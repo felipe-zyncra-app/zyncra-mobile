@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, localDateStr } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import { refreshAllReminders } from "@/lib/notifications";
 import NewApptModal from "@/components/NewApptModal";
@@ -132,8 +132,13 @@ export default function DashboardScreen() {
     if (tenant) setTenantName(tenant.name);
 
     const now        = new Date();
-    const dateStr    = now.toISOString().split("T")[0];
+    const dateStr    = localDateStr(now);
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const nextMonthStart = localDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+    // created_at es UTC: los límites del día/mes local se calculan como instantes, no como fecha recortada
+    const monthStartIso  = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const dayStartMs     = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayEndMs       = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
 
     const [{ data: todayAppts }, { count: clientCount }, { data: sales }, { data: monthAppts }] = await Promise.all([
       supabase.from("appointments")
@@ -142,22 +147,25 @@ export default function DashboardScreen() {
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
-      supabase.from("pos_sales").select("total, created_at").eq("tenant_id", tenantId).gte("created_at", monthStart),
+      supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId).gte("created_at", monthStartIso),
       supabase.from("appointments")
-        .select("status, services(price)")
+        .select("id, status, services(price)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", monthStart.slice(0, 10))
-        .in("status", ["completed", "confirmed"])
+        .lt("appointment_date", nextMonthStart)
+        .eq("status", "completed")
         .limit(2000),
     ]);
 
     const all      = (todayAppts as unknown as Appt[]) ?? [];
     const allSales = sales ?? [];
+    // Citas cobradas por POS ya están en pos_sales — se excluyen para no contarlas doble
+    const saleApptIds = new Set(allSales.map((s: any) => s.appointment_id).filter(Boolean));
     const getApptPrice = (a: any) => Number((Array.isArray(a.services) ? a.services[0] : a.services)?.price ?? 0);
-    const posDay   = allSales.filter(s => s.created_at?.slice(0, 10) === dateStr).reduce((acc, s) => acc + Number(s.total ?? 0), 0);
+    const posDay   = allSales.filter(s => { const t = new Date(s.created_at).getTime(); return t >= dayStartMs && t < dayEndMs; }).reduce((acc, s) => acc + Number(s.total ?? 0), 0);
     const posMonth = allSales.reduce((acc, s) => acc + Number(s.total ?? 0), 0);
-    const apptDay  = all.filter(a => a.status === "completed" || a.status === "confirmed").reduce((acc, a) => acc + getApptPrice(a), 0);
-    const apptMonth = (monthAppts ?? []).reduce((acc: number, a: any) => acc + getApptPrice(a), 0);
+    const apptDay  = all.filter(a => a.status === "completed" && !saleApptIds.has(a.id)).reduce((acc, a) => acc + getApptPrice(a), 0);
+    const apptMonth = (monthAppts ?? []).filter((a: any) => !saleApptIds.has(a.id)).reduce((acc: number, a: any) => acc + getApptPrice(a), 0);
     const revenueDay   = posDay + apptDay;
     const revenueMonth = posMonth + apptMonth;
 

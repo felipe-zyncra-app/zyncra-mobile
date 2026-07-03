@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   RefreshControl, Modal, ActivityIndicator,
-  KeyboardAvoidingView, Platform, TextInput,
+  KeyboardAvoidingView, Platform, TextInput, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmt12Hour } from "@/lib/format";
+import { fmt12Hour, localDateStr } from "@/lib/format";
 import { timeToMins, chunk, generateSlotsForDay, buildWeek } from "@/lib/scheduling";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
@@ -232,7 +232,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     }
 
     const slots   = generateSlotsForDay(dayConfig.start, dayConfig.end, duration);
-    const dateStr = selectedDate.toISOString().split("T")[0];
+    const dateStr = localDateStr(selectedDate);
     const proId   = selectedPro!.id;
 
     const { data: existing } = await supabase
@@ -271,14 +271,18 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     if (!appt || !selectedTime || !selectedService || !selectedPro) return;
     setSaving(true);
     try {
-      const dateStr = selectedDate.toISOString().split("T")[0];
-      await supabase.from("appointments").update({
+      const dateStr = localDateStr(selectedDate);
+      const { error: saveError } = await supabase.from("appointments").update({
         professional_id:  selectedPro.id,
         service_id:       selectedService.id,
         appointment_date: dateStr,
         appointment_time: `${selectedTime}:00`,
         ...(selectedClient ? { client_id: selectedClient.id } : {}),
       }).eq("id", appt.id);
+      if (saveError) {
+        Alert.alert("No se pudo guardar la cita", "Revisa tu conexión e inténtalo de nuevo.");
+        return;
+      }
       onSaved();
       onClose();
     } finally {
@@ -786,7 +790,7 @@ export default function AgendaScreen() {
 
   const loadAppts = useCallback(async (date: Date) => {
     if (!tenantId) return;
-    const dateStr = date.toISOString().split("T")[0];
+    const dateStr = localDateStr(date);
     const [{ data: apptData }, { data: proData }] = await Promise.all([
       supabase.from("appointments")
         .select("id, appointment_date, appointment_time, status, service_id, client_id, clients(name), services(name, price, duration_minutes), professionals(id, name)")

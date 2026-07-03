@@ -116,11 +116,15 @@ export default function CajaScreen() {
     const amt = parseFloat(openAmt.replace(/\./g, "").replace(",", "."));
     if (isNaN(amt) || amt < 0) { Alert.alert("Error", "Ingresa un fondo inicial válido."); return; }
     setOpening(true);
-    const { data: s } = await supabase.from("cash_sessions").insert({
+    const { data: s, error: openError } = await supabase.from("cash_sessions").insert({
       tenant_id: tenantId, opening_amount: amt, opening_note: openNote.trim() || null,
     }).select("*").single();
-    if (s) { setSession(s as Session); setMovements([]); setOpenAmt(""); setOpenNote(""); }
     setOpening(false);
+    if (openError || !s) {
+      Alert.alert("No se pudo abrir la caja", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setSession(s as Session); setMovements([]); setOpenAmt(""); setOpenNote("");
   };
 
   const handleMovement = async () => {
@@ -128,14 +132,18 @@ export default function CajaScreen() {
     if (!session || isNaN(amt) || amt <= 0) { Alert.alert("Error", "Ingresa un monto válido."); return; }
     if (!movDesc.trim()) { Alert.alert("Error", "La descripción es obligatoria."); return; }
     setMovSaving(true);
-    const { data: mv } = await supabase.from("cash_movements").insert({
+    const { data: mv, error: movError } = await supabase.from("cash_movements").insert({
       session_id: session.id, tenant_id: tenantId,
       type: movType, amount: amt, description: movDesc.trim(),
       category: movCat || null,
     }).select("*").single();
-    if (mv) setMovements(prev => [mv as Movement, ...prev]);
-    setMovAmt(""); setMovDesc(""); setMovCat("");
     setMovSaving(false);
+    if (movError || !mv) {
+      Alert.alert("No se pudo guardar el movimiento", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setMovements(prev => [mv as Movement, ...prev]);
+    setMovAmt(""); setMovDesc(""); setMovCat("");
     setMovModal(false);
   };
 
@@ -144,12 +152,16 @@ export default function CajaScreen() {
     const amt = parseFloat(closeAmt.replace(/\./g, "").replace(",", "."));
     if (isNaN(amt) || amt < 0) { Alert.alert("Error", "Ingresa un monto de cierre válido."); return; }
     setClosing(true);
-    await supabase.from("cash_sessions").update({
+    const { error: closeError } = await supabase.from("cash_sessions").update({
       closed_at: new Date().toISOString(), closing_amount: amt,
       closing_note: closeNote.trim() || null,
     }).eq("id", session.id);
-    setSession(null); setMovements([]); setCloseAmt(""); setCloseNote("");
     setClosing(false);
+    if (closeError) {
+      Alert.alert("No se pudo cerrar la caja", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setSession(null); setMovements([]); setCloseAmt(""); setCloseNote("");
     setCloseModal(false);
     Alert.alert("Caja cerrada", "La sesión fue cerrada correctamente.");
   };

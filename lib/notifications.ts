@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
+import { localDateStr } from "./format";
 
 // How notifications appear when the app is in foreground
 Notifications.setNotificationHandler({
@@ -140,14 +141,14 @@ export async function refreshAllReminders() {
     "¡Hola {{nombre}}! Te recordamos tu cita de {{servicio}} el {{fecha}} a las {{hora}}.";
 
   // Fetch upcoming confirmed appointments
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr();
   const { data: appts } = await supabase
     .from("appointments")
-    .select("id, date, time, status, clients(name), services(name)")
+    .select("id, appointment_date, appointment_time, status, clients(name), services(name)")
     .eq("tenant_id", tenant.id)
     .in("status", ["pending", "confirmed"])
-    .gte("date", today)
-    .order("date", { ascending: true })
+    .gte("appointment_date", today)
+    .order("appointment_date", { ascending: true })
     .limit(50);
 
   if (!appts) return;
@@ -156,7 +157,7 @@ export async function refreshAllReminders() {
     const clientName = (a.clients as any)?.name ?? "Cliente";
     const serviceName = (a.services as any)?.name ?? "Servicio";
     await scheduleAppointmentReminder(
-      { id: a.id, date: a.date, time: a.time, clientName, serviceName },
+      { id: a.id, date: a.appointment_date, time: a.appointment_time, clientName, serviceName },
       hoursBefore,
       template
     );

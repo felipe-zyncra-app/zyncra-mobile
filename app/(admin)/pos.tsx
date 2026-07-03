@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmtMoneyFull, fmt12 } from "@/lib/format";
+import { fmtMoneyFull, fmt12, localDateStr } from "@/lib/format";
 import ManualSaleModal from "@/components/ManualSaleModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -289,7 +289,10 @@ export default function PosScreen() {
 
   const load = useCallback(async (d: Date) => {
     if (!tenantId) return;
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = localDateStr(d);
+    // created_at es UTC: el día local se acota con instantes reales, no con la fecha recortada
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayEnd   = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
     const [{ data: apptData }, { data: salesData }] = await Promise.all([
       supabase.from("appointments")
         .select("id, appointment_time, status, clients(name), services(name, price)")
@@ -299,8 +302,8 @@ export default function PosScreen() {
       supabase.from("pos_sales")
         .select("id, created_at, total, payment_method, note, appointment_id, clients(name), pos_sale_items(name, price, quantity)")
         .eq("tenant_id", tenantId)
-        .gte("created_at", `${dateStr}T00:00:00`)
-        .lte("created_at", `${dateStr}T23:59:59`)
+        .gte("created_at", dayStart.toISOString())
+        .lt("created_at", dayEnd.toISOString())
         .order("created_at", { ascending: false }),
     ]);
     setAppts((apptData as unknown as Appt[]) ?? []);
@@ -320,8 +323,13 @@ export default function PosScreen() {
 
   const handlePay = async (appt: Appt, paymentMethod: string) => {
     const price = Number((appt.services as any)?.price ?? 0);
-    await supabase.from("appointments").update({ status: "completed" }).eq("id", appt.id);
-    await supabase.from("pos_sales").insert({
+    const prevStatus = appt.status;
+    const { error: statusError } = await supabase.from("appointments").update({ status: "completed" }).eq("id", appt.id);
+    if (statusError) {
+      Alert.alert("No se pudo registrar el cobro", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    const { error: saleError } = await supabase.from("pos_sales").insert({
       tenant_id: tenantId,
       client_id: null,
       appointment_id: appt.id,
@@ -330,6 +338,11 @@ export default function PosScreen() {
       payment_method: paymentMethod,
       note: appt.services?.name ?? null,
     });
+    if (saleError) {
+      await supabase.from("appointments").update({ status: prevStatus }).eq("id", appt.id);
+      Alert.alert("No se pudo registrar el cobro", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
     setPayAppt(null);
     await load(date);
   };
@@ -355,7 +368,8 @@ export default function PosScreen() {
             await supabase.from("appointments").update({ status: "confirmed" }).eq("id", sale.appointment_id);
           }
           await supabase.from("pos_sale_items").delete().eq("sale_id", sale.id);
-          await supabase.from("pos_sales").delete().eq("id", sale.id);
+          const { error: voidError } = await supabase.from("pos_sales").delete().eq("id", sale.id);
+          if (voidError) Alert.alert("No se pudo anular el cobro", "Revisa tu conexión e inténtalo de nuevo.");
           await load(date);
         },
       },

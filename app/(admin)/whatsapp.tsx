@@ -14,7 +14,7 @@ import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmtPhone, fmtDateCompact } from "@/lib/format";
+import { fmtPhone, fmtDateCompact, localDateStr } from "@/lib/format";
 
 type Tab = "nueva" | "plantillas" | "historial" | "bot" | "conversaciones";
 type Segment = "all" | "active" | "inactive";
@@ -163,7 +163,7 @@ export default function WhatsappScreen() {
     cutoff.setDate(cutoff.getDate() - 90);
     const { data: appts } = await supabase.from("appointments")
       .select("client_id").eq("tenant_id", tid)
-      .gte("appointment_date", cutoff.toISOString().split("T")[0]);
+      .gte("appointment_date", localDateStr(cutoff));
     const activeIds = new Set((appts ?? []).map((a: any) => a.client_id));
     if (seg === "active") return allC.filter(c => activeIds.has(c.id));
     return allC.filter(c => !activeIds.has(c.id));

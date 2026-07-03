@@ -2,7 +2,7 @@
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,7 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { scheduleAppointmentReminder } from "@/lib/notifications";
 import { timeToMins, generateSlotsForDay, buildWeek, chunk } from "@/lib/scheduling";
-import { fmt12Hour } from "@/lib/format";
+import { fmt12Hour, localDateStr } from "@/lib/format";
 
 type Service      = { id: string; name: string; duration_minutes: number; price: number };
 type Client       = { id: string; name: string; phone: string };
@@ -128,7 +128,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     // Generate hourly slots that fit within business hours
     const slots = generateSlotsForDay(dayConfig.start, dayConfig.end, newDuration);
 
-    const dateStr = date.toISOString().split("T")[0];
+    const dateStr = localDateStr(date);
     const { data: appts } = await supabase
       .from("appointments")
       .select("appointment_time, service_id")
@@ -176,16 +176,20 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     if (!canSave || !selectedService || !selectedPro) return;
     setSaving(true);
     try {
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = localDateStr(selectedDate);
       let clientId = selectedClient?.id ?? null;
 
       if (isNewClient && newClientName.trim()) {
-        const { data: newCli } = await supabase
+        const { data: newCli, error: cliError } = await supabase
           .from("clients")
           .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: "—" })
           .select("id")
           .single();
-        if (newCli) clientId = newCli.id;
+        if (cliError || !newCli) {
+          Alert.alert("No se pudo crear el cliente", "Revisa tu conexión e inténtalo de nuevo.");
+          return;
+        }
+        clientId = newCli.id;
       }
 
       const payload: Record<string, unknown> = {
@@ -198,25 +202,28 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       };
       if (clientId) payload.client_id = clientId;
 
-      const { data: inserted } = await supabase
+      const { data: inserted, error: apptError } = await supabase
         .from("appointments").insert(payload).select("id").single();
 
-      if (inserted) {
-        const { data: settings } = await supabase
-          .from("reminder_settings").select("hours_before, message_template")
-          .eq("tenant_id", tenantId).single();
-        await scheduleAppointmentReminder(
-          {
-            id: inserted.id,
-            date: dateStr,
-            time: `${selectedTime}:00`,
-            clientName: isNewClient ? newClientName.trim() : (selectedClient?.name ?? "Cliente"),
-            serviceName: selectedService.name,
-          },
-          settings?.hours_before ?? 24,
-          settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
-        );
+      if (apptError || !inserted) {
+        Alert.alert("No se pudo guardar la cita", "Revisa tu conexión e inténtalo de nuevo.");
+        return;
       }
+
+      const { data: settings } = await supabase
+        .from("reminder_settings").select("hours_before, message_template")
+        .eq("tenant_id", tenantId).single();
+      await scheduleAppointmentReminder(
+        {
+          id: inserted.id,
+          date: dateStr,
+          time: `${selectedTime}:00`,
+          clientName: isNewClient ? newClientName.trim() : (selectedClient?.name ?? "Cliente"),
+          serviceName: selectedService.name,
+        },
+        settings?.hours_before ?? 24,
+        settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
+      ).catch(() => {});
 
       onSuccess();
       onClose();

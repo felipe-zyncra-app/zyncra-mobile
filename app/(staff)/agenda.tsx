@@ -10,6 +10,7 @@ import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
 import { buildWeek } from "@/lib/scheduling";
+import { localDateStr } from "@/lib/format";
 import ErrorState from "@/components/ErrorState";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
@@ -126,7 +127,7 @@ export default function StaffAgendaScreen() {
     if (!professionalId) return;
     try {
       setError(false);
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = localDateStr(selectedDate);
       const { data, error: err } = await supabase
         .from("appointments")
         .select("id, appointment_date, appointment_time, status, clients(name, phone), services(name, price)")
