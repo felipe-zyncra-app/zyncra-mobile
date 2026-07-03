@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { STATUS_META } from "@/constants/status";
-import { fmtDateShort, fmtMoneyFull } from "@/lib/format";
+import { fmtDateShort, fmtMoneyFull, localDateStr } from "@/lib/format";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 
@@ -37,12 +37,19 @@ type ApptHistoryItem = {
   price: number;
 };
 
+// Ventana de datos de esta pantalla: últimos 12 meses (lista y estadísticas usan el mismo corte)
+function twelveMonthsAgo(): string {
+  const d = new Date();
+  return localDateStr(new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()));
+}
+
 // ─── Client detail modal ──────────────────────────────────────────────────────
 
 function ClientModal({ client, proId, onClose }: {
   client: ClientEntry | null; proId: string | null; onClose: () => void;
 }) {
   const [history, setHistory] = useState<ApptHistoryItem[]>([]);
+  const [totalSpent, setTotalSpent] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -67,13 +74,22 @@ function ClientModal({ client, proId, onClose }: {
         })));
         setLoading(false);
       });
+    // El total se calcula aparte: el historial visible se corta en 20 citas
+    supabase.from("appointments")
+      .select("services(price)")
+      .eq("client_id", client.id)
+      .eq("professional_id", proId)
+      .eq("status", "completed")
+      .gte("appointment_date", twelveMonthsAgo())
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTotalSpent((data ?? []).reduce((s: number, a: any) => s + Number(a.services?.price ?? 0), 0));
+      });
     return () => { cancelled = true; };
   }, [client, proId]);
 
   const { t } = useTheme();
   if (!client) return null;
-
-  const totalSpent = history.filter(a => a.status === "completed").reduce((s, a) => s + a.price, 0);
 
   return (
     <Modal visible={!!client} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -223,12 +239,23 @@ export default function StaffClientsScreen() {
     setLoading(true);
     setError(false);
     try {
-    const { data: appts, error: err } = await supabase
-      .from("appointments")
-      .select("appointment_date, client_id, status, clients(id,name,phone,email), services(name,price)")
-      .eq("professional_id", proId)
-      .not("client_id", "is", null)
-      .order("appointment_date", { ascending: false });
+    // Últimos 12 meses, paginado: sin rango ni paginación Supabase corta en 1000 filas
+    // en silencio y desaparecen clientes de la lista
+    const PAGE = 1000;
+    const appts: any[] = [];
+    for (let from = 0; from < 5000; from += PAGE) {
+      const { data: page, error: err } = await supabase
+        .from("appointments")
+        .select("appointment_date, client_id, status, clients(id,name,phone,email), services(name,price)")
+        .eq("professional_id", proId)
+        .not("client_id", "is", null)
+        .gte("appointment_date", twelveMonthsAgo())
+        .order("appointment_date", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (err) throw err;
+      appts.push(...(page ?? []));
+      if (!page || page.length < PAGE) break;
+    }
 
     const map = new Map<string, ClientEntry>();
     (appts ?? []).forEach((a: any) => {

@@ -96,13 +96,6 @@ export default function AdminLayout() {
       <Tabs.Screen name="clients"       options={{ title: "Clientes" }} />
       <Tabs.Screen name="pos"           options={{ title: "Cobros" }} />
       <Tabs.Screen name="settings"      options={{ title: "Ajustes" }} />
-      <Tabs.Screen name="services"      options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="team"          options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="business-info" options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="schedule"      options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="reminders"     options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="profile"         options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="billing"         options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="whatsapp"        options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="reviews-google"  options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="reviews-site"    options={{ tabBarButton: () => null }} />

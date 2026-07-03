@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { scheduleAppointmentReminder } from "@/lib/notifications";
 import { timeToMins, generateSlotsForDay, buildWeek, chunk } from "@/lib/scheduling";
+import { useClientSearch } from "@/lib/useClientSearch";
 import { fmt12Hour, localDateStr } from "@/lib/format";
 
 type Service      = { id: string; name: string; duration_minutes: number; price: number };
@@ -159,7 +160,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setLoadingSlots(false);
   };
 
-  const filteredClients = clients.filter(c =>
+  // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
+  const serverClients = useClientSearch(tenantId, clientSearch);
+  const filteredClients = serverClients ?? clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.phone.includes(clientSearch)
   );

@@ -14,6 +14,7 @@ import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmt12Hour, localDateStr } from "@/lib/format";
 import { timeToMins, chunk, generateSlotsForDay, buildWeek } from "@/lib/scheduling";
+import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
@@ -173,6 +174,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
   const [selectedPro, setSelectedPro]         = useState<Professional | null>(null);
   const [selectedClient, setSelectedClient]   = useState<EditClient | null>(null);
   const [clientSearch, setClientSearch]       = useState("");
+  // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
+  const serverClients = useClientSearch(tenantId, clientSearch);
   const [selectedService, setSelectedService] = useState<EditService | null>(null);
   const [selectedDate, setSelectedDate]       = useState(new Date());
   const [weekBase, setWeekBase]               = useState(new Date());
@@ -292,7 +295,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
 
   if (!appt) return null;
 
-  const filteredClients = clients.filter(c =>
+  const filteredClients = serverClients ?? clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase()) || c.phone.includes(clientSearch)
   );
 

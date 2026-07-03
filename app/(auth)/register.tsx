@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useState, useRef } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Pressable, KeyboardAvoidingView, Platform,
@@ -52,20 +52,36 @@ const GOALS = [
   { id: "team",        emoji: "👥", label: "Gestionar equipo" },
 ];
 
-const PLAN_INFO = {
-  Esencial: { price: "$99.900/mes", color: Colors.text, emoji: "✨" },
-  Pro:       { price: "$199.900/mes", color: Colors.red,  emoji: "🚀" },
-  Personalizado: { price: "A medida", color: "#7B2FBE",   emoji: "🏢" },
-} as const;
+// Espejo de los planes reales de app/settings/billing.tsx (nombres, precios y colores)
+type PlanName = "Starter" | "Growth" | "Pro" | "Enterprise";
+
+const PLAN_INFO: Record<PlanName, { price: string; color: string; emoji: string }> = {
+  Starter:    { price: "$59.900/mes",  color: "#22D3EE",   emoji: "🌱" },
+  Growth:     { price: "$119.900/mes", color: "#A855F7",   emoji: "📈" },
+  Pro:        { price: "$229.900/mes", color: Colors.blue, emoji: "🚀" },
+  Enterprise: { price: "$449.900/mes", color: Colors.red,  emoji: "🏢" },
+};
 
 const createSlug = (n: string) =>
   n.toLowerCase().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 
-function determinePlan(c: string, a: string, m: boolean, g: string[]): "Esencial" | "Pro" | "Personalizado" {
-  if (m || c === "8+") return "Personalizado";
-  const pro = ["pos", "billing", "marketing", "commissions"];
-  if (["4-7", "8+"].includes(c) || ["16-30", "30+"].includes(a) || g.some(x => pro.includes(x))) return "Pro";
-  return "Esencial";
+// Cortes según las capacidades de cada plan: Starter 1 colaborador, Growth 2-5,
+// Pro 6-15 (hasta 3 sucursales), Enterprise 15+/multi-sede
+function determinePlan(c: string, a: string, m: boolean, g: string[]): PlanName {
+  if (m && c === "8+") return "Enterprise";
+  if (c === "8+" || c === "4-7" || m || a === "30+") return "Pro";
+  const growth = ["commissions", "marketing", "billing", "team"];
+  if (c === "2-3" || a === "16-30" || g.some(x => growth.includes(x))) return "Growth";
+  return "Starter";
+}
+
+function translateAuthError(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("already registered")) return "Ese correo ya tiene una cuenta. Inicia sesión.";
+  if (m.includes("invalid") && m.includes("email")) return "El correo no es válido.";
+  if (m.includes("password")) return "La contraseña no cumple los requisitos.";
+  if (m.includes("network") || m.includes("fetch")) return "Sin conexión. Revisa tu internet e inténtalo de nuevo.";
+  return msg;
 }
 
 // ── Reusable components ───────────────────────────────────────────────────────
@@ -119,7 +135,10 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [plan, setPlan] = useState<"Esencial" | "Pro" | "Personalizado">("Esencial");
+  const [plan, setPlan] = useState<PlanName>("Starter");
+  // Si el signUp funcionó pero falló crear el negocio, el reintento salta el signUp
+  // (volver a llamarlo con el mismo correo devolvería "already registered" y dejaría al usuario atrapado)
+  const createdUserId = useRef<string | null>(null);
 
   const toggleGoal = (id: string) => {
     setGoals(prev =>
@@ -141,26 +160,30 @@ export default function RegisterScreen() {
     setLoading(true);
     setError(null);
     try {
-      const { data: auth, error: ae } = await supabase.auth.signUp({ email, password });
-      if (ae) throw ae;
-      if (auth.user) {
-        const slug = createSlug(businessName);
-        const { data: td, error: te } = await supabase.from("tenants")
-          .insert([{ owner_id: auth.user.id, name: businessName, slug }])
-          .select().single();
-        if (te) { if (te.code === "23505") throw new Error("Ese nombre ya está en uso."); throw te; }
-        if (td) {
-          await supabase.from("business_profiles").insert([{
-            tenant_id: td.id, biz_type: bizType, collaborators,
-            appointments_per_day: appointments, multi_sede: multiSede,
-            goals, whatsapp: whatsapp || null,
-            plan_recommended: determinePlan(collaborators, appointments, multiSede!, goals),
-          }]);
-        }
-        const rec = determinePlan(collaborators, appointments, multiSede!, goals);
-        setPlan(rec);
-        setStep(5);
+      let userId = createdUserId.current;
+      if (!userId) {
+        const { data: auth, error: ae } = await supabase.auth.signUp({ email, password });
+        if (ae) throw new Error(translateAuthError(ae.message));
+        userId = auth.user?.id ?? null;
+        if (!userId) throw new Error("No se pudo crear la cuenta. Inténtalo de nuevo.");
+        createdUserId.current = userId;
       }
+      const slug = createSlug(businessName);
+      const { data: td, error: te } = await supabase.from("tenants")
+        .insert([{ owner_id: userId, name: businessName, slug }])
+        .select().single();
+      if (te) { if (te.code === "23505") throw new Error("Ese nombre ya está en uso."); throw te; }
+      if (td) {
+        await supabase.from("business_profiles").insert([{
+          tenant_id: td.id, biz_type: bizType, collaborators,
+          appointments_per_day: appointments, multi_sede: multiSede,
+          goals, whatsapp: whatsapp || null,
+          plan_recommended: determinePlan(collaborators, appointments, multiSede!, goals),
+        }]);
+      }
+      const rec = determinePlan(collaborators, appointments, multiSede!, goals);
+      setPlan(rec);
+      setStep(5);
     } catch (err: unknown) {
       setError((err as Error).message);
     } finally {
@@ -328,7 +351,7 @@ export default function RegisterScreen() {
             </Text>
 
             <LinearGradient
-              colors={plan === "Pro" ? ["#fff5f5", "#fff0f0"] : plan === "Personalizado" ? ["#f8f0ff", "#f3e8ff"] : ["#f5f4f2", "#f0efec"]}
+              colors={plan === "Enterprise" ? ["#fff5f5", "#fff0f0"] : plan === "Pro" ? ["#f0f3ff", "#eaefff"] : plan === "Growth" ? ["#f8f0ff", "#f3e8ff"] : ["#effbfd", "#e8f8fb"]}
               style={[c.planCard, Shadow.md]}>
               <Text style={{ fontSize: 11, fontFamily: "JetBrainsMono_500Medium", textTransform: "uppercase", letterSpacing: 1, color: PLAN_INFO[plan].color, marginBottom: 4 }}>
                 Plan recomendado
@@ -342,11 +365,13 @@ export default function RegisterScreen() {
                 </Text>
               </View>
               <Text style={{ fontSize: 13, color: Colors.muted, fontFamily: "SpaceGrotesk_400Regular", lineHeight: 20 }}>
-                {plan === "Esencial"
-                  ? "Agenda digital, recordatorios automáticos, gestión de clientes y WhatsApp."
+                {plan === "Starter"
+                  ? "Agenda online, CRM, POS básico y hasta 100 confirmaciones por WhatsApp."
+                  : plan === "Growth"
+                  ? "Confirmaciones ilimitadas, IA Hanna, comisiones, inventario y WhatsApp Marketing."
                   : plan === "Pro"
-                  ? "Todo Esencial + POS, comisiones del equipo y campañas de WhatsApp Marketing."
-                  : "Múltiples sedes, equipo ilimitado, DIAN y soporte dedicado."}
+                  ? "Todo Growth + IA Hanna Pro, hasta 3 sucursales y equipos de 6 a 15 personas."
+                  : "Multi-sucursal ilimitada, IA avanzada, API pública y Account Manager dedicado."}
               </Text>
             </LinearGradient>
 
