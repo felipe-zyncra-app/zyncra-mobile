@@ -2,7 +2,7 @@ export const Colors = {
   red:     "#fb0f05",
   blue:    "#0027fe",
   purple:  "#0027fe",
-  ink:     "#1a1a2e",
+  ink:     "#111118",
   // Backgrounds
   cream:   "#FFFFFF",
   cream2:  "#F4F4F9",
@@ -25,7 +25,7 @@ export const Gradients = {
   brand:     ["#fb0f05", "#0027fe"] as const,
   brandH:    ["#fb0f05", "#0027fe"] as const,
   brandSoft: ["rgba(251,15,5,0.10)", "rgba(0,39,254,0.05)"] as const,
-  ink:       ["#1a1a2e", "#0f0f1a"] as const,
+  ink:       ["#111118", "#09090F"] as const,
 };
 
 export const Fonts = {

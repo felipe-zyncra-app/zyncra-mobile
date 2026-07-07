@@ -451,7 +451,7 @@ export default function PosScreen() {
           {/* ── Revenue hero ── */}
           <Animated.View entering={FadeInDown.duration(350)} style={{ padding: 20, paddingBottom: 0, gap: 12 }}>
             <View style={[s.heroCard, Shadow.md]}>
-              <LinearGradient colors={["#1a1a2e", "#16213e"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.heroGrad}>
+              <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.heroGrad}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.heroLabel}>Total cobrado</Text>
                   <Text style={s.heroValue}>{cobrado > 0 ? fmtMoneyFull(cobrado) : "—"}</Text>

@@ -738,7 +738,7 @@ const s = StyleSheet.create({
   convoAvatar:  { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.red + "14", alignItems: "center", justifyContent: "center" },
   convoPhone:   { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
   convoPreview: { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 2 },
-  msgBubbleBot: { backgroundColor: "#1a1a2e", borderRadius: 12, borderTopLeftRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-start" },
+  msgBubbleBot: { backgroundColor: Colors.ink, borderRadius: 12, borderTopLeftRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-start" },
   msgBubbleUser:{ backgroundColor: Colors.cream2, borderRadius: 12, borderTopRightRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-end", borderWidth: 1, borderColor: Colors.border },
   msgText:      { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", lineHeight: 18 },
 

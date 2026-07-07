@@ -294,7 +294,7 @@ export default function DashboardScreen() {
           {/* ── Revenue hero card ── */}
           <Animated.View entering={FadeInDown.delay(120).duration(400)}>
             <View style={[s.revenueCard, Shadow.md]}>
-              <LinearGradient colors={["#1a1a2e", "#16213e"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.revenueGrad}>
+              <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.revenueGrad}>
                 <View style={s.revenueBlob} />
                 <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
                   <View>

@@ -10,7 +10,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { scheduleAppointmentReminder } from "@/lib/notifications";
-import { timeToMins, generateSlotsForDay, buildWeek, chunk } from "@/lib/scheduling";
+import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { fmt12Hour, localDateStr } from "@/lib/format";
 
@@ -56,6 +56,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const [clientSearch, setClientSearch]       = useState("");
   const [isNewClient, setIsNewClient]         = useState(false);
   const [newClientName, setNewClientName]     = useState("");
+  const [newClientPhone, setNewClientPhone]   = useState("");
   const [selectedClient, setSelectedClient]   = useState<Client | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedDate, setSelectedDate]       = useState(initialDate ?? new Date());
@@ -76,6 +77,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setDayClosed(false);
     setClientSearch("");
     setNewClientName("");
+    setNewClientPhone("");
     setIsNewClient(false);
     const base = initialDate ?? new Date();
     setSelectedDate(base);
@@ -100,7 +102,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     ]);
     setServices(svcs ?? []);
     setPros(pros ?? []);
-    setClients(clis ?? []);
+    setClients((clis ?? []).map(c => ({ ...c, phone: c.phone ?? "" })));
     setSchedule((tenant?.settings as any)?.schedule ?? null);
     setLoading(false);
   };
@@ -176,16 +178,24 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
 
   const handleSave = async () => {
-    if (!canSave || !selectedService || !selectedPro) return;
+    if (!canSave || !selectedService || !selectedPro || !selectedTime) return;
     setSaving(true);
     try {
       const dateStr = localDateStr(selectedDate);
+
+      // El slot pudo ocuparse desde otro dispositivo mientras se completaba el formulario
+      if (await hasSlotConflict(selectedPro.id, dateStr, timeToMins(selectedTime), selectedService.duration_minutes)) {
+        Alert.alert("Horario ya ocupado", "Ese horario acaba de reservarse. Elige otro.");
+        loadSlots(selectedPro.id, selectedDate, selectedService.duration_minutes, schedule);
+        return;
+      }
+
       let clientId = selectedClient?.id ?? null;
 
       if (isNewClient && newClientName.trim()) {
         const { data: newCli, error: cliError } = await supabase
           .from("clients")
-          .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: "—" })
+          .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: newClientPhone.trim() || null })
           .select("id")
           .single();
         if (cliError || !newCli) {
@@ -331,6 +341,15 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         placeholder="Ej: Juan García"
                         placeholderTextColor={Colors.subtle}
                         autoFocus
+                      />
+                      <Text style={[s.fieldLabel, { marginTop: 14 }]}>Teléfono (opcional)</Text>
+                      <TextInput
+                        style={s.input}
+                        value={newClientPhone}
+                        onChangeText={setNewClientPhone}
+                        placeholder="Ej: 300 123 4567"
+                        placeholderTextColor={Colors.subtle}
+                        keyboardType="phone-pad"
                       />
                     </View>
                   ) : (

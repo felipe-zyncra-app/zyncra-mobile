@@ -263,7 +263,7 @@ export default function ZyncraIntro({ onDone }: { onDone: () => void }) {
 
 const s = StyleSheet.create({
   bg: {
-    backgroundColor: "#0C0C14",
+    backgroundColor: Colors.ink,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 999,

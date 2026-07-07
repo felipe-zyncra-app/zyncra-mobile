@@ -13,7 +13,7 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmt12Hour, localDateStr } from "@/lib/format";
-import { timeToMins, chunk, generateSlotsForDay, buildWeek } from "@/lib/scheduling";
+import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
@@ -275,6 +275,14 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     setSaving(true);
     try {
       const dateStr = localDateStr(selectedDate);
+
+      // El slot pudo ocuparse desde otro dispositivo mientras se editaba
+      if (await hasSlotConflict(selectedPro.id, dateStr, timeToMins(selectedTime), selectedService.duration_minutes, appt.id)) {
+        Alert.alert("Horario ya ocupado", "Ese horario acaba de reservarse. Elige otro.");
+        reloadSlots();
+        return;
+      }
+
       const { error: saveError } = await supabase.from("appointments").update({
         professional_id:  selectedPro.id,
         service_id:       selectedService.id,

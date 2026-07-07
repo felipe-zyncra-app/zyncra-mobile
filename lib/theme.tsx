@@ -26,8 +26,8 @@ const LIGHT = {
 };
 
 const DARK = {
-  bg:           "#0D0D14",
-  bgAlt:        "#16161F",
+  bg:           "#09090F",
+  bgAlt:        "#111118",
   card:         "rgba(255,255,255,0.08)",
   cardBorder:   "rgba(255,255,255,0.10)",
   cardSoft:     "rgba(255,255,255,0.05)",
@@ -39,9 +39,9 @@ const DARK = {
   divider:      "rgba(255,255,255,0.06)",
   inputBg:      "rgba(255,255,255,0.07)",
   inputBorder:  "rgba(255,255,255,0.10)",
-  bottomBar:    "rgba(13,13,20,0.92)",
+  bottomBar:    "rgba(9,9,15,0.92)",
   bottomBorder: "rgba(255,255,255,0.08)",
-  tabBarBg:     "rgba(22,22,31,0.75)",
+  tabBarBg:     "rgba(17,17,24,0.75)",
   tabBarBorder: "rgba(255,255,255,0.08)",
   blurTint:     "dark" as const,
   statusBar:    "light" as const,
