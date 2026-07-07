@@ -88,7 +88,7 @@ export default function SettingsScreen() {
       title: "Negocio",
       color: Colors.blue,
       items: [
-        { icon: "cut-outline",         label: "Servicios",             sub: "Gestiona tu catálogo de precios",      route: "/settings/services" },
+        { icon: "pricetags-outline",   label: "Servicios",             sub: "Gestiona tu catálogo de precios",      route: "/settings/services" },
         { icon: "people-outline",      label: "Equipo de trabajo",     sub: "Profesionales y permisos",             route: "/settings/team" },
         { icon: "time-outline",        label: "Horario de atención",   sub: "Días y horas disponibles",             route: "/settings/schedule" },
         { icon: "storefront-outline",  label: "Mi Tienda",             sub: "Personalización y link de reservas",   route: "/settings/store" },

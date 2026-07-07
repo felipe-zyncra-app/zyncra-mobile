@@ -450,7 +450,7 @@ export default function ReportsScreen() {
             <Animated.View entering={FadeInDown.delay(360).duration(400)} style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <View style={s.cardHeader}>
                 <View style={[s.cardIconBox, { backgroundColor: "#8b5cf614" }]}>
-                  <Ionicons name="cut-outline" size={16} color="#8b5cf6" />
+                  <Ionicons name="pricetags-outline" size={16} color="#8b5cf6" />
                 </View>
                 <Text style={[s.cardTitle, { color: t.text }]}>Top servicios</Text>
               </View>

@@ -25,7 +25,7 @@ const HOUR_OPTIONS = [
 
 const VARIABLES = [
   { key: "{{nombre}}",   label: "Nombre",   icon: "person-outline" as const },
-  { key: "{{servicio}}", label: "Servicio",  icon: "cut-outline" as const },
+  { key: "{{servicio}}", label: "Servicio",  icon: "pricetags-outline" as const },
   { key: "{{fecha}}",    label: "Fecha",     icon: "calendar-outline" as const },
   { key: "{{hora}}",     label: "Hora",      icon: "time-outline" as const },
 ];
