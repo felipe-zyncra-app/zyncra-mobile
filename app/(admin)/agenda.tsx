@@ -657,9 +657,9 @@ const TIME_COL_W = 56;
 
 // ─── Day Calendar ─────────────────────────────────────────────────────────────
 
-function DayCalendar({ appts, professionals, onPressAppt, showPro, refreshing, onRefresh }: {
+function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, refreshing, onRefresh }: {
   appts: Appt[]; professionals: Professional[]; onPressAppt: (a: Appt) => void;
-  showPro: boolean; refreshing: boolean; onRefresh: () => void;
+  onAddPress: () => void; showPro: boolean; refreshing: boolean; onRefresh: () => void;
 }) {
   const { t } = useTheme();
   const scrollRef = useRef<ScrollView>(null);
@@ -755,15 +755,21 @@ function DayCalendar({ appts, professionals, onPressAppt, showPro, refreshing, o
           );
         })}
 
-        {/* Empty state */}
+        {/* Empty state — tocable: abre el modal de nueva cita */}
         {appts.length === 0 && (
           <Animated.View
             entering={FadeInDown.duration(400)}
-            style={[dg.emptyCard, { top: Math.max(8, nowY - 50), left: TIME_COL_W + 8, right: 8, backgroundColor: t.card, borderColor: t.cardBorder }]}
+            style={{ position: "absolute", top: Math.max(8, nowY - 50), left: TIME_COL_W + 8, right: 8 }}
           >
-            <Ionicons name="calendar-outline" size={30} color={t.subtle} />
-            <Text style={[dg.emptyTitle, { color: t.text }]}>Sin citas este día</Text>
-            <Text style={[dg.emptySub, { color: t.muted }]}>Toca + para agendar</Text>
+            <TouchableOpacity
+              style={[dg.emptyCard, { backgroundColor: t.card, borderColor: t.cardBorder }]}
+              onPress={onAddPress}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="calendar-outline" size={30} color={t.subtle} />
+              <Text style={[dg.emptyTitle, { color: t.text }]}>Sin citas este día</Text>
+              <Text style={[dg.emptySub, { color: t.muted }]}>Toca para agendar</Text>
+            </TouchableOpacity>
           </Animated.View>
         )}
       </View>
@@ -781,7 +787,7 @@ const dg = StyleSheet.create({
   blockPro:      { fontSize: 9,  fontFamily: "SpaceGrotesk_600SemiBold" },
   blockBadge:    { paddingHorizontal: 6, paddingVertical: 4, alignSelf: "center", marginRight: 6, borderRadius: 6 },
   blockBadgeText:{ fontSize: 9, fontFamily: "SpaceGrotesk_700Bold" },
-  emptyCard:     { position: "absolute", borderRadius: Radius.xl, borderWidth: 1, padding: 28, alignItems: "center", gap: 8 },
+  emptyCard:     { borderRadius: Radius.xl, borderWidth: 1, padding: 28, alignItems: "center", gap: 8 },
   emptyTitle:    { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold" },
   emptySub:      { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", textAlign: "center" },
 });
@@ -994,6 +1000,7 @@ export default function AgendaScreen() {
         appts={visible}
         professionals={professionals}
         onPressAppt={setDetailAppt}
+        onAddPress={() => setShowNew(true)}
         showPro={filterProId === null}
         refreshing={refreshing}
         onRefresh={onRefresh}
