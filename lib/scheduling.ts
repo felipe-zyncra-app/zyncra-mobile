@@ -34,6 +34,24 @@ export function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+export type DayHours = { open: boolean; start: string; end: string };
+
+// Horario efectivo de un día: el propio del profesional (si tiene) tiene prioridad sobre el
+// del negocio — mismo criterio que la reserva online del web (getEffectiveHours).
+// Formato canónico: claves "0".."6" de Date.getDay() con {open,start,end}. Se acepta el
+// formato legado del editor móvil ({mon..sun} con {enabled}) por si quedó guardado así.
+const LEGACY_DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+export function effectiveDayHours(date: Date, businessSchedule: any, proSchedule: any): DayHours | null {
+  const dow = date.getDay();
+  const pd = proSchedule?.[String(dow)] ?? proSchedule?.[LEGACY_DAY_KEYS[dow]];
+  if (pd != null) {
+    return { open: !!(pd.open ?? pd.enabled), start: pd.start ?? "09:00", end: pd.end ?? "18:00" };
+  }
+  const bd = businessSchedule?.[String(dow)];
+  return bd ? { open: !!bd.open, start: bd.start ?? "09:00", end: bd.end ?? "18:00" } : null;
+}
+
 // Re-verifica en el servidor que el horario siga libre justo antes de guardar:
 // los slots se calcularon al abrir el paso y otro dispositivo pudo ocuparlo mientras tanto.
 // Si la consulta falla se asume libre — el insert tiene su propio manejo de error.

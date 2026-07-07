@@ -32,14 +32,29 @@ const TIME_OPTS = Array.from({ length: 29 }, (_, i) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 });
 const DEFAULT_DAY: DayConfig = { enabled: false, start: "09:00", end: "18:00" };
+const DOW_KEYS: (keyof ProSchedule)[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
 function buildSched(raw: any): ProSchedule {
   const base = { mon: DEFAULT_DAY, tue: DEFAULT_DAY, wed: DEFAULT_DAY, thu: DEFAULT_DAY, fri: { enabled: true, start: "09:00", end: "18:00" }, sat: DEFAULT_DAY, sun: DEFAULT_DAY };
   if (!raw || typeof raw !== "object") return base;
   const merged: any = { ...base };
+  // Formato canónico (el que leen la reserva online y la agenda): claves "0".."6" con {open,start,end}
+  for (let d = 0; d < 7; d++) {
+    const c = raw[String(d)];
+    if (c) merged[DOW_KEYS[d]] = { enabled: !!(c.open ?? c.enabled), start: c.start ?? "09:00", end: c.end ?? "18:00" };
+  }
+  // Formato legado del editor móvil: claves mon..sun con {enabled}
   for (const k of Object.keys(base)) {
     if (raw[k]) merged[k] = { ...DEFAULT_DAY, ...raw[k] };
   }
   return merged as ProSchedule;
+}
+
+// Se guarda siempre en el formato canónico para que la reserva online del web y la agenda lo respeten
+function toCanonical(sched: ProSchedule): Record<string, { open: boolean; start: string; end: string }> {
+  const out: Record<string, { open: boolean; start: string; end: string }> = {};
+  DOW_KEYS.forEach((k, dow) => { out[String(dow)] = { open: sched[k].enabled, start: sched[k].start, end: sched[k].end }; });
+  return out;
 }
 
 function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
@@ -125,7 +140,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
     try {
       const payload: Record<string, unknown> = {
         name: name.trim(), role: role.trim() || "Profesional", is_active: active,
-        schedule: useCustomSched ? proSched : null,
+        schedule: useCustomSched ? toCanonical(proSched) : null,
       };
       if (isEdit) {
         if (photoUri) {

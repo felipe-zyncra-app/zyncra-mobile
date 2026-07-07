@@ -13,7 +13,7 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmt12Hour, localDateStr } from "@/lib/format";
-import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict } from "@/lib/scheduling";
+import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, effectiveDayHours } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
@@ -44,7 +44,7 @@ const PRO_PALETTE = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Professional = { id: string; name: string; role?: string };
+type Professional = { id: string; name: string; role?: string; schedule?: any };
 
 type EditClient  = { id: string; name: string; phone: string };
 type EditService = { id: string; name: string; duration_minutes: number; price: number };
@@ -188,7 +188,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     if (!appt) return;
     setStep(0);
     setClientSearch("");
-    setSelectedPro(appt.professionals ?? null);
+    // Resolver contra la lista completa: el join de la cita no trae el schedule del profesional
+    setSelectedPro(professionals.find(p => p.id === appt.professionals?.id) ?? appt.professionals ?? null);
     const date = new Date(appt.appointment_date + "T12:00:00");
     setSelectedDate(date);
     setWeekBase(date);
@@ -228,8 +229,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     setSelectedTime(null);
     setDayClosed(false);
 
-    const dayKey   = String(selectedDate.getDay());
-    const dayConfig = schedule?.[dayKey];
+    // Horario efectivo del día: el propio del profesional (si tiene) sobre el del negocio
+    const dayConfig = effectiveDayHours(selectedDate, schedule, selectedPro?.schedule);
     if (!dayConfig?.open) {
       setDayClosed(true); setAvailableSlots([]); setLoadingSlots(false); return;
     }
@@ -462,7 +463,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
                   </TouchableOpacity>
                   {week.map((d, i) => {
                     const isPast   = d < today;
-                    const isClosed = schedule ? schedule[String(d.getDay())]?.open === false : false;
+                    const isClosed = schedule ? effectiveDayHours(d, schedule, selectedPro?.schedule)?.open === false : false;
                     const blocked  = isPast || isClosed;
                     const isSel    = d.toDateString() === selectedDate.toDateString();
                     const isToday  = d.toDateString() === new Date().toDateString();
@@ -809,7 +810,7 @@ export default function AgendaScreen() {
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
       supabase.from("professionals")
-        .select("id, name")
+        .select("id, name, schedule")
         .eq("tenant_id", tenantId)
         .eq("is_active", true)
         .order("name"),
