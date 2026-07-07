@@ -627,8 +627,9 @@ export default function FinanzasScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={["top"]}>
-      {/* Header — gradient brand igual al resto de pantallas */}
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+      {/* Header de subpantalla: superficie oscura + acento de marca de 3px */}
+      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
         <View style={s.headerBlob1} />
         <View style={s.headerBlob2} />
         <View style={s.headerTopRow}>

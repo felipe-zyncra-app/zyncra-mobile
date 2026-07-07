@@ -86,7 +86,8 @@ function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.header}>
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.header}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={dm.headerRow}>
             <TouchableOpacity onPress={onClose} style={dm.closeBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -327,7 +328,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     <Modal visible={!!appt} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         {/* Header */}
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={em.headerRow}>
             <TouchableOpacity onPress={step === 0 ? onClose : () => setStep(p => p - 1)} style={em.headerBtn}>
               <Text style={em.backText}>{step === 0 ? "✕" : "←"}</Text>

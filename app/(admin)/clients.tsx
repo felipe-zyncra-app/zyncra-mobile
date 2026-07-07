@@ -75,7 +75,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={em.headerRow}>
             <TouchableOpacity onPress={onClose} style={em.iconBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -175,8 +176,9 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
         {/* Header */}
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[p.header, { paddingTop: insets.top + 12 }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={p.headerRow}>
             <TouchableOpacity onPress={onClose} style={p.iconBtn}>
               <Ionicons name="arrow-back" size={20} color="white" />
@@ -418,6 +420,7 @@ export default function ClientsScreen() {
         data={filtered}
         keyExtractor={(item) => item.id}
         style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         ListEmptyComponent={

@@ -94,7 +94,8 @@ function ClientModal({ client, proId, onClose }: {
   return (
     <Modal visible={!!client} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={cm.header}>
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={cm.header}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={cm.headerRow}>
             <TouchableOpacity onPress={onClose} style={cm.iconBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -368,6 +369,7 @@ export default function StaffClientsScreen() {
           data={filtered}
           keyExtractor={item => item.id}
           renderItem={renderItem}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
           ListEmptyComponent={

@@ -11,9 +11,10 @@ type Props = {
 
 export default function ModalHeader({ title, onClose, rightAction }: Props) {
   return (
-    <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+    <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.accent} />
       <View style={s.row}>
-        <TouchableOpacity onPress={onClose} style={s.btn}>
+        <TouchableOpacity onPress={onClose} style={s.btn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="close" size={20} color="white" />
         </TouchableOpacity>
         <Text style={s.title}>{title}</Text>
@@ -31,6 +32,7 @@ export default function ModalHeader({ title, onClose, rightAction }: Props) {
 
 const s = StyleSheet.create({
   header: { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 20 },
+  accent: { position: "absolute", top: 0, left: 0, right: 0, height: 3 },
   row:    { flexDirection: "row", alignItems: "center", gap: 12 },
   btn:    { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.18)", alignItems: "center", justifyContent: "center" },
   title:  { flex: 1, fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white", textAlign: "center" },

@@ -219,7 +219,7 @@ export default function RemindersScreen() {
                 <View style={s.chatBg}>
                   <View style={s.bubble}>
                     <Text style={s.bubbleText}>{previewText(template)}</Text>
-                    <Text style={s.bubbleTime}>10:00 AM ✓✓</Text>
+                    <Text style={s.bubbleTime}>10:00 AM</Text>
                   </View>
                 </View>
 

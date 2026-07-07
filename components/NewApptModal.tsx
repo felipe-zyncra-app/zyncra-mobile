@@ -290,7 +290,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
 
         {/* Header */}
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={s.headerRow}>
             <TouchableOpacity onPress={step === 0 ? onClose : () => setStep(p => p - 1)} style={s.backBtn}>
               <Text style={s.backBtnText}>{step === 0 ? "✕" : "←"}</Text>
