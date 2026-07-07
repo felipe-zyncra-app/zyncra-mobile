@@ -2,6 +2,7 @@ import { Tabs, Redirect } from "expo-router";
 import { View, ActivityIndicator } from "react-native";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/lib/auth";
+import { useStaffPermissions } from "@/lib/permissions";
 import FluidTabBar, { type TabItem } from "@/components/FluidTabBar";
 
 const TABS: TabItem[] = [
@@ -12,6 +13,8 @@ const TABS: TabItem[] = [
 
 export default function StaffLayout() {
   const { role, loading } = useAuth();
+  const perms = useStaffPermissions();
+  const visibleTabs = perms.clients_tab ? TABS : TABS.filter(t => t.name !== "clients");
 
   if (loading) {
     return (
@@ -24,7 +27,7 @@ export default function StaffLayout() {
   if (role !== "staff") return <Redirect href="/(auth)/login" />;
 
   return (
-    <Tabs tabBar={(props) => <FluidTabBar {...props} tabs={TABS} />} screenOptions={{ headerShown: false }}>
+    <Tabs tabBar={(props) => <FluidTabBar {...props} tabs={visibleTabs} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="agenda"  options={{ title: "Mi Agenda" }} />
       <Tabs.Screen name="clients" options={{ title: "Clientes" }} />
       <Tabs.Screen name="profile" options={{ title: "Mi Perfil" }} />

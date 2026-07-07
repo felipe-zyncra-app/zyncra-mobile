@@ -14,6 +14,7 @@ import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { STATUS_META } from "@/constants/status";
 import { fmtDateShort, fmtMoneyFull, localDateStr } from "@/lib/format";
+import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 
@@ -45,8 +46,8 @@ function twelveMonthsAgo(): string {
 
 // ─── Client detail modal ──────────────────────────────────────────────────────
 
-function ClientModal({ client, proId, onClose }: {
-  client: ClientEntry | null; proId: string | null; onClose: () => void;
+function ClientModal({ client, proId, perms, onClose }: {
+  client: ClientEntry | null; proId: string | null; perms: StaffPermissions; onClose: () => void;
 }) {
   const [history, setHistory] = useState<ApptHistoryItem[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
@@ -105,10 +106,10 @@ function ClientModal({ client, proId, onClose }: {
           <View style={{ alignItems: "center" }}>
             <Avatar name={client.name} size={68} />
             <Text style={cm.clientName}>{client.name}</Text>
-            {client.phone && <Text style={cm.clientPhone}>{client.phone}</Text>}
+            {perms.contact && client.phone && <Text style={cm.clientPhone}>{client.phone}</Text>}
           </View>
           <View style={cm.quickActions}>
-            {client.phone && (
+            {perms.contact && client.phone && (
               <>
                 <TouchableOpacity style={cm.actionBtn} onPress={() => Linking.openURL(`tel:${client.phone}`)}>
                   <Ionicons name="call-outline" size={17} color="white" />
@@ -120,7 +121,7 @@ function ClientModal({ client, proId, onClose }: {
                 </TouchableOpacity>
               </>
             )}
-            {client.email && (
+            {perms.contact && client.email && (
               <TouchableOpacity style={cm.actionBtn} onPress={() => Linking.openURL(`mailto:${client.email}`)}>
                 <Ionicons name="mail-outline" size={17} color="white" />
                 <Text style={cm.actionLabel}>Correo</Text>
@@ -141,11 +142,15 @@ function ClientModal({ client, proId, onClose }: {
               <Text style={[cm.statVal, { color: Colors.success }]}>{client.completedCount}</Text>
               <Text style={cm.statLabel}>Completadas</Text>
             </View>
-            <View style={cm.statDivider} />
-            <View style={cm.statBox}>
-              <Text style={[cm.statVal, { color: Colors.purple }]}>{fmtMoneyFull(totalSpent)}</Text>
-              <Text style={cm.statLabel}>Total gastado</Text>
-            </View>
+            {perms.amounts && (
+              <>
+                <View style={cm.statDivider} />
+                <View style={cm.statBox}>
+                  <Text style={[cm.statVal, { color: Colors.purple }]}>{fmtMoneyFull(totalSpent)}</Text>
+                  <Text style={cm.statLabel}>Total gastado</Text>
+                </View>
+              </>
+            )}
           </View>
 
           {/* Appointment history */}
@@ -170,7 +175,7 @@ function ClientModal({ client, proId, onClose }: {
                     <Text style={cm.apptTime}>{a.time}</Text>
                   </View>
                   <View style={{ alignItems: "flex-end", gap: 4 }}>
-                    {a.price > 0 && <Text style={cm.apptPrice}>{fmtMoneyFull(a.price)}</Text>}
+                    {perms.amounts && a.price > 0 && <Text style={cm.apptPrice}>{fmtMoneyFull(a.price)}</Text>}
                     <View style={[cm.statusPill, { backgroundColor: meta.color + "15" }]}>
                       <Text style={[cm.statusText, { color: meta.color }]}>{meta.label}</Text>
                     </View>
@@ -219,6 +224,7 @@ export default function StaffClientsScreen() {
   const { user } = useAuth();
   const { t } = useTheme();
   const [proId, setProId]           = useState<string | null>(null);
+  const [perms, setPerms]           = useState<StaffPermissions>(DEFAULT_PERMISSIONS);
   const [clients, setClients]       = useState<ClientEntry[]>([]);
   const [filtered, setFiltered]     = useState<ClientEntry[]>([]);
   const [query, setQuery]           = useState("");
@@ -230,8 +236,12 @@ export default function StaffClientsScreen() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    supabase.from("professionals").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (!cancelled && data) setProId(data.id); });
+    supabase.from("professionals").select("id, permissions").eq("user_id", user.id).single()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setProId(data.id);
+        setPerms(parsePermissions(data.permissions));
+      });
     return () => { cancelled = true; };
   }, [user]);
 
@@ -314,7 +324,7 @@ export default function StaffClientsScreen() {
           )}
         </View>
         <View style={s.actionBtns}>
-          {item.phone && (
+          {perms.contact && item.phone && (
             <TouchableOpacity
               style={s.iconBtn}
               onPress={() => Linking.openURL(`https://wa.me/${item.phone!.replace(/\D/g, "")}`)}
@@ -384,7 +394,7 @@ export default function StaffClientsScreen() {
         />
       )}
 
-      <ClientModal client={selected} proId={proId} onClose={() => setSelected(null)} />
+      <ClientModal client={selected} proId={proId} perms={perms} onClose={() => setSelected(null)} />
     </SafeAreaView>
   );
 }

@@ -11,7 +11,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "@/lib/supabase";
-import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
+import { Colors, Gradients, Radius, Shadow, MonoLabel } from "@/constants/theme";
+import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
 import { useTheme } from "@/lib/theme";
 import { Config } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
@@ -20,7 +21,7 @@ import ErrorState from "@/components/ErrorState";
 
 type DayConfig = { enabled: boolean; start: string; end: string };
 type ProSchedule = { mon: DayConfig; tue: DayConfig; wed: DayConfig; thu: DayConfig; fri: DayConfig; sat: DayConfig; sun: DayConfig };
-type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; schedule?: any };
+type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; schedule?: any; permissions?: any };
 
 const DAYS: { key: keyof ProSchedule; label: string }[] = [
   { key: "mon", label: "Lun" }, { key: "tue", label: "Mar" }, { key: "wed", label: "Mié" },
@@ -76,6 +77,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
   const [useCustomSched, setUseCustomSched] = useState(false);
   const [proSched, setProSched]     = useState<ProSchedule>(buildSched(null));
   const [bizSched, setBizSched]     = useState<ProSchedule>(buildSched(null));
+  const [perms, setPerms]           = useState<StaffPermissions>(DEFAULT_PERMISSIONS);
 
   useEffect(() => {
     if (visible) {
@@ -86,6 +88,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       setAccPass("");
       setAccSuccess(false);
       setPhotoUri(null);
+      setPerms(parsePermissions(pro?.permissions));
       supabase.from("tenants").select("settings").eq("id", tenantId).single()
         .then(({ data }) => {
           const biz = buildSched((data?.settings as any)?.schedule);
@@ -141,6 +144,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       const payload: Record<string, unknown> = {
         name: name.trim(), role: role.trim() || "Profesional", is_active: active,
         schedule: useCustomSched ? toCanonical(proSched) : null,
+        permissions: perms,
       };
       if (isEdit) {
         if (photoUri) {
@@ -326,6 +330,47 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
                 );
               })}
             </View>
+
+            {/* Permisos: qué puede ver esta cuenta en la app de staff */}
+            <View style={{ marginTop: 28 }}>
+              <Text style={[MonoLabel, { marginBottom: 10 }]}>Qué puede ver esta cuenta</Text>
+              <View style={[s.switchRow, Shadow.sm, { backgroundColor: t.bgAlt }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.switchLabel, { color: t.text }]}>Contacto de clientes</Text>
+                  <Text style={[s.switchSub, { color: t.muted }]}>Teléfono, correo y botones de llamar/WhatsApp</Text>
+                </View>
+                <Switch
+                  value={perms.contact}
+                  onValueChange={v => setPerms(p => ({ ...p, contact: v }))}
+                  trackColor={{ false: Colors.border, true: Colors.blue + "aa" }}
+                  thumbColor={perms.contact ? Colors.blue : Colors.subtle}
+                />
+              </View>
+              <View style={[s.switchRow, Shadow.sm, { backgroundColor: t.bgAlt, marginTop: 10 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.switchLabel, { color: t.text }]}>Montos y precios</Text>
+                  <Text style={[s.switchSub, { color: t.muted }]}>Valores de servicios y total gastado por cliente</Text>
+                </View>
+                <Switch
+                  value={perms.amounts}
+                  onValueChange={v => setPerms(p => ({ ...p, amounts: v }))}
+                  trackColor={{ false: Colors.border, true: Colors.blue + "aa" }}
+                  thumbColor={perms.amounts ? Colors.blue : Colors.subtle}
+                />
+              </View>
+              <View style={[s.switchRow, Shadow.sm, { backgroundColor: t.bgAlt, marginTop: 10 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.switchLabel, { color: t.text }]}>Pestaña de Clientes</Text>
+                  <Text style={[s.switchSub, { color: t.muted }]}>La lista completa de sus clientes con historial</Text>
+                </View>
+                <Switch
+                  value={perms.clients_tab}
+                  onValueChange={v => setPerms(p => ({ ...p, clients_tab: v }))}
+                  trackColor={{ false: Colors.border, true: Colors.blue + "aa" }}
+                  thumbColor={perms.clients_tab ? Colors.blue : Colors.subtle}
+                />
+              </View>
+            </View>
           </ScrollView>
 
           <View style={[s.bottomBar, { borderTopColor: t.border, backgroundColor: t.bg }]}>
@@ -356,7 +401,7 @@ export default function TeamScreen() {
     setError(false);
     try {
       const { data } = await supabase.from("professionals")
-        .select("id, name, role, is_active, user_id, email, photo_url, schedule")
+        .select("id, name, role, is_active, user_id, email, photo_url, schedule, permissions")
         .eq("tenant_id", tenantId).order("name");
       setPros(data ?? []);
     } catch {
