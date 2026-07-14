@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { fmtMoney } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import { refreshAllReminders } from "@/lib/notifications";
@@ -115,7 +116,8 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const [tenantName, setTenantName] = useState("Tu negocio");
+  const { tenant: tenantData } = useTenant();
+  const tenantName = tenantData?.name ?? "Tu negocio";
   const [appts, setAppts]           = useState<Appt[]>([]);
   const [metrics, setMetrics]       = useState({ total: 0, confirmed: 0, clients: 0, revenueDay: 0, revenueMonth: 0 });
   const [refreshing, setRefreshing] = useState(false);
@@ -123,10 +125,6 @@ export default function DashboardScreen() {
 
   const load = async () => {
     if (!tenantId) return;
-
-    const { data: tenant } = await supabase
-      .from("tenants").select("name").eq("id", tenantId).single();
-    if (tenant) setTenantName(tenant.name);
 
     const now        = new Date();
     const dateStr    = now.toISOString().split("T")[0];

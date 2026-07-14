@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 
@@ -113,6 +114,7 @@ export default function BillingScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
+  const { tenant: tenantCtx } = useTenant();
   const [tenant, setTenant] = useState<TenantPlan | null>(null);
 
   useEffect(() => {
@@ -129,14 +131,16 @@ export default function BillingScreen() {
     return () => { cancelled = true; };
   }, [tenantId]);
 
+  const tenantName = tenantCtx?.name ?? tenant?.name ?? "Tu negocio";
+
   const plan = (tenant?.plan ?? "trial") as keyof typeof PLANS;
   const planMeta = PLANS[plan] ?? PLANS.trial;
   const remaining = tenant ? daysLeft(tenant.created_at, tenant.plan_expires_at) : 0;
   const isTrial = plan === "trial";
   const isPro   = plan === "pro";
 
-  const upgradeMsg = `Hola, quiero actualizar mi negocio "${tenant?.name ?? ""}" al plan Pro de Zyncra.`;
-  const businessMsg = `Hola, quiero más información sobre el plan Business de Zyncra para mi negocio "${tenant?.name ?? ""}".`;
+  const upgradeMsg = `Hola, quiero actualizar mi negocio "${tenantName}" al plan Pro de Zyncra.`;
+  const businessMsg = `Hola, quiero más información sobre el plan Business de Zyncra para mi negocio "${tenantName}".`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -152,7 +156,7 @@ export default function BillingScreen() {
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={s.headerTitle}>Plan y facturación</Text>
-              <Text style={s.headerSub}>{tenant?.name ?? "Tu negocio"}</Text>
+              <Text style={s.headerSub}>{tenantName}</Text>
             </View>
           </View>
 

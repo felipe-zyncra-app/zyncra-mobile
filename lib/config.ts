@@ -6,6 +6,7 @@ export const Config = {
   supabaseUrl: SUPABASE_URL,
   edgeFunctions: {
     createStaffUser: `${SUPABASE_URL}/functions/v1/create-staff-user`,
+    sendPush: `${SUPABASE_URL}/functions/v1/send-push`,
   },
   api: {
     factus: "https://zyncra.app/api/factus",

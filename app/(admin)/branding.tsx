@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Alert, Pressable, Share,
@@ -8,6 +8,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, MonoLabel, Radius, Shadow } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 
 const SWATCHES_PRIMARY   = ["#fb0f05", "#e11d48", "#7c3aed", "#2563eb", "#059669", "#d97706", "#14111C"];
 const SWATCHES_SECONDARY = ["#0027fe", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#6366f1"];
@@ -154,9 +157,38 @@ function LivePreview({ config }: { config: Config }) {
 
 export default function BrandingScreen() {
   const router  = useRouter();
+  const { tenantId } = useAuth();
+  const { tenant, update: updateTenant } = useTenant();
   const [config, setConfig] = useState<Config>({ ...DEFAULT });
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!tenant) return;
+    setConfig(prev => ({
+      ...prev,
+      businessName: tenant.name,
+      slug:         tenant.slug || DEFAULT.slug,
+    }));
+  }, [tenant]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    supabase.from("branding")
+      .select("welcome_message, primary_color, secondary_color")
+      .eq("tenant_id", tenantId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        setConfig(prev => ({
+          ...prev,
+          welcome:        data.welcome_message || DEFAULT.welcome,
+          primaryColor:   data.primary_color || DEFAULT.primaryColor,
+          secondaryColor: data.secondary_color || DEFAULT.secondaryColor,
+        }));
+      });
+  }, [tenantId]);
 
   const bookingLink = `https://${BOOKING_BASE}${config.slug}`;
 
@@ -168,9 +200,31 @@ export default function BrandingScreen() {
     setTimeout(() => setCopied(false), 2000);
   }, [bookingLink]);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+  const handleSave = async () => {
+    if (saving || !tenantId) return;
+    setSaving(true);
+
+    const [tenantOk, brandRes] = await Promise.all([
+      updateTenant({
+        name: config.businessName.trim(),
+        slug:  config.slug,
+      }),
+      supabase.from("branding").upsert({
+        tenant_id:       tenantId,
+        business_name:   config.businessName.trim(),
+        welcome_message: config.welcome,
+        primary_color:   config.primaryColor,
+        secondary_color: config.secondaryColor,
+      }, { onConflict: "tenant_id" }),
+    ]);
+
+    setSaving(false);
+    if (tenantOk && !brandRes.error) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } else {
+      Alert.alert("Error", "No se pudieron guardar los cambios");
+    }
   };
 
   const set = (key: keyof Config) => (val: string) =>
@@ -312,8 +366,8 @@ export default function BrandingScreen() {
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={s.saveBtn}
           >
-            <Ionicons name="save-outline" size={18} color="white" />
-            <Text style={s.saveBtnText}>Guardar configuración</Text>
+            <Ionicons name={saving ? "hourglass-outline" : "save-outline"} size={18} color="white" />
+            <Text style={s.saveBtnText}>{saving ? "Guardando…" : "Guardar configuración"}</Text>
           </LinearGradient>
         </TouchableOpacity>
 

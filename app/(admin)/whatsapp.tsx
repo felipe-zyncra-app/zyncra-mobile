@@ -14,6 +14,7 @@ import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { fmtPhone, fmtDateCompact } from "@/lib/format";
 
 type Tab = "nueva" | "plantillas" | "historial" | "bot" | "conversaciones";
@@ -40,7 +41,8 @@ export default function WhatsappScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const [bizName, setBizName]         = useState("");
+  const { tenant: tenantData } = useTenant();
+  const bizName = tenantData?.name ?? "";
   const [tab, setTab]                 = useState<Tab>("nueva");
 
   // Nueva campaña
@@ -76,12 +78,6 @@ export default function WhatsappScreen() {
   const [conversations, setConversations]   = useState<Conversation[]>([]);
   const [convoLoading, setConvoLoading]     = useState(false);
   const [expandedConvo, setExpandedConvo]   = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!tenantId) return;
-    supabase.from("tenants").select("name").eq("id", tenantId).single()
-      .then(({ data }) => { if (data) setBizName(data.name ?? ""); });
-  }, [tenantId]);
 
   const loadTemplates = useCallback(async () => {
     if (!tenantId) return;

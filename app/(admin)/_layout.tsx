@@ -112,6 +112,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="custom-fields"   options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="reports"          options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="pos-history"     options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="push-now"        options={{ tabBarButton: () => null }} />
     </Tabs>
   );
 }

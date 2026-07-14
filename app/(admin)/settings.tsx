@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Switch } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -34,21 +35,12 @@ function SettingRow({
   );
 }
 
-type Tenant = { name: string; phone?: string };
-
 export default function SettingsScreen() {
   const router = useRouter();
   const { mode, t, toggle } = useTheme();
   const { tenantId } = useAuth();
-  const [tenant, setTenant] = useState<Tenant | null>(null);
-
-  useEffect(() => {
-    if (!tenantId) return;
-    let cancelled = false;
-    supabase.from("tenants").select("name, phone").eq("id", tenantId).single()
-      .then(({ data }) => { if (!cancelled && data) setTenant(data); });
-    return () => { cancelled = true; };
-  }, [tenantId]);
+  const { tenant: tenantData } = useTenant();
+  const tenant = tenantData ? { name: tenantData.name, phone: tenantData.phone } : null;
 
   const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Seguro que quieres salir?", [
@@ -64,6 +56,12 @@ export default function SettingsScreen() {
   };
 
   const SECTIONS = [
+    {
+      title: "Evento especial",
+      items: [
+        { icon: "airplane-outline" as IoniconName, color: Colors.red, label: "Enviar notificación ahora", sub: "Botones rápidos para el salto en paracaídas 🪂", route: "/(admin)/push-now" },
+      ],
+    },
     {
       title: "Tu negocio",
       items: [

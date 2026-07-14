@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { Config } from "@/lib/config";
@@ -99,6 +100,7 @@ export default function StoreScreen() {
   const router = useRouter();
   const { tenantId } = useAuth();
   const { t } = useTheme();
+  const { patch: patchTenant } = useTenant();
 
   const [slug,       setSlug]       = useState<string>("");
   const [loading,    setLoading]    = useState(true);
@@ -198,6 +200,13 @@ export default function StoreScreen() {
       primary_color:   primaryColor,
       secondary_color: secondColor,
     }, { onConflict: "tenant_id" });
+
+    patchTenant({
+      name:    bizName.trim(),
+      phone:   phone.trim(),
+      address: address.trim(),
+      slug:    slug.trim(),
+    });
 
     setSaving(false);
     setSaved(true);
