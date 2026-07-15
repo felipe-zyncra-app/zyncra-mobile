@@ -99,7 +99,8 @@ function EditModal({ visible, client, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+        <View style={[em.header, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={em.headerRow}>
             <TouchableOpacity onPress={onClose} style={em.iconBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -109,7 +110,7 @@ function EditModal({ visible, client, onClose, onSaved }: {
               <Ionicons name="trash-outline" size={18} color="white" />
             </TouchableOpacity>
           </View>
-        </LinearGradient>
+        </View>
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
@@ -195,7 +196,8 @@ function FieldsModal({ visible, fields, values, clientId, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={fm.header}>
+        <View style={[fm.header, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={fm.headerRow}>
             <TouchableOpacity onPress={onClose} style={fm.iconBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -203,7 +205,7 @@ function FieldsModal({ visible, fields, values, clientId, onClose, onSaved }: {
             <Text style={fm.headerTitle}>Campos personalizados</Text>
             <View style={{ width: 40 }} />
           </View>
-        </LinearGradient>
+        </View>
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
@@ -348,7 +350,8 @@ export default function ClientProfileScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       {/* Header */}
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+      <View style={[s.header, { backgroundColor: "#0C0C14" }]}>
+        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
         <View style={s.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={s.iconBtn}>
             <Ionicons name="arrow-back" size={20} color="white" />
@@ -398,7 +401,7 @@ export default function ClientProfileScreen() {
             )}
           </View>
         </View>
-      </LinearGradient>
+      </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
         {/* Stats */}

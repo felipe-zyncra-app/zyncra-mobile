@@ -25,7 +25,7 @@ export const Gradients = {
   brand:     ["#fb0f05", "#0027fe"] as const,
   brandH:    ["#fb0f05", "#0027fe"] as const,
   brandSoft: ["rgba(251,15,5,0.10)", "rgba(0,39,254,0.05)"] as const,
-  ink:       ["#1a1a2e", "#0f0f1a"] as const,
+  ink:       ["#14141d", "#0C0C14"] as const,
 };
 
 export const Fonts = {
@@ -92,16 +92,18 @@ export const CardStyle = {
   },
 };
 
+// "Glass" es legado: hoy mapea a la card sólida del portal web para que
+// las pantallas sin migrar hereden el nuevo estilo sin tocarlas una a una.
 export const Glass = {
   card: {
-    backgroundColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(20,15,30,0.08)",
   },
   cardStrong: {
-    backgroundColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.75)",
+    borderColor: "rgba(20,15,30,0.08)",
   },
   dark: {
     backgroundColor: "rgba(20,17,28,0.35)",

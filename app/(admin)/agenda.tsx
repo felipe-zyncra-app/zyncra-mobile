@@ -16,6 +16,7 @@ import { fmt12Hour } from "@/lib/format";
 import { timeToMins, chunk, generateSlotsForDay, buildWeek } from "@/lib/scheduling";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
+import { MonoTag } from "@/components/ui";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
 
 // ─── Scheduling helpers ─────────────────────────────────────────────────────
@@ -85,7 +86,8 @@ function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.header}>
+        <View style={[dm.header, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={dm.headerRow}>
             <TouchableOpacity onPress={onClose} style={dm.closeBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -106,7 +108,7 @@ function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
               <Text style={dm.price}>${Math.round(appt.services.price).toLocaleString("es-CO")}</Text>
             )}
           </View>
-        </LinearGradient>
+        </View>
 
         <ScrollView contentContainerStyle={{ padding: 20 }}>
           <Text style={dm.sectionLabel}>Estado de la cita</Text>
@@ -311,7 +313,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
     <Modal visible={!!appt} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         {/* Header */}
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+        <View style={[em.header, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={em.headerRow}>
             <TouchableOpacity onPress={step === 0 ? onClose : () => setStep(p => p - 1)} style={em.headerBtn}>
               <Text style={em.backText}>{step === 0 ? "✕" : "←"}</Text>
@@ -327,7 +330,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
               <View key={i} style={[em.progressDot, step >= i && em.progressActive]} />
             ))}
           </View>
-        </LinearGradient>
+        </View>
 
         {loading ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -789,47 +792,24 @@ export default function AgendaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* ── Header ── */}
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerBlob1} />
-        <View style={s.headerBlob2} />
-
-        <View style={s.headerTopRow}>
-          <View style={s.headerIconBox}>
-            <Ionicons name="calendar" size={16} color="white" />
-          </View>
-          <Text style={s.headerLabel}>Agenda</Text>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={s.addBtn} onPress={() => setShowNew(true)} activeOpacity={0.8}>
-            <Ionicons name="add" size={22} color="white" />
-          </TouchableOpacity>
+      {/* ── Header compacto ── */}
+      <View style={s.header}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <MonoTag>Agenda</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]}>
+            {selected.toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}
+          </Text>
+          <Text style={[s.headerSub, { color: t.muted }]}>
+            {appts.length} cita{appts.length !== 1 ? "s" : ""} · {appts.filter(a => a.status === "confirmed").length} confirmadas
+            {conflictCount > 0 ? <Text style={{ color: "#d97706" }}> · {conflictCount} conflicto{conflictCount !== 1 ? "s" : ""}</Text> : null}
+          </Text>
         </View>
-
-        <Text style={s.headerTitle}>
-          {selected.toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}
-        </Text>
-
-        <View style={s.headerStatsRow}>
-          <View style={s.headerStatPill}>
-            <Text style={s.headerStatValue}>{appts.length}</Text>
-            <Text style={s.headerStatLabel}>citas</Text>
-          </View>
-          <View style={s.headerStatDivider} />
-          <View style={s.headerStatPill}>
-            <Text style={s.headerStatValue}>{appts.filter(a => a.status === "confirmed").length}</Text>
-            <Text style={s.headerStatLabel}>confirm.</Text>
-          </View>
-          {conflictCount > 0 && (
-            <>
-              <View style={s.headerStatDivider} />
-              <View style={s.headerStatPill}>
-                <Ionicons name="warning" size={11} color="#fbbf24" />
-                <Text style={[s.headerStatLabel, { color: "#fbbf24" }]}>{conflictCount} conflicto{conflictCount !== 1 ? "s" : ""}</Text>
-              </View>
-            </>
-          )}
-        </View>
-      </LinearGradient>
+        <TouchableOpacity onPress={() => setShowNew(true)} activeOpacity={0.85} style={s.addBtnWrap}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.addBtn}>
+            <Ionicons name="add" size={20} color="white" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
       {/* ── Week strip ── */}
       <View style={[s.weekStrip, Shadow.sm]}>
@@ -948,19 +928,11 @@ export default function AgendaScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  header:          { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 16, overflow: "hidden" },
-  headerBlob1:     { position: "absolute", width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,.06)", top: -80, right: -40 },
-  headerBlob2:     { position: "absolute", width: 100, height: 100, borderRadius: 50, backgroundColor: "rgba(0,0,0,.05)", bottom: -30, left: -20 },
-  headerTopRow:    { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, position: "relative", zIndex: 1 },
-  headerIconBox:   { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
-  headerLabel:     { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.8)" },
-  headerTitle:     { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.5, textTransform: "capitalize", marginBottom: 12, position: "relative", zIndex: 1 },
-  headerStatsRow:  { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,.14)", borderRadius: Radius.full, paddingVertical: 8, paddingHorizontal: 14, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", gap: 0, position: "relative", zIndex: 1 },
-  headerStatPill:  { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 4 },
-  headerStatValue: { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  headerStatLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.75)" },
-  headerStatDivider:{ width: 1, height: 14, backgroundColor: "rgba(255,255,255,.25)", marginHorizontal: 6 },
-  addBtn:          { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
+  header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
+  headerTitle: { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, textTransform: "capitalize", marginTop: 3 },
+  headerSub:   { fontSize: 12.5, fontFamily: "SpaceGrotesk_400Regular", marginTop: 3 },
+  addBtnWrap:  { borderRadius: 19, overflow: "hidden" },
+  addBtn:      { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
 
   weekStrip:    { ...Glass.cardStrong, flexDirection: "row", paddingVertical: 12, paddingHorizontal: 4, alignItems: "center" },
   weekArrow:    { width: 32, alignItems: "center", justifyContent: "center" },

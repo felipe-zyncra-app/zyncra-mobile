@@ -13,6 +13,7 @@ import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { sendPushNow, sendPushSequence } from "@/lib/notifications";
+import { ScreenHeader } from "@/components/ui";
 
 const FAKE_CLIENTS = ["Andrés Gómez", "Camila Ríos", "Santiago Pérez", "Valentina Cruz"];
 const FAKE_TIMES   = ["hoy 3:00 pm", "mañana 10:00 am", "hoy 5:30 pm", "el sábado 11:00 am"];
@@ -82,17 +83,7 @@ export default function PushNowScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Notificación al vuelo</Text>
-            <Text style={s.headerSub}>Para el día del salto 🪂</Text>
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Evento especial" title="Notificación al vuelo" subtitle="Para el día del salto 🪂" onBack={() => router.back()} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>

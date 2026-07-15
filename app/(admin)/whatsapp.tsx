@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { fmtPhone, fmtDateCompact } from "@/lib/format";
@@ -251,20 +252,7 @@ export default function WhatsappScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Campañas WhatsApp</Text>
-            <Text style={s.headerSub}>Mensajes masivos personalizados</Text>
-          </View>
-          <View style={[s.backBtn, { backgroundColor: "rgba(255,255,255,.18)" }]}>
-            <Ionicons name="logo-whatsapp" size={20} color="white" />
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Marketing" title="Campañas WhatsApp" subtitle="Mensajes masivos personalizados" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

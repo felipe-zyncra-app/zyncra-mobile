@@ -14,6 +14,7 @@ import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmt12 } from "@/lib/format";
 import ManualSaleModal from "@/components/ManualSaleModal";
+import { MonoTag } from "@/components/ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,8 @@ function PaymentModal({ appt, onConfirm, onClose }: {
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={pm.header}>
+        <View style={[pm.header, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={pm.headerRow}>
             <TouchableOpacity onPress={onClose} style={pm.closeBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -98,7 +100,7 @@ function PaymentModal({ appt, onConfirm, onClose }: {
               <Text style={pm.totalVal}>{price > 0 ? fmtMoneyFull(price) : "—"}</Text>
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
         <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 120 }}>
           <Text style={pm.sectionLabel}>¿Cómo pagó el cliente?</Text>
@@ -384,46 +386,32 @@ export default function PosScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerBlob1} />
-        <View style={s.headerBlob2} />
-
-        <View style={s.headerTopRow}>
-          <View style={s.headerIconBox}>
-            <Ionicons name="card" size={16} color="white" />
+      {/* Header compacto */}
+      <View style={s.header}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <MonoTag>Cobros</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]}>Gestión de pagos</Text>
+          <View style={[s.dateNav, { backgroundColor: t.chipBg, borderColor: t.line }]}>
+            <TouchableOpacity onPress={() => setDate(d => addDays(d, -1))} style={s.navBtn}>
+              <Ionicons name="chevron-back" size={14} color={t.muted} />
+            </TouchableOpacity>
+            <Text style={[s.dateLabel, { color: t.ink }]}>{dateLabel}</Text>
+            <TouchableOpacity onPress={() => setDate(d => addDays(d, 1))} style={s.navBtn} disabled={isToday}>
+              <Ionicons name="chevron-forward" size={14} color={isToday ? t.subtle : t.muted} />
+            </TouchableOpacity>
           </View>
-          <Text style={s.headerLabel}>Cobros</Text>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={s.headerActionBtn} onPress={() => router.push("/(admin)/pos-history" as any)} activeOpacity={0.8}>
-            <Ionicons name="time-outline" size={17} color="white" />
+        </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TouchableOpacity style={[s.headerActionBtn, { backgroundColor: t.chipBg, borderColor: t.line }]} onPress={() => router.push("/(admin)/pos-history" as any)} activeOpacity={0.7}>
+            <Ionicons name="time-outline" size={17} color={t.ink} />
           </TouchableOpacity>
-          <TouchableOpacity style={s.headerActionBtn} onPress={() => setShowManual(true)} activeOpacity={0.8}>
-            <Ionicons name="add" size={20} color="white" />
+          <TouchableOpacity onPress={() => setShowManual(true)} activeOpacity={0.85} style={{ borderRadius: 18, overflow: "hidden" }}>
+            <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.addBtn}>
+              <Ionicons name="add" size={20} color="white" />
+            </LinearGradient>
           </TouchableOpacity>
         </View>
-
-        <View style={s.headerHeroRow}>
-          <View>
-            <Text style={s.headerTitle}>Gestión de pagos</Text>
-            <View style={s.dateNav}>
-              <TouchableOpacity onPress={() => setDate(d => addDays(d, -1))} style={s.navBtn}>
-                <Ionicons name="chevron-back" size={14} color="white" />
-              </TouchableOpacity>
-              <Text style={s.dateLabel}>{dateLabel}</Text>
-              <TouchableOpacity onPress={() => setDate(d => addDays(d, 1))} style={s.navBtn} disabled={isToday}>
-                <Ionicons name="chevron-forward" size={14} color={isToday ? "rgba(255,255,255,.3)" : "white"} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          {cobrado > 0 && (
-            <View style={s.headerAmountBox}>
-              <Text style={s.headerAmountLabel}>Cobrado</Text>
-              <Text style={s.headerAmountValue}>{fmtMoneyFull(cobrado)}</Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient>
+      </View>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -437,7 +425,8 @@ export default function PosScreen() {
           {/* ── Revenue hero ── */}
           <Animated.View entering={FadeInDown.duration(350)} style={{ padding: 20, paddingBottom: 0, gap: 12 }}>
             <View style={[s.heroCard, Shadow.md]}>
-              <LinearGradient colors={["#1a1a2e", "#16213e"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.heroGrad}>
+              <View style={[s.heroGrad, { backgroundColor: "#0C0C14" }]}>
+                <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.heroLabel}>Total cobrado</Text>
                   <Text style={s.heroValue}>{cobrado > 0 ? fmtMoneyFull(cobrado) : "—"}</Text>
@@ -450,7 +439,7 @@ export default function PosScreen() {
                     <Text style={s.projectedSub}>{pendingAppts.length} cita{pendingAppts.length !== 1 ? "s" : ""}</Text>
                   </View>
                 )}
-              </LinearGradient>
+              </View>
             </View>
 
             {/* Payment breakdown */}
@@ -600,21 +589,13 @@ export default function PosScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  header:          { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 18, overflow: "hidden" },
-  headerBlob1:     { position: "absolute", width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,.06)", top: -80, right: -40 },
-  headerBlob2:     { position: "absolute", width: 100, height: 100, borderRadius: 50, backgroundColor: "rgba(0,0,0,.05)", bottom: -30, left: -20 },
-  headerTopRow:    { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, position: "relative", zIndex: 1 },
-  headerIconBox:   { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
-  headerLabel:     { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.8)" },
-  headerActionBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", marginLeft: 6 },
-  headerHeroRow:   { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", position: "relative", zIndex: 1 },
-  headerTitle:     { fontSize: 20, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.4, marginBottom: 10 },
-  dateNav:         { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,.14)", borderRadius: Radius.full, paddingVertical: 6, paddingHorizontal: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
+  header:          { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
+  headerTitle:     { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, marginTop: 3, marginBottom: 10 },
+  headerActionBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  addBtn:          { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  dateNav:         { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: Radius.full, paddingVertical: 6, paddingHorizontal: 8, borderWidth: 1, alignSelf: "flex-start" },
   navBtn:          { padding: 2 },
-  dateLabel:       { fontSize: 12, fontFamily: "SpaceGrotesk_700Bold", color: "white", minWidth: 36, textAlign: "center" },
-  headerAmountBox: { backgroundColor: "rgba(255,255,255,.15)", borderRadius: Radius.lg, paddingVertical: 10, paddingHorizontal: 14, alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
-  headerAmountLabel:{ fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.65)", textTransform: "uppercase", letterSpacing: 0.5 },
-  headerAmountValue:{ fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white", marginTop: 2 },
+  dateLabel:       { fontSize: 12, fontFamily: "SpaceGrotesk_700Bold", minWidth: 36, textAlign: "center" },
 
   heroCard:       { borderRadius: Radius.xl, overflow: "hidden" },
   heroGrad:       { flexDirection: "row", alignItems: "center", padding: 22, gap: 16 },

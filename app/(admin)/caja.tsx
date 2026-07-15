@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmtTime, fmtDateFull } from "@/lib/format";
 
@@ -168,20 +169,7 @@ export default function CajaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Sistema de Caja</Text>
-            <Text style={s.headerSub}>Control de ingresos y egresos</Text>
-          </View>
-          <View style={s.backBtn}>
-            <Ionicons name="cash-outline" size={20} color="white" />
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Ventas" title="Sistema de Caja" subtitle="Control de ingresos y egresos" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

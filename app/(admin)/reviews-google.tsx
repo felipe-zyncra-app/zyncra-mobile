@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtPhone, fmtDateFull } from "@/lib/format";
 
@@ -153,20 +154,7 @@ export default function GoogleReviewsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Reseñas Google</Text>
-            <Text style={s.headerSub}>Solicita reseñas a tus clientes</Text>
-          </View>
-          <View style={s.backBtn}>
-            <Ionicons name="star" size={18} color="white" />
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Marketing" title="Reseñas Google" subtitle="Solicita reseñas a tus clientes" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

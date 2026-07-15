@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { Config } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
 import { fmtDateFull } from "@/lib/format";
@@ -124,22 +125,12 @@ export default function SiteReviewsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Reseñas del sitio</Text>
-            <Text style={s.headerSub}>Gestiona las opiniones de tus clientes</Text>
-          </View>
-          {pending.length > 0 && (
-            <View style={s.pendingBadge}>
-              <Text style={s.pendingBadgeText}>{pending.length}</Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Marketing"
+        title="Reseñas del negocio"
+        subtitle={pending.length > 0 ? `${pending.length} por moderar` : "Gestiona las opiniones de tus clientes"}
+        onBack={() => router.back()}
+      />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

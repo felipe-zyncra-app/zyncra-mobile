@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
+import { ScreenHeader } from "@/components/ui";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmt12Hour } from "@/lib/format";
@@ -137,17 +138,12 @@ export default function ScheduleScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Horario de atencion</Text>
-            <Text style={s.headerSub}>{openCount} dia{openCount !== 1 ? "s" : ""} activo{openCount !== 1 ? "s" : ""}</Text>
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Negocio"
+        title="Horario de atencion"
+        subtitle={`${openCount} dia${openCount !== 1 ? "s" : ""} activo${openCount !== 1 ? "s" : ""}`}
+        onBack={() => router.back()}
+      />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>

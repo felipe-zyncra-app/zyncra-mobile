@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull } from "@/lib/format";
 
@@ -110,26 +111,16 @@ export default function PosHistoryScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.iconBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Historial de Cobros</Text>
-          <View style={{ width: 36 }} />
-        </View>
-        <View style={s.monthNav}>
-          <TouchableOpacity onPress={() => setMonth(m => addMonths(m, -1))} style={s.navBtn}>
-            <Ionicons name="chevron-back" size={18} color="white" />
-          </TouchableOpacity>
-          <Text style={s.monthLabel}>{monthLabel}</Text>
-          <TouchableOpacity onPress={() => setMonth(m => addMonths(m, 1))} style={s.navBtn} disabled={isCurrentMonth}>
-            <Ionicons name="chevron-forward" size={18} color={isCurrentMonth ? "rgba(255,255,255,.3)" : "white"} />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Ventas" title="Historial de Cobros" onBack={() => router.back()} />
+      <View style={[s.monthNav, { backgroundColor: t.chipBg, borderColor: t.line }]}>
+        <TouchableOpacity onPress={() => setMonth(m => addMonths(m, -1))} style={s.navBtn}>
+          <Ionicons name="chevron-back" size={18} color={t.muted} />
+        </TouchableOpacity>
+        <Text style={[s.monthLabel, { color: t.ink }]}>{monthLabel}</Text>
+        <TouchableOpacity onPress={() => setMonth(m => addMonths(m, 1))} style={s.navBtn} disabled={isCurrentMonth}>
+          <Ionicons name="chevron-forward" size={18} color={isCurrentMonth ? t.subtle : t.muted} />
+        </TouchableOpacity>
+      </View>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -234,7 +225,7 @@ const s = StyleSheet.create({
   headerRow:    { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
   headerTitle:  { fontSize: 20, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.4 },
   iconBtn:      { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.10)", alignItems: "center", justifyContent: "center" },
-  monthNav:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16 },
+  monthNav:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, alignSelf: "center", borderRadius: 999, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 14, marginTop: 4, marginBottom: 4 },
   navBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center" },
   monthLabel:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", color: "white", minWidth: 160, textAlign: "center", textTransform: "capitalize" },
 
