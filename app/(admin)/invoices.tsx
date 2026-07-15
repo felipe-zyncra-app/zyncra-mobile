@@ -270,7 +270,7 @@ export default function InvoicesScreen() {
   // ── Settings tab ──────────────────────────────────────────────────────────
 
   const renderSettings = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       <Text style={[s.sectionTitle, { color: t.subtle }]}>Credenciales Factus</Text>
       <View style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
         <Text style={[s.hint, { color: t.muted }]}>
@@ -369,7 +369,7 @@ export default function InvoicesScreen() {
   // ── Nueva factura tab ─────────────────────────────────────────────────────
 
   const renderNueva = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
       <Text style={[s.sectionTitle, { color: t.subtle }]}>Datos del Cliente</Text>
       <View style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
         <Text style={[s.fieldLabel, { color: t.subtle }]}>Tipo de documento</Text>

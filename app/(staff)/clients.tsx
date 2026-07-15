@@ -114,7 +114,7 @@ function ClientModal({ client, proId, onClose }: {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           {/* Stats */}
           <View style={[cm.statsRow, Shadow.sm]}>
             <View style={cm.statBox}>

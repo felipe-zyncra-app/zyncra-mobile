@@ -167,8 +167,8 @@ export default function GoogleReviewsScreen() {
 
       {/* ── CONFIGURACIÓN ── */}
       {tab === "config" && (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
             <Animated.View entering={FadeInDown.duration(350)}>
 
               {/* How-to */}
@@ -223,7 +223,7 @@ export default function GoogleReviewsScreen() {
 
       {/* ── SOLICITAR RESEÑA ── */}
       {tab === "solicitar" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <Animated.View entering={FadeInDown.duration(350)}>
 
             {sentOk && (
@@ -258,7 +258,7 @@ export default function GoogleReviewsScreen() {
               <Animated.View entering={FadeInDown.duration(300)}>
                 <Text style={[s.label, { marginTop: 24 }]}>Vista previa del mensaje</Text>
                 <View style={[s.preview, Shadow.sm]}>
-                  <ScrollView style={{ maxHeight: 180 }} scrollEnabled>
+                  <ScrollView automaticallyAdjustKeyboardInsets style={{ maxHeight: 180 }} scrollEnabled>
                     <Text style={s.previewText}>{buildMessage(selected)}</Text>
                   </ScrollView>
                 </View>
@@ -283,7 +283,7 @@ export default function GoogleReviewsScreen() {
 
       {/* ── HISTORIAL ── */}
       {tab === "historial" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           {loadingHist ? (
             <ActivityIndicator color={Colors.red} style={{ marginTop: 40 }} />
           ) : requests.length === 0 ? (

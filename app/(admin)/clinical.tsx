@@ -210,8 +210,8 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
             <ActivityIndicator color={Colors.red} size="large" />
           </View>
         ) : (
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
               {tab === "ficha" ? (
                 <>
                   <SectionLabel>Datos del paciente</SectionLabel>

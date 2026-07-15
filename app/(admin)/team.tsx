@@ -199,8 +199,8 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
           </View>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {/* Photo picker */}
             <TouchableOpacity style={s.photoPicker} onPress={pickPhoto} activeOpacity={0.8}>
               {(photoUri || pro?.avatar_url || pro?.photo_url) ? (
@@ -376,7 +376,7 @@ export default function TeamScreen() {
         rightAction={{ icon: "add", onPress: () => setModal({ visible: true, pro: null }) }}
       />
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ padding: 20, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       >

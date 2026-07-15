@@ -265,8 +265,8 @@ export default function WhatsappScreen() {
 
       {/* ── NUEVA CAMPAÑA ── */}
       {tab === "nueva" && (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
             <Animated.View entering={FadeInDown.duration(350)}>
 
               {/* Name */}
@@ -388,7 +388,7 @@ export default function WhatsappScreen() {
 
       {/* ── PLANTILLAS ── */}
       {tab === "plantillas" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           {templates.length === 0 ? (
             <Animated.View entering={FadeInDown.duration(350)} style={[s.emptyCard, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <Text style={{ fontSize: 32, marginBottom: 10 }}>📝</Text>
@@ -422,7 +422,7 @@ export default function WhatsappScreen() {
 
       {/* ── HISTORIAL ── */}
       {tab === "historial" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           {campaigns.length === 0 ? (
             <Animated.View entering={FadeInDown.duration(350)} style={[s.emptyCard, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <Text style={{ fontSize: 32, marginBottom: 10 }}>📣</Text>
@@ -475,7 +475,7 @@ export default function WhatsappScreen() {
 
       {/* ── BOT IA ── */}
       {tab === "bot" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           <Animated.View entering={FadeInDown.duration(350)}>
             <View style={[s.botRow, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <View style={{ flex: 1 }}>
@@ -521,7 +521,7 @@ export default function WhatsappScreen() {
 
       {/* ── CONVERSACIONES ── */}
       {tab === "conversaciones" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           {convoLoading ? (
             <ActivityIndicator color={Colors.red} style={{ marginTop: 40 }} />
           ) : conversations.length === 0 ? (

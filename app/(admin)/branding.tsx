@@ -248,7 +248,7 @@ export default function BrandingScreen() {
         />
       </View>
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={s.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}

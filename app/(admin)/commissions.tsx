@@ -347,7 +347,7 @@ export default function CommissionsScreen() {
   // ── Render tabs ─────────────────────────────────────────────────────────────
 
   const renderResumen = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       {/* Period selector */}
       <View style={s.periodRow}>
         {(["week", "month", "custom"] as Period[]).map((p) => (
@@ -460,7 +460,7 @@ export default function CommissionsScreen() {
   );
 
   const renderReglas = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       <Text style={s.hint}>
         Define cómo se calcula la comisión de cada profesional. Sin regla → comisión $0.
       </Text>
@@ -517,7 +517,7 @@ export default function CommissionsScreen() {
     return (
     <View style={{ flex: 1 }}>
       {professionals.length > 1 && (
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 10, gap: 8, flexDirection: "row" }}

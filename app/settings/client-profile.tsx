@@ -112,8 +112,8 @@ function EditModal({ visible, client, onClose, onSaved }: {
           </View>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {[
               { label: "Nombre completo *", value: name, set: setName, placeholder: "Ej: Juan García", cap: "words" as const },
               { label: "Teléfono *", value: phone, set: setPhone, placeholder: "3001234567", kb: "phone-pad" as const },
@@ -207,8 +207,8 @@ function FieldsModal({ visible, fields, values, clientId, onClose, onSaved }: {
           </View>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {fields.map(field => (
               <View key={field.id} style={fm.field}>
                 <Text style={fm.fieldLabel}>{field.name}{field.required ? " *" : ""}</Text>
@@ -225,7 +225,7 @@ function FieldsModal({ visible, fields, values, clientId, onClose, onSaved }: {
                   </View>
 
                 ) : field.type === "select" && field.options ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+                  <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       {field.options.map(opt => {
                         const active = draft[field.id] === opt;
@@ -403,7 +403,7 @@ export default function ClientProfileScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+      <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
         {/* Stats */}
         <Animated.View entering={FadeInDown.delay(0).duration(340)}>
           <View style={[s.statsCard, Shadow.sm]}>

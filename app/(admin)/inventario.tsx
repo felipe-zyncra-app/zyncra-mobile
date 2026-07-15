@@ -358,7 +358,7 @@ export default function InventarioScreen() {
 
       {/* Tab content */}
       {tab === "productos" ? (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           {filtered.length === 0 ? (
             <View style={s.emptyState}>
               <View style={s.emptyIcon}>
@@ -416,7 +416,7 @@ export default function InventarioScreen() {
           )}
         </ScrollView>
       ) : (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           <View style={s.card}>
             {movements.length === 0 ? (
               <Text style={s.emptySub}>Sin movimientos registrados.</Text>
@@ -455,7 +455,7 @@ export default function InventarioScreen() {
       {/* ── Modal: Create/Edit product ── */}
       <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
             {/* Modal header */}
             <View style={s.mHeader}>
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mAccent} />
@@ -468,7 +468,7 @@ export default function InventarioScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
               {/* SKU + Name */}
               <View style={s.mRow}>
                 <View style={{ width: 120 }}>
@@ -580,7 +580,7 @@ export default function InventarioScreen() {
       {/* ── Modal: Adjust stock ── */}
       <Modal visible={showAdjust} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAdjust(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
             <View style={s.mHeader}>
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mAccent} />
               <View style={[s.mIconBox, { backgroundColor: "rgba(99,102,241,0.12)" }]}>
@@ -595,7 +595,7 @@ export default function InventarioScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
               {adjustTarget && (
                 <View style={s.currentStockBox}>
                   <Text style={s.fieldLabel}>STOCK ACTUAL</Text>

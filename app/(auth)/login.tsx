@@ -56,7 +56,7 @@ export default function LoginScreen() {
   }, [role]);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1 }}>
       <StatusBar style="light" />
 
       <View style={s.bg}>
@@ -69,7 +69,7 @@ export default function LoginScreen() {
         <View style={[s.corner, s.cornerTL]} />
         <View style={[s.corner, s.cornerBR]} />
 
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>

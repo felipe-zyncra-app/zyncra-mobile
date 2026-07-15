@@ -171,7 +171,7 @@ export default function RegisterScreen() {
   const progress = Math.min((step - 1) / 4, 1);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1 }}>
       {/* ── Header ── */}
       <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={c.header}>
         <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
@@ -193,7 +193,7 @@ export default function RegisterScreen() {
       </LinearGradient>
 
       {/* ── Body ── */}
-      <ScrollView style={{ flex: 1, backgroundColor: Colors.cream }}
+      <ScrollView automaticallyAdjustKeyboardInsets style={{ flex: 1, backgroundColor: Colors.cream }}
         contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
         keyboardShouldPersistTaps="handled">
 

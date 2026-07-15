@@ -142,8 +142,8 @@ export default function HannaScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60, gap: 16 }} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60, gap: 16 }} showsVerticalScrollIndicator={false}>
 
             {/* Identidad + uso */}
             <Animated.View entering={FadeInDown.duration(350)}>

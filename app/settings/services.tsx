@@ -127,8 +127,8 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
             }
           </View>
         </View>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Field label="Nombre del servicio *" value={name} onChangeText={setName} placeholder="Ej: Corte de cabello" />
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
@@ -190,7 +190,7 @@ export default function ServicesScreen() {
         rightAction={{ icon: "add", onPress: () => setModal({ visible: true, service: null }) }}
       />
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ padding: 20, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       >

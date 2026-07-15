@@ -108,7 +108,7 @@ function RescheduleModal({ appt, tenantId, onClose, onSaved }: {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 24, gap: 20 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 24, gap: 20 }}>
           <View>
             <Text style={[rm.fieldLabel, { color: t.muted }]}>Nueva fecha (YYYY-MM-DD)</Text>
             <TextInput
@@ -284,14 +284,14 @@ export default function UpcomingScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={{ paddingBottom: 40 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         >
           {/* Professional filter */}
           {professionals.length > 1 && (
             <Animated.View entering={FadeInDown.duration(300)}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.proFilter}>
+              <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.proFilter}>
                 <TouchableOpacity
                   style={[s.proChip, { backgroundColor: t.bgAlt, borderColor: t.border }, selectedPro === "all" && s.proChipActive]}
                   onPress={() => setSelectedPro("all")}

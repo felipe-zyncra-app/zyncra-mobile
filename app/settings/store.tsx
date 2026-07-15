@@ -237,8 +237,8 @@ export default function StoreScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
             {/* ── Booking link card ──────────────────────────────────── */}
             <Animated.View entering={FadeInDown.delay(60).duration(400)} style={[s.linkCard, Shadow.md]}>

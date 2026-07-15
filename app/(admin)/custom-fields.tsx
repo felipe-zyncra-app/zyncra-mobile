@@ -292,7 +292,7 @@ export default function CustomFieldsScreen() {
   // ── Render Values tab ─────────────────────────────────────────────────────
 
   const renderValues = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       <TouchableOpacity style={[s.clientSelector, Shadow.sm]} onPress={() => setClientPicker(true)}>
         <Ionicons name="person-outline" size={18} color={Colors.muted} />
         <Text style={[s.clientSelectorTxt, selectedClient && { color: Colors.text }]}>
@@ -328,7 +328,7 @@ export default function CustomFieldsScreen() {
                         thumbColor="white"
                       />
                     ) : f.field_type === "select" ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                      <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                         <View style={{ flexDirection: "row", gap: 8 }}>
                           {f.options.map(opt => (
                             <TouchableOpacity
@@ -390,7 +390,7 @@ export default function CustomFieldsScreen() {
       {/* Create/Edit Modal */}
       <Modal visible={modal} animationType="slide" transparent>
         <View style={m.overlay}>
-          <ScrollView contentContainerStyle={m.sheetScroll} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={m.sheetScroll} keyboardShouldPersistTaps="handled">
             <View style={m.sheet}>
               <View style={m.handle} />
               <Text style={m.title}>{editing ? "Editar campo" : "Nuevo campo personalizado"}</Text>

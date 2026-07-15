@@ -80,8 +80,8 @@ export default function RemindersScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Animated.View entering={FadeInDown.duration(350)}>
 
               {/* Hours before */}

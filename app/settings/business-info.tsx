@@ -65,8 +65,8 @@ export default function BusinessInfoScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Animated.View entering={FadeInDown.duration(350)}>
               <FormField label="Nombre del negocio *" value={name} onChangeText={setName} placeholder="Ej: Salón Bella" />
               <FormField label="Teléfono / WhatsApp" value={phone} onChangeText={setPhone} placeholder="Ej: 3001234567" keyboardType="phone-pad" />

@@ -345,8 +345,8 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
           </View>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
             {Object.entries(bySupplier).map(([sid, group]) => (
               <View key={sid} style={{ marginBottom: 16 }}>
                 <SectionLabel>{group.name}</SectionLabel>

@@ -70,8 +70,8 @@ function LocationModal({ location, tenantId, onClose, onSaved }: {
           </View>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {([["name", "Nombre de la sede *", "Ej: Sede Norte", "default"], ["address", "Dirección", "Calle 00 # 00-00", "default"], ["phone", "Teléfono", "3001234567", "phone-pad"]] as const).map(([key, label, ph, kb]) => (
               <View key={key} style={{ marginBottom: 16 }}>
                 <Text style={[m.fieldLabel, { color: t.subtle }]}>{label}</Text>
@@ -160,7 +160,7 @@ export default function LocationsScreen() {
         rightAction={{ icon: "add", onPress: () => setModal({ visible: true, location: null }) }}
       />
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
