@@ -21,7 +21,7 @@ import ErrorState from "@/components/ErrorState";
 
 type DayConfig = { enabled: boolean; start: string; end: string };
 type ProSchedule = { mon: DayConfig; tue: DayConfig; wed: DayConfig; thu: DayConfig; fri: DayConfig; sat: DayConfig; sun: DayConfig };
-type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; schedule?: any };
+type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; avatar_url: string | null; schedule?: any };
 
 const DAYS: { key: keyof ProSchedule; label: string }[] = [
   { key: "mon", label: "Lun" }, { key: "tue", label: "Mar" }, { key: "wed", label: "Mié" },
@@ -131,7 +131,8 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       if (isEdit) {
         if (photoUri) {
           const url = await uploadPhoto(pro!.id);
-          if (url) payload.photo_url = url;
+          // Escribe ambas columnas para que la foto se vea también en el portal web (avatar_url)
+          if (url) { payload.photo_url = url; payload.avatar_url = url; }
         }
         await supabase.from("professionals").update(payload).eq("id", pro!.id);
       } else {
@@ -139,7 +140,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
           .from("professionals").insert({ ...payload, tenant_id: tenantId }).select("id").single();
         if (inserted && photoUri) {
           const url = await uploadPhoto(inserted.id);
-          if (url) await supabase.from("professionals").update({ photo_url: url }).eq("id", inserted.id);
+          if (url) await supabase.from("professionals").update({ photo_url: url, avatar_url: url }).eq("id", inserted.id);
         }
       }
       onSaved(); onClose();
@@ -202,8 +203,8 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {/* Photo picker */}
             <TouchableOpacity style={s.photoPicker} onPress={pickPhoto} activeOpacity={0.8}>
-              {(photoUri || pro?.photo_url) ? (
-                <Image source={{ uri: photoUri ?? pro?.photo_url! }} style={s.photoImg} />
+              {(photoUri || pro?.avatar_url || pro?.photo_url) ? (
+                <Image source={{ uri: photoUri ?? pro?.avatar_url ?? pro?.photo_url! }} style={s.photoImg} />
               ) : (
                 <View style={s.photoPlaceholder}>
                   <Text style={s.photoInitials}>
@@ -343,7 +344,7 @@ export default function TeamScreen() {
     setError(false);
     try {
       const { data } = await supabase.from("professionals")
-        .select("id, name, role, is_active, user_id, email, photo_url, schedule")
+        .select("id, name, role, is_active, user_id, email, photo_url, avatar_url, schedule")
         .eq("tenant_id", tenantId).order("name");
       setPros(data ?? []);
     } catch {
@@ -393,7 +394,7 @@ export default function TeamScreen() {
                 onPress={() => setModal({ visible: true, pro: p })}
                 activeOpacity={0.75}
               >
-                <Avatar name={p.name} photoUrl={p.photo_url} size={52} color={Colors.red} />
+                <Avatar name={p.name} photoUrl={p.avatar_url ?? p.photo_url} size={52} color={Colors.red} />
                 <View style={{ flex: 1 }}>
                   <Text style={[s.name, { color: t.text }]}>{p.name}</Text>
                   <Text style={[s.role, { color: t.muted }]}>{p.role}</Text>
