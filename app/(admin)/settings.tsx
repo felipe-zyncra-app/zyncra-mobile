@@ -33,6 +33,7 @@ const SECTIONS: {
   {
     title: "Marketing",
     items: [
+      { icon: "sparkles-outline",     color: "#a855f7",     label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp",   route: "/(admin)/hanna" },
       { icon: "logo-whatsapp",        color: "#25D366",     label: "Marketing WhatsApp",  sub: "Campañas y mensajes masivos",          route: "/(admin)/whatsapp" },
       { icon: "star-outline",         color: "#f59e0b",     label: "Reseñas Google",      sub: "Solicita reseñas a tus clientes",      route: "/(admin)/reviews-google" },
       { icon: "chatbubbles-outline",  color: Colors.blue,   label: "Reseñas del negocio", sub: "Modera las opiniones de tu negocio",   route: "/(admin)/reviews-site" },
@@ -49,12 +50,25 @@ const SECTIONS: {
     ],
   },
   {
+    title: "Compras",
+    items: [
+      { icon: "cart-outline", color: "#0ea5e9", label: "Proveedores", sub: "Catálogo mayorista y pedidos", route: "/(admin)/proveedores" },
+    ],
+  },
+  {
+    title: "Clientes",
+    items: [
+      { icon: "pulse-outline", color: "#0ea5e9", label: "Historias Clínicas", sub: "Fichas y evoluciones de pacientes", route: "/(admin)/clinical" },
+    ],
+  },
+  {
     title: "Negocio",
     items: [
       { icon: "storefront-outline", color: Colors.red,   label: "Mi Tienda",             sub: "Personalización y link de reservas",  route: "/settings/store" },
       { icon: "time-outline",       color: "#f59e0b",    label: "Horario de atención",   sub: "Días y horas disponibles",            route: "/settings/schedule" },
       { icon: "cut-outline",        color: "#8b5cf6",    label: "Servicios",             sub: "Gestiona tu catálogo de precios",     route: "/settings/services" },
       { icon: "people-outline",     color: Colors.blue,  label: "Equipo",                sub: "Profesionales y permisos",            route: "/settings/team" },
+      { icon: "location-outline",   color: "#10b981",    label: "Sedes",                 sub: "Ubicaciones de tu negocio",           route: "/(admin)/locations" },
       { icon: "options-outline",    color: "#8b5cf6",    label: "Campos Personalizados", sub: "Datos extra para clientes y citas",   route: "/(admin)/custom-fields" },
     ],
   },

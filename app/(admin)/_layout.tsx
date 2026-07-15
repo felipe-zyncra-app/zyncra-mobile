@@ -114,6 +114,10 @@ export default function AdminLayout() {
       <Tabs.Screen name="reports"          options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="pos-history"     options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="push-now"        options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="clinical"        options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="locations"       options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="proveedores"     options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="hanna"           options={{ tabBarButton: () => null }} />
     </Tabs>
   );
 }

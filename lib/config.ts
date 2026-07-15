@@ -10,6 +10,7 @@ export const Config = {
   },
   api: {
     factus: "https://zyncra.app/api/factus",
+    hannaCampaigns: "https://zyncra.app/api/admin/hanna-campaigns",
   },
   urls: {
     booking: "https://zyncra.app/book/",
