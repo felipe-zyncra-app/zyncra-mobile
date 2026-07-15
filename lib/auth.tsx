@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (session && role === "admin" && inStaff) {
-      router.replace("/(admin)");
+      router.replace("/(admin)/(tabs)");
       return;
     }
   }, [session, role, loading, segments]);

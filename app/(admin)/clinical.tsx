@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
@@ -79,6 +79,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
   onClose: () => void; onSaved: () => void;
 }) {
   const { t } = useTheme();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<"ficha" | "evolucion">("evolucion");
   const [record, setRecord] = useState<RecordRow | null>(null);
   const [entries, setEntries] = useState<EntryRow[]>([]);
@@ -180,8 +181,8 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }} edges={["top"]}>
-        <View style={[dm.header, { backgroundColor: "#0C0C14" }]}>
+      <View style={{ flex: 1, backgroundColor: t.canvas }}>
+        <View style={[dm.header, { backgroundColor: "#0C0C14", paddingTop: insets.top + 10 }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={dm.accent} />
           <View style={dm.headerRow}>
             <TouchableOpacity onPress={onClose} style={dm.iconBtn}>
@@ -359,7 +360,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
             </ScrollView>
           </KeyboardAvoidingView>
         )}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -454,12 +455,11 @@ export default function ClinicalScreen() {
                 return (
                   <TouchableOpacity
                     key={v.key}
-                    style={[dm.vertChip, { backgroundColor: t.cardSolid, borderColor: active ? Colors.blue : t.line }]}
+                    style={[dm.vertChip, { backgroundColor: active ? Colors.blue + "10" : t.cardSolid, borderColor: active ? Colors.blue : t.line }]}
                     onPress={() => saveVertical(v.key)}
                     activeOpacity={0.8}
                   >
-                    <Text style={[dm.vertLabel, { color: active ? Colors.blue : t.ink }]}>{v.label}</Text>
-                    <Text style={[dm.vertDesc, { color: t.subtle }]}>{v.desc}</Text>
+                    <Text style={[dm.vertLabel, { color: active ? Colors.blue : t.ink }]} numberOfLines={2}>{v.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -603,9 +603,8 @@ const dm = StyleSheet.create({
 
   // Lista
   vertRow:    { flexDirection: "row", gap: 8, marginBottom: 18 },
-  vertChip:   { flex: 1, borderWidth: 1.5, borderRadius: Radius.md, padding: 11 },
-  vertLabel:  { fontSize: 12.5, fontFamily: Fonts.bold },
-  vertDesc:   { fontSize: 10.5, fontFamily: Fonts.regular, marginTop: 2 },
+  vertChip:   { flex: 1, borderWidth: 1.5, borderRadius: Radius.md, paddingVertical: 12, paddingHorizontal: 8, minHeight: 52, alignItems: "center", justifyContent: "center" },
+  vertLabel:  { fontSize: 12.5, fontFamily: Fonts.bold, textAlign: "center", lineHeight: 16 },
   metricsRow: { flexDirection: "row", gap: 10, marginBottom: 18 },
   metricCard: { flex: 1, borderWidth: 1, borderRadius: Radius.md, padding: 13 },
   metricValue:{ fontSize: 22, fontFamily: Fonts.bold, letterSpacing: -0.6 },

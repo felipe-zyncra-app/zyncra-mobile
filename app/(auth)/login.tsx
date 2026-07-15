@@ -51,7 +51,7 @@ export default function LoginScreen() {
   };
 
   useEffect(() => {
-    if (role === "admin") router.replace("/(admin)");
+    if (role === "admin") router.replace("/(admin)/(tabs)");
     else if (role === "staff") router.replace("/(staff)/agenda");
   }, [role]);
 

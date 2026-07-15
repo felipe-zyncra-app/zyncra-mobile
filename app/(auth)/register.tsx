@@ -351,7 +351,7 @@ export default function RegisterScreen() {
             </LinearGradient>
 
             <View style={{ width: "100%", marginTop: 20 }}>
-              <GradientBtn label="Ir a mi panel →" onPress={() => router.replace("/(admin)")} />
+              <GradientBtn label="Ir a mi panel →" onPress={() => router.replace("/(admin)/(tabs)")} />
             </View>
             <Text style={{ marginTop: 16, color: Colors.subtle, fontSize: 12, fontFamily: "SpaceGrotesk_400Regular" }}>
               14 días gratis · Sin tarjeta de crédito
