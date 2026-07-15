@@ -41,6 +41,8 @@ const SECTIONS: {
   {
     title: "Ventas",
     items: [
+      { icon: "stats-chart-outline",   color: Colors.red,     label: "Módulo Financiero",   sub: "Ingresos, egresos y balance",    route: "/(admin)/finanzas" },
+      { icon: "cube-outline",          color: "#8b5cf6",      label: "Inventario",          sub: "Productos, stock y valor",       route: "/(admin)/inventario" },
       { icon: "wallet-outline",        color: Colors.success, label: "Sistema de Caja",     sub: "Control de ingresos y egresos",  route: "/(admin)/caja" },
       { icon: "ribbon-outline",        color: "#f59e0b",      label: "Comisiones",          sub: "Paga a tu equipo de trabajo",    route: "/(admin)/commissions" },
       { icon: "document-text-outline", color: Colors.blue,    label: "Factura Electrónica", sub: "Emite facturas DIAN vía Factus", route: "/(admin)/invoices" },
