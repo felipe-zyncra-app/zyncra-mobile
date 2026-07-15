@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Fonts, Gradients, Shadow } from "@/constants/theme";
+import HannaFab from "@/components/HannaFab";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -71,15 +72,19 @@ const s = StyleSheet.create({
 
 export default function AdminTabsLayout() {
   return (
-    <Tabs
-      tabBar={(props) => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
-    >
-      <Tabs.Screen name="index"    options={{ title: "Panel" }} />
-      <Tabs.Screen name="agenda"   options={{ title: "Agenda" }} />
-      <Tabs.Screen name="clients"  options={{ title: "Clientes" }} />
-      <Tabs.Screen name="pos"      options={{ title: "Cobros" }} />
-      <Tabs.Screen name="settings" options={{ title: "Ajustes" }} />
-    </Tabs>
+    <View style={{ flex: 1 }}>
+      <Tabs
+        tabBar={(props) => <CustomTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
+      >
+        <Tabs.Screen name="index"    options={{ title: "Panel" }} />
+        <Tabs.Screen name="agenda"   options={{ title: "Agenda" }} />
+        <Tabs.Screen name="clients"  options={{ title: "Clientes" }} />
+        <Tabs.Screen name="pos"      options={{ title: "Cobros" }} />
+        <Tabs.Screen name="settings" options={{ title: "Ajustes" }} />
+      </Tabs>
+      {/* Copiloto Hanna — flotante sobre todas las pestañas */}
+      <HannaFab />
+    </View>
   );
 }

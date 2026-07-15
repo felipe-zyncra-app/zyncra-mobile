@@ -18,6 +18,12 @@ const SECTIONS: {
   items: { icon: IoniconName; color: string; label: string; sub: string; route: string }[];
 }[] = [
   {
+    title: "Soporte",
+    items: [
+      { icon: "help-buoy-outline", color: Colors.blue, label: "Centro de ayuda", sub: "Guías paso a paso para usar Zyncra", route: "/(admin)/help" },
+    ],
+  },
+  {
     title: "Evento especial",
     items: [
       { icon: "airplane-outline", color: Colors.red, label: "Enviar notificación ahora", sub: "Botones rápidos para el salto en paracaídas 🪂", route: "/(admin)/push-now" },
