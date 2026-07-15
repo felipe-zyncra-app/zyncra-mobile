@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 import { Colors, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { fmt12Hour } from "@/lib/format";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 import BottomSaveBar from "@/components/BottomSaveBar";
 
 const DAYS = [
@@ -137,7 +137,8 @@ export default function ScheduleScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader
+      <ScreenHeader
+        crumb="Negocio"
         title="Horario de atencion"
         subtitle={`${openCount} dia${openCount !== 1 ? "s" : ""} activo${openCount !== 1 ? "s" : ""}`}
         onBack={() => router.back()}

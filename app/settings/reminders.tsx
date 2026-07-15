@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 
 const HOUR_OPTIONS = [
   { value: 1,  label: "1h" },
@@ -102,11 +102,11 @@ export default function RemindersScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader
+      <ScreenHeader
+        crumb="Panel"
         title="Recordatorios"
         subtitle="Mensajes automáticos por WhatsApp"
         onBack={() => router.back()}
-        rightAction={{ icon: "logo-whatsapp", onPress: () => {} }}
       />
 
       {loading ? (

@@ -34,6 +34,8 @@ export const Fonts = {
   bold:     "SpaceGrotesk_700Bold",
   mono:     "JetBrainsMono_500Medium",
   monoBold: "JetBrainsMono_700Bold",
+  serif:       "InstrumentSerif_400Regular",
+  serifItalic: "InstrumentSerif_400Regular_Italic",
 };
 
 export const MonoLabel = {
@@ -73,6 +75,20 @@ export const Shadow = {
     shadowOpacity: 0.25,
     shadowRadius: 14,
     elevation: 6,
+  },
+};
+
+// Card sólida estilo portal web (.statCard/.listCard de admin.module.css):
+// blanco sobre lienzo claro, borde hairline, sombra mínima.
+export const CardStyle = {
+  base: {
+    borderRadius: 16,
+    borderWidth: 1,
+    shadowColor: "#14111C",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
 };
 

@@ -1,9 +1,8 @@
 ﻿import { Tabs, Redirect } from "expo-router";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import { Colors, Shadow, Glass } from "@/constants/theme";
-import { useTheme } from "@/lib/theme";
+import { LinearGradient } from "expo-linear-gradient";
+import { Colors, Fonts, Gradients, Shadow } from "@/constants/theme";
 import { useAuth } from "@/lib/auth";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
@@ -17,15 +16,17 @@ const TABS: { name: string; label: string; icon: IoniconName; iconFocused: Ionic
   { name: "settings", label: "Ajustes",  icon: "settings-outline", iconFocused: "settings" },
 ];
 
+// Pill de tinta oscura — eco de la sidebar del portal web (#0C0C14):
+// ítem activo con fondo blanco al 8%, ícono acento #ff5d54 y barra
+// de gradiente (adaptación de .navItem.active de admin.module.css).
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const currentRouteName = state.routes[state.index].name;
   const isSubScreen = !TABS.some(t => t.name === currentRouteName);
-  const { t: theme } = useTheme();
   if (isSubScreen) return null;
 
   return (
     <View style={s.wrapper}>
-      <BlurView tint={theme.blurTint} intensity={Glass.blurStrong.intensity} style={[s.bar, Shadow.md, { backgroundColor: theme.tabBarBg, borderColor: theme.tabBarBorder }]}>
+      <View style={[s.bar, Shadow.md]}>
         {state.routes.filter(r => TABS.some(t => t.name === r.name)).map((route) => {
           const focused = state.routes[state.index].name === route.name;
           const tab = TABS.find(t => t.name === route.name) ?? TABS[0];
@@ -37,40 +38,40 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               onPress={() => navigation.navigate(route.name)}
               activeOpacity={0.7}
             >
-              <View style={s.tabInner}>
-                {focused ? (
-                  <>
-                    <View style={s.iconBox}>
-                      <Ionicons name={tab.iconFocused} size={20} color="white" />
-                    </View>
-                    <Text style={s.labelFocused}>{tab.label}</Text>
-                  </>
-                ) : (
-                  <>
-                    <View style={s.iconBoxInactive}>
-                      <Ionicons name={tab.icon} size={20} color={theme.subtle} />
-                    </View>
-                    <Text style={[s.label, { color: theme.subtle }]}>{tab.label}</Text>
-                  </>
+              <View style={[s.tabInner, focused && s.tabInnerActive]}>
+                {focused && (
+                  <LinearGradient
+                    colors={Gradients.brand}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={s.accentBar}
+                  />
                 )}
+                <Ionicons
+                  name={focused ? tab.iconFocused : tab.icon}
+                  size={19}
+                  color={focused ? "#ff5d54" : "rgba(255,255,255,0.52)"}
+                />
+                <Text style={[s.label, focused ? s.labelActive : { color: "rgba(255,255,255,0.52)" }]}>
+                  {tab.label}
+                </Text>
               </View>
             </TouchableOpacity>
           );
         })}
-      </BlurView>
+      </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  wrapper:         { position: "absolute", bottom: 0, left: 0, right: 0, paddingBottom: 24, paddingHorizontal: 12 },
-  bar:             { backgroundColor: "rgba(255,255,255,0.55)", borderRadius: 22, flexDirection: "row", paddingVertical: 10, paddingHorizontal: 4, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.6)" },
-  tab:             { flex: 1, alignItems: "center" },
-  tabInner:        { alignItems: "center", gap: 4 },
-  iconBox:         { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.red },
-  iconBoxInactive: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  label:           { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle, textAlign: "center" },
-  labelFocused:    { fontSize: 10, fontFamily: "SpaceGrotesk_700Bold", color: Colors.red, textAlign: "center" },
+  wrapper:        { position: "absolute", bottom: 0, left: 0, right: 0, paddingBottom: 24, paddingHorizontal: 12 },
+  bar:            { backgroundColor: "#0C0C14", borderRadius: 22, flexDirection: "row", paddingVertical: 8, paddingHorizontal: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  tab:            { flex: 1, alignItems: "center" },
+  tabInner:       { alignItems: "center", gap: 3, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 12, overflow: "hidden" },
+  tabInnerActive: { backgroundColor: "rgba(255,255,255,0.08)" },
+  accentBar:      { position: "absolute", top: 0, left: "28%" as any, right: "28%" as any, height: 2.5, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
+  label:          { fontSize: 9.5, fontFamily: Fonts.semibold, textAlign: "center" },
+  labelActive:    { color: "white", fontFamily: Fonts.bold },
 });
 
 export default function AdminLayout() {

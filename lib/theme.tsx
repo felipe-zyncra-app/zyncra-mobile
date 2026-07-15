@@ -21,6 +21,14 @@ const LIGHT = {
   bottomBorder: "rgba(255,255,255,0.6)",
   tabBarBg:     "rgba(255,255,255,0.55)",
   tabBarBorder: "rgba(255,255,255,0.6)",
+  // ── Tokens estilo portal web (tinta sobre lienzo claro) ──
+  canvas:       "#F4F4F9",
+  cardSolid:    "#FFFFFF",
+  line:         "rgba(20,15,30,0.08)",
+  lineStrong:   "rgba(20,15,30,0.16)",
+  ink:          "#14111C",
+  chipBg:       "rgba(20,15,30,0.04)",
+  trackBg:      "rgba(20,15,30,0.06)",
   blurTint:     "light" as const,
   statusBar:    "dark" as const,
 };
@@ -43,6 +51,14 @@ const DARK = {
   bottomBorder: "rgba(255,255,255,0.08)",
   tabBarBg:     "rgba(22,22,31,0.75)",
   tabBarBorder: "rgba(255,255,255,0.08)",
+  // ── Tokens estilo portal web, mapeados sobre la sidebar oscura (#0C0C14) ──
+  canvas:       "#0D0D14",
+  cardSolid:    "#16161F",
+  line:         "rgba(255,255,255,0.08)",
+  lineStrong:   "rgba(255,255,255,0.16)",
+  ink:          "#F0EFF4",
+  chipBg:       "rgba(255,255,255,0.06)",
+  trackBg:      "rgba(255,255,255,0.08)",
   blurTint:     "dark" as const,
   statusBar:    "light" as const,
 };
