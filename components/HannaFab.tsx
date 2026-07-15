@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Image,
-  Modal, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
+  Modal, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Dimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,6 +12,7 @@ import { Config, authedFetch } from "@/lib/config";
 // Identidad de Hanna: violeta → rosa
 const HGRAD = ["#a855f7", "#ec4899"] as const;
 const HANNA = require("@/assets/hanna.png");
+const SCREEN_H = Dimensions.get("window").height;
 
 const SUGGESTIONS = [
   "¿Cómo va mi día hoy?",
@@ -70,10 +71,10 @@ export default function HannaFab() {
 
       {/* Chat */}
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
-        <View style={s.backdrop}>
+        <KeyboardAvoidingView style={s.backdrop} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setOpen(false)} />
           <SafeAreaView style={s.sheet} edges={["bottom"]}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <View>
               {/* Header */}
               <LinearGradient colors={["rgba(168,85,247,0.18)", "rgba(236,72,153,0.08)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.header}>
                 <View style={s.hAvatarRing}>
@@ -146,9 +147,9 @@ export default function HannaFab() {
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
-            </KeyboardAvoidingView>
+            </View>
           </SafeAreaView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
@@ -169,7 +170,7 @@ const s = StyleSheet.create({
   hRole:    { fontSize: 11.5, fontFamily: Fonts.regular, color: "#c084fc", marginTop: 1 },
   closeBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
 
-  body:     { flexGrow: 0 },
+  body:     { maxHeight: SCREEN_H * 0.42 },
   bub:      { maxWidth: "88%" },
   bubBot:   { alignSelf: "flex-start", backgroundColor: "rgba(168,85,247,0.10)", borderWidth: 1, borderColor: "rgba(168,85,247,0.18)", borderRadius: 13, borderBottomLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 9 },
   bubBotText: { fontSize: 13.5, fontFamily: Fonts.regular, color: "rgba(245,240,255,0.88)", lineHeight: 20 },
