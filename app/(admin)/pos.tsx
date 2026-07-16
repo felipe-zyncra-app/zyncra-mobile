@@ -13,6 +13,7 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmt12, localDateStr } from "@/lib/format";
+import { getActiveLocationId } from "@/lib/active-location";
 import ManualSaleModal from "@/components/ManualSaleModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ type Appt = {
   id: string;
   appointment_time: string;
   status: string;
+  client_id: string | null;
+  location_id: string | null;
   clients: { name: string } | null;
   services: { name: string; price: number } | null;
 };
@@ -296,7 +299,7 @@ export default function PosScreen() {
     const dayEnd   = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
     const [{ data: apptData }, { data: salesData }] = await Promise.all([
       supabase.from("appointments")
-        .select("id, appointment_time, status, clients(name), services(name, price)")
+        .select("id, appointment_time, status, client_id, location_id, clients(name), services(name, price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
@@ -330,14 +333,19 @@ export default function PosScreen() {
       Alert.alert("No se pudo registrar el cobro", "Revisa tu conexión e inténtalo de nuevo.");
       return;
     }
+    // client_id: sin él, el "Total gastado" del CRM web no suma este cobro.
+    // location_id: la sede de la cita (o la activa) — sin ella la venta no
+    // aparece en caja/POS/finanzas del panel web al filtrar por sede.
+    const locationId = appt.location_id ?? await getActiveLocationId(tenantId);
     const { error: saleError } = await supabase.from("pos_sales").insert({
       tenant_id: tenantId,
-      client_id: null,
+      client_id: appt.client_id ?? null,
       appointment_id: appt.id,
       subtotal: price,
       total: price,
       payment_method: paymentMethod,
       note: appt.services?.name ?? null,
+      ...(locationId ? { location_id: locationId } : {}),
     });
     if (saleError) {
       await supabase.from("appointments").update({ status: prevStatus }).eq("id", appt.id);

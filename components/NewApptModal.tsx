@@ -13,6 +13,7 @@ import { scheduleAppointmentReminder } from "@/lib/notifications";
 import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, effectiveDayHours } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { fmt12Hour, localDateStr } from "@/lib/format";
+import { getActiveLocationId } from "@/lib/active-location";
 
 type Service      = { id: string; name: string; duration_minutes: number; price: number };
 type Client       = { id: string; name: string; phone: string };
@@ -234,6 +235,10 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         status:           "pending",
       };
       if (clientId) payload.client_id = clientId;
+      // Sede activa: sin esto la cita no aparece en el panel web al filtrar
+      // por sede ni bloquea el horario en la reserva pública por sede
+      const locationId = await getActiveLocationId(tenantId);
+      if (locationId) payload.location_id = locationId;
 
       const { data: inserted, error: apptError } = await supabase
         .from("appointments").insert(payload).select("id").single();

@@ -15,6 +15,7 @@ import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmtTime, fmtDateFull } from "@/lib/format";
+import { getActiveLocationId } from "@/lib/active-location";
 
 type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
@@ -116,8 +117,12 @@ export default function CajaScreen() {
     const amt = parseFloat(openAmt.replace(/\./g, "").replace(",", "."));
     if (isNaN(amt) || amt < 0) { Alert.alert("Error", "Ingresa un fondo inicial válido."); return; }
     setOpening(true);
+    // Sede activa: el POS web exige caja abierta EN LA SEDE ACTIVA para
+    // cobrar — una sesión sin location_id no cuenta para ese candado
+    const locationId = await getActiveLocationId(tenantId);
     const { data: s, error: openError } = await supabase.from("cash_sessions").insert({
       tenant_id: tenantId, opening_amount: amt, opening_note: openNote.trim() || null,
+      ...(locationId ? { location_id: locationId } : {}),
     }).select("*").single();
     setOpening(false);
     if (openError || !s) {

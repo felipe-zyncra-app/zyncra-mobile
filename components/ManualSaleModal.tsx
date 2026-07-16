@@ -7,6 +7,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { getActiveLocationId } from "@/lib/active-location";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 
 const METHODS = [
@@ -60,6 +61,9 @@ export default function ManualSaleModal({ visible, tenantId, onClose, onSaved }:
     if (!canSave) return;
     setSaving(true);
     try {
+      // Sede activa: sin location_id la venta no aparece en caja/POS/finanzas
+      // del panel web al filtrar por sede
+      const locationId = await getActiveLocationId(tenantId);
       const { data: sale } = await supabase.from("pos_sales").insert({
         tenant_id: tenantId,
         client_id: selectedClient?.id ?? null,
@@ -67,6 +71,7 @@ export default function ManualSaleModal({ visible, tenantId, onClose, onSaved }:
         total,
         payment_method: method,
         note: description.trim(),
+        ...(locationId ? { location_id: locationId } : {}),
       }).select("id").single();
 
       if (sale) {
