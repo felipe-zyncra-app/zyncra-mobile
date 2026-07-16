@@ -69,6 +69,7 @@ export default function SettingsScreen() {
       color: "#25D366",
       items: [
         { icon: "logo-whatsapp",        label: "Campañas WhatsApp",       sub: "Mensajes masivos personalizados",       route: "/(admin)/whatsapp" },
+        { icon: "gift-outline",         label: "Fidelización",            sub: "Recompensas por visitas",               route: "/(admin)/loyalty" },
         { icon: "star-outline",         label: "Reseñas Google",          sub: "Solicita reseñas a tus clientes",       route: "/(admin)/reviews-google" },
         { icon: "chatbubbles-outline",  label: "Reseñas del negocio",     sub: "Modera las opiniones de tu negocio",    route: "/(admin)/reviews-site" },
       ],
@@ -90,6 +91,7 @@ export default function SettingsScreen() {
       items: [
         { icon: "pricetags-outline",   label: "Servicios",             sub: "Gestiona tu catálogo de precios",      route: "/settings/services" },
         { icon: "people-outline",      label: "Equipo de trabajo",     sub: "Profesionales y permisos",             route: "/settings/team" },
+        { icon: "location-outline",    label: "Sedes",                 sub: "Sede activa del celular y fotos",      route: "/settings/locations" },
         { icon: "time-outline",        label: "Horario de atención",   sub: "Días y horas disponibles",             route: "/settings/schedule" },
         { icon: "storefront-outline",  label: "Mi Tienda",             sub: "Personalización y link de reservas",   route: "/settings/store" },
       ],

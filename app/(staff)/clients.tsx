@@ -15,6 +15,10 @@ import { useTheme } from "@/lib/theme";
 import { STATUS_META } from "@/constants/status";
 import { fmtDateShort, fmtMoneyFull, localDateStr } from "@/lib/format";
 import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
+import {
+  type LoyaltyReward, type LoyaltyRedemption,
+  describeReward, getClientRewardStatuses,
+} from "@/lib/loyalty";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 
@@ -49,9 +53,48 @@ function twelveMonthsAgo(): string {
 function ClientModal({ client, proId, perms, onClose }: {
   client: ClientEntry | null; proId: string | null; perms: StaffPermissions; onClose: () => void;
 }) {
+  const { tenantId } = useAuth();
   const [history, setHistory] = useState<ApptHistoryItem[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Fidelización — visitas totales del cliente en el negocio (no solo con este profesional)
+  const [rewards, setRewards] = useState<LoyaltyReward[]>([]);
+  const [redemptions, setRedemptions] = useState<LoyaltyRedemption[]>([]);
+  const [totalVisits, setTotalVisits] = useState(0);
+  const [serviceNames, setServiceNames] = useState<Record<string, string>>({});
+  const [redeeming, setRedeeming] = useState(false);
+
+  const loadLoyalty = useCallback(async () => {
+    if (!client || !tenantId) return;
+    const [{ data: rw }, { data: rd }, { data: visitRows }, { data: svcs }] = await Promise.all([
+      supabase.from("loyalty_rewards").select("*").eq("tenant_id", tenantId).eq("active", true).order("visits_required"),
+      supabase.from("loyalty_redemptions").select("*").eq("client_id", client.id),
+      supabase.from("appointments").select("id,status,appointment_date").eq("client_id", client.id).limit(1000),
+      supabase.from("services").select("id,name").eq("tenant_id", tenantId),
+    ]);
+    setRewards((rw ?? []) as LoyaltyReward[]);
+    setRedemptions((rd ?? []) as LoyaltyRedemption[]);
+    const today = localDateStr();
+    setTotalVisits((visitRows ?? []).filter((a: any) => a.status !== "cancelled" && a.appointment_date <= today).length);
+    setServiceNames(Object.fromEntries(((svcs ?? []) as { id: string; name: string }[]).map(sv => [sv.id, sv.name])));
+  }, [client, tenantId]);
+
+  useEffect(() => { loadLoyalty(); }, [loadLoyalty]);
+
+  const loyaltyStatuses = getClientRewardStatuses(rewards, totalVisits, redemptions);
+  const loyaltyAvailable = loyaltyStatuses.filter(st => st.available > 0);
+  const loyaltyNext = loyaltyStatuses.filter(st => st.available === 0).sort((a, b) => a.remaining - b.remaining)[0] ?? null;
+
+  const handleRedeem = async (rewardId: string) => {
+    if (!client || !tenantId) return;
+    setRedeeming(true);
+    const { error } = await supabase.from("loyalty_redemptions").insert({
+      tenant_id: tenantId, client_id: client.id, reward_id: rewardId, visits_at_redemption: totalVisits,
+    });
+    setRedeeming(false);
+    if (!error) loadLoyalty();
+  };
 
   useEffect(() => {
     if (!client || !proId) return;
@@ -152,6 +195,50 @@ function ClientModal({ client, proId, perms, onClose }: {
               </>
             )}
           </View>
+
+          {/* Fidelización */}
+          {rewards.length > 0 && (
+            <>
+              <Text style={cm.sectionLabel}>Fidelización</Text>
+              {loyaltyAvailable.length > 0 ? (
+                loyaltyAvailable.map(st => (
+                  <View key={st.reward.id} style={[cm.apptRow, Shadow.sm, { borderWidth: 1, borderColor: "#a855f7" + "45" }]}>
+                    <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#a855f7" + "18", alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name="gift-outline" size={16} color="#a855f7" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={cm.apptService} numberOfLines={1}>{st.reward.label}</Text>
+                      <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: "#a855f7", marginTop: 2 }}>
+                        {describeReward(st.reward, serviceNames[st.reward.service_id ?? ""] ?? null)}{st.available > 1 ? ` · ×${st.available}` : ""}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleRedeem(st.reward.id)}
+                      disabled={redeeming}
+                      style={{ backgroundColor: "#a855f7", borderRadius: Radius.full, paddingVertical: 8, paddingHorizontal: 13, opacity: redeeming ? 0.6 : 1 }}
+                      activeOpacity={0.8}
+                    >
+                      {redeeming ? <ActivityIndicator size="small" color="white" /> : (
+                        <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: "white" }}>Entregar</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : loyaltyNext ? (
+                <View style={[cm.apptRow, Shadow.sm, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={cm.apptService} numberOfLines={1}>{loyaltyNext.reward.label}</Text>
+                    <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted }}>
+                      Falta{loyaltyNext.remaining !== 1 ? "n" : ""} <Text style={{ color: Colors.blue, fontFamily: "SpaceGrotesk_700Bold" }}>{loyaltyNext.remaining}</Text> visita{loyaltyNext.remaining !== 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                  <View style={{ height: 6, borderRadius: 4, backgroundColor: Colors.border, overflow: "hidden" }}>
+                    <View style={{ height: "100%", width: `${Math.min(100, (loyaltyNext.progressCurrent / loyaltyNext.progressTarget) * 100)}%`, backgroundColor: Colors.blue, borderRadius: 4 }} />
+                  </View>
+                </View>
+              ) : null}
+            </>
+          )}
 
           {/* Appointment history */}
           <Text style={cm.sectionLabel}>Historial de citas</Text>
