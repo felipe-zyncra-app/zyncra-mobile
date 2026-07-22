@@ -123,6 +123,7 @@ export default function DashboardScreen() {
   const [showNotif, setShowNotif]   = useState(false);
   const [notifItems, setNotifItems] = useState<any[]>([]);
   const [loadingNotif, setLoadingNotif] = useState(false);
+  const [waUnread, setWaUnread]     = useState(0);
 
   const load = async () => {
     if (!tenantId) return;
@@ -182,6 +183,20 @@ export default function DashboardScreen() {
     run();
     return () => { cancelled = true; };
   }, [tenantId]);
+
+  // Chats de WhatsApp sin leer — badge del acceso rápido en la barra superior
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    const loadUnread = async () => {
+      const { data } = await supabase
+        .from("wa_chats").select("unread").eq("tenant_id", tenantId).gt("unread", 0);
+      if (!cancelled) setWaUnread((data ?? []).reduce((s: number, r: any) => s + (r.unread || 0), 0));
+    };
+    loadUnread();
+    const id = setInterval(loadUnread, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tenantId]);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const openNotifications = async () => {
@@ -232,15 +247,27 @@ export default function DashboardScreen() {
           <View style={s.headerBlob2} />
           <View style={s.headerBlob3} />
 
-          {/* Top bar: logo + bell */}
+          {/* Top bar: logo + chats + bell */}
           <Animated.View entering={FadeIn.duration(350)} style={s.topBar}>
             <View style={s.logoRow}>
               <Image source={require("@/assets/zyncra-logo.png")} style={s.logoImg} />
               <Text style={s.logoText}>Zyncra</Text>
             </View>
-            <TouchableOpacity style={s.bellBtn} activeOpacity={0.7} onPress={openNotifications}>
-              <Ionicons name="notifications-outline" size={18} color="white" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              {/* Chats de WhatsApp: acceso de un toque — es uso diario */}
+              <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}
+                onPress={() => router.navigate("/(admin)/inbox" as any)}>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color="white" />
+                {waUnread > 0 && (
+                  <View style={s.waBadge}>
+                    <Text style={s.waBadgeText}>{waUnread > 9 ? "9+" : waUnread}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity style={s.bellBtn} activeOpacity={0.7} onPress={openNotifications}>
+                <Ionicons name="notifications-outline" size={18} color="white" />
+              </TouchableOpacity>
+            </View>
           </Animated.View>
 
           {/* Hero content */}
@@ -489,6 +516,8 @@ const s = StyleSheet.create({
   logoImg:       { width: 28, height: 28, borderRadius: 8 },
   logoText:      { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.3 },
   bellBtn:       { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
+  waBadge:       { position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 1.5, borderColor: "#14111C" },
+  waBadgeText:   { fontSize: 9.5, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
 
   heroContent:   { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 24, marginBottom: 18, position: "relative", zIndex: 1 },
   heroLeft:      { flex: 1, marginRight: 16 },

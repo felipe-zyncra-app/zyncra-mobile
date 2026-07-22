@@ -49,6 +49,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="branding"        options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="upcoming"        options={{ tabBarButton: () => null }} />
       <Tabs.Screen name="loyalty"         options={{ tabBarButton: () => null }} />
+      <Tabs.Screen name="inbox"           options={{ tabBarButton: () => null }} />
     </Tabs>
   );
 }

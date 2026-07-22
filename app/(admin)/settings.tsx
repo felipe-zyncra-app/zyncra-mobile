@@ -68,6 +68,7 @@ export default function SettingsScreen() {
       title: "Marketing",
       color: "#25D366",
       items: [
+        { icon: "chatbubble-ellipses-outline", label: "Chats de WhatsApp", sub: "Responde a tus clientes · Hanna y humano", route: "/(admin)/inbox" },
         { icon: "logo-whatsapp",        label: "Campañas WhatsApp",       sub: "Mensajes masivos personalizados",       route: "/(admin)/whatsapp" },
         { icon: "gift-outline",         label: "Fidelización",            sub: "Recompensas por visitas",               route: "/(admin)/loyalty" },
         { icon: "star-outline",         label: "Reseñas Google",          sub: "Solicita reseñas a tus clientes",       route: "/(admin)/reviews-google" },
