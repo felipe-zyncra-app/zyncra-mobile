@@ -15,6 +15,8 @@ const METHODS = [
   { key: "tarjeta",       label: "Tarjeta",        icon: "card-outline" as const },
   { key: "transferencia", label: "Transferencia",  icon: "phone-portrait-outline" as const },
   { key: "nequi",         label: "Nequi",          icon: "logo-whatsapp" as const },
+  { key: "daviplata",     label: "Daviplata",      icon: "phone-portrait-outline" as const },
+  { key: "qr",            label: "QR",             icon: "qr-code-outline" as const },
 ];
 
 type Client = { id: string; name: string };

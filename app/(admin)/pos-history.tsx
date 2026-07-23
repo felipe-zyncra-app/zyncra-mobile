@@ -33,6 +33,8 @@ const METHODS: { key: string; label: string; icon: IoniconName; color: string }[
   { key: "tarjeta",       label: "Tarjeta",        icon: "card-outline",           color: Colors.blue },
   { key: "transferencia", label: "Transferencia",  icon: "phone-portrait-outline", color: Colors.purple },
   { key: "nequi",         label: "Nequi",          icon: "logo-whatsapp",          color: "#00b5a5" },
+  { key: "daviplata",     label: "Daviplata",      icon: "phone-portrait-outline", color: "#f59e0b" },
+  { key: "qr",            label: "QR",             icon: "qr-code-outline",        color: "#8b5cf6" },
 ];
 
 function addMonths(d: Date, n: number) {

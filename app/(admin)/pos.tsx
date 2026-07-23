@@ -46,6 +46,8 @@ const METHODS = [
   { key: "tarjeta",       label: "Tarjeta",         icon: "card-outline" as const,           color: Colors.blue },
   { key: "transferencia", label: "Transferencia",   icon: "phone-portrait-outline" as const, color: Colors.purple },
   { key: "nequi",         label: "Nequi",           icon: "logo-whatsapp" as const,          color: "#00b5a5" },
+  { key: "daviplata",     label: "Daviplata",       icon: "phone-portrait-outline" as const, color: "#f59e0b" },
+  { key: "qr",            label: "QR",              icon: "qr-code-outline" as const,        color: "#8b5cf6" },
 ];
 
 function addDays(d: Date, n: number) {

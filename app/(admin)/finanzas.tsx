@@ -57,7 +57,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 const PM_COLOR: Record<string, string> = {
-  efectivo: "#10b981", tarjeta: "#6366f1", nequi: "#0027fe", daviplata: "#f59e0b",
+  efectivo: "#10b981", tarjeta: "#6366f1", nequi: "#0027fe", daviplata: "#f59e0b", qr: "#8b5cf6",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
