@@ -32,7 +32,7 @@ interface Product {
 interface Movement {
   id: string;
   product_id: string;
-  type: "purchase" | "sale" | "adjustment" | "return";
+  type: "purchase" | "sale" | "adjustment" | "return" | "courtesy";
   quantity: number;
   notes: string | null;
   created_at: string;
@@ -61,6 +61,7 @@ const MOVE_META: Record<string, { label: string; color: string; icon: any }> = {
   sale:       { label: "Venta",      color: "#6366f1", icon: "cart-outline"          },
   adjustment: { label: "Ajuste",     color: "#f59e0b", icon: "options-outline"       },
   return:     { label: "Devolución", color: "#8E879B", icon: "return-up-back-outline"},
+  courtesy:   { label: "Cortesía",   color: "#ec4899", icon: "gift-outline"          },
 };
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -83,7 +84,7 @@ export default function InventarioScreen() {
   const [showAdjust, setShowAdjust]       = useState(false);
   const [adjustTarget, setAdjustTarget]   = useState<Product | null>(null);
   const [adjustQty, setAdjustQty]         = useState("");
-  const [adjustType, setAdjustType]       = useState<"purchase" | "adjustment" | "return">("purchase");
+  const [adjustType, setAdjustType]       = useState<"purchase" | "adjustment" | "return" | "courtesy">("purchase");
   const [adjustNotes, setAdjustNotes]     = useState("");
 
   useEffect(() => {
@@ -181,7 +182,8 @@ export default function InventarioScreen() {
   const handleAdjust = async () => {
     if (!adjustTarget || !adjustQty || !tenantId) return;
     const qty = parseInt(adjustQty) || 0;
-    const isNegative = adjustType === "adjustment" && adjustQty.startsWith("-");
+    // Salidas (restan stock): cortesía siempre resta; ajuste resta si el usuario escribió "-".
+    const isNegative = adjustType === "courtesy" || (adjustType === "adjustment" && adjustQty.startsWith("-"));
     const actualDelta = isNegative ? -Math.abs(qty) : Math.abs(qty);
     const newStock = Math.max(0, adjustTarget.stock_quantity + actualDelta);
 
@@ -520,7 +522,7 @@ export default function InventarioScreen() {
               <View style={s.mField}>
                 <Text style={[s.fieldLabel, { color: t.subtle }]}>Tipo de movimiento</Text>
                 <View style={s.adjustTypes}>
-                  {(["purchase", "adjustment", "return"] as const).map(tb => {
+                  {(["purchase", "adjustment", "return", "courtesy"] as const).map(tb => {
                     const meta = MOVE_META[tb];
                     const active = adjustType === tb;
                     return (
@@ -539,12 +541,12 @@ export default function InventarioScreen() {
 
               <View style={s.mField}>
                 <Text style={[s.fieldLabel, { color: t.subtle }]}>
-                  {adjustType === "adjustment" ? "Cantidad (+ entrada / − salida)" : "Cantidad a agregar"}
+                  {adjustType === "adjustment" ? "Cantidad (+ entrada / − salida)" : adjustType === "courtesy" ? "Cantidad a entregar (cortesía)" : "Cantidad a agregar"}
                 </Text>
                 <TextInput value={adjustQty} onChangeText={setAdjustQty}
                   style={[...inputStyle, { fontFamily: Fonts.mono, fontSize: 16 }]}
                   keyboardType="numeric"
-                  placeholder={adjustType === "adjustment" ? "Ej. 10 o -5" : "Ej. 10"}
+                  placeholder={adjustType === "adjustment" ? "Ej. 10 o -5" : adjustType === "courtesy" ? "Ej. 2" : "Ej. 10"}
                   placeholderTextColor={t.subtle} />
               </View>
 
@@ -650,7 +652,7 @@ const s = StyleSheet.create({
 
   currentStockBox: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 20 },
   currentStockVal: { fontSize: 28, fontFamily: Fonts.bold, fontVariant: ["tabular-nums"], marginTop: 4 },
-  adjustTypes:     { flexDirection: "row", gap: 8 },
-  adjustTypeBtn:   { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5 },
+  adjustTypes:     { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  adjustTypeBtn:   { flexGrow: 1, flexBasis: "45%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5 },
   adjustTypeTxt:   { fontSize: 11, fontFamily: Fonts.semibold },
 });
