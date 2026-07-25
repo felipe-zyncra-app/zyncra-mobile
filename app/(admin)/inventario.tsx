@@ -190,6 +190,8 @@ export default function InventarioScreen() {
     const { error: movErr } = await supabase.from("inventory_movements").insert({
       tenant_id: tenantId, product_id: adjustTarget.id,
       type: adjustType, quantity: actualDelta, notes: adjustNotes || null,
+      // Snapshot del costo unitario para valorar cortesías en Finanzas.
+      unit_cost: adjustTarget.cost_price ?? null,
     });
     if (movErr) { Alert.alert("Error", movErr.message); return; }
 
