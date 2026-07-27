@@ -21,7 +21,7 @@ type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
 
 type Session  = { id: string; opening_amount: number; opening_note: string | null; opened_at: string; closed_at: string | null; closing_amount: number | null; closing_note: string | null };
-type Movement = { id: string; session_id: string; type: MoveType; amount: number; description: string; category: string | null; created_at: string };
+type Movement = { id: string; session_id: string; type: MoveType; amount: number; description: string; category: string | null; payment_method: string | null; created_at: string };
 
 const INGRESO_CATS = ["Servicio", "Producto", "Propina", "Otro"];
 const EGRESO_CATS  = ["Arriendo", "Nómina", "Insumos", "Servicios públicos", "Otro"];
@@ -175,8 +175,15 @@ export default function CajaScreen() {
   const ingresos = movements.filter(m => m.type === "ingreso").reduce((a, m) => a + Number(m.amount), 0);
   const egresos  = movements.filter(m => m.type === "egreso").reduce((a, m) => a + Number(m.amount), 0);
   const balance  = session ? Number(session.opening_amount) + ingresos - egresos : 0;
+  // Efectivo que debe estar FÍSICAMENTE en el cajón: lo cobrado por Nequi,
+  // tarjeta o QR no entra a caja, así que el arqueo se compara solo contra esto.
+  const ingresosEfectivo = movements
+    .filter(m => m.type === "ingreso" && (!m.payment_method || m.payment_method === "efectivo"))
+    .reduce((a, m) => a + Number(m.amount), 0);
+  const efectivoEsperado = session ? Number(session.opening_amount) + ingresosEfectivo - egresos : 0;
+  const ingresosElectronicos = ingresos - ingresosEfectivo;
   const closeBalance = parseFloat(closeAmt.replace(/\./g, "").replace(",", ".")) || 0;
-  const diff     = closeBalance - balance;
+  const diff     = closeBalance - efectivoEsperado;
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "caja",      label: "Caja" },
@@ -466,9 +473,9 @@ export default function CajaScreen() {
               {/* Summary */}
               <View style={[s.summaryBox, Shadow.sm, { backgroundColor: t.bgAlt }]}>
                 {[
-                  { label: "Fondo inicial",   value: fmtMoneyFull(session ? Number(session.opening_amount) : 0), color: Colors.text },
-                  { label: "Total ingresos",   value: fmtMoneyFull(ingresos), color: Colors.success },
-                  { label: "Total egresos",    value: fmtMoneyFull(egresos),  color: Colors.red },
+                  { label: "Fondo inicial",        value: fmtMoneyFull(session ? Number(session.opening_amount) : 0), color: Colors.text },
+                  { label: "Ingresos en efectivo", value: fmtMoneyFull(ingresosEfectivo), color: Colors.success },
+                  { label: "Total egresos",        value: fmtMoneyFull(egresos),  color: Colors.red },
                 ].map(r => (
                   <View key={r.label} style={s.summaryRow}>
                     <Text style={[s.summaryLabel, { color: t.muted }]}>{r.label}</Text>
@@ -477,9 +484,17 @@ export default function CajaScreen() {
                 ))}
                 <View style={[s.summaryDivider, { backgroundColor: t.border }]} />
                 <View style={s.summaryRow}>
-                  <Text style={[s.summaryLabel, { fontFamily: "SpaceGrotesk_700Bold", color: t.text }]}>Balance esperado</Text>
-                  <Text style={[s.summaryValue, { color: Colors.purple, fontFamily: "SpaceGrotesk_700Bold" }]}>{fmtMoneyFull(balance)}</Text>
+                  <Text style={[s.summaryLabel, { fontFamily: "SpaceGrotesk_700Bold", color: t.text }]}>Efectivo esperado en caja</Text>
+                  <Text style={[s.summaryValue, { color: Colors.purple, fontFamily: "SpaceGrotesk_700Bold" }]}>{fmtMoneyFull(efectivoEsperado)}</Text>
                 </View>
+                {ingresosElectronicos > 0 && (
+                  <View style={s.summaryRow}>
+                    <Text style={[s.summaryLabel, { color: t.subtle, fontSize: 11 }]}>
+                      + {fmtMoneyFull(ingresosElectronicos)} por Nequi/tarjeta/QR
+                    </Text>
+                    <Text style={[s.summaryValue, { color: t.subtle, fontSize: 11 }]}>no está en el cajón</Text>
+                  </View>
+                )}
               </View>
 
               <Text style={[s.label, { color: t.muted }]}>Efectivo contado *</Text>
@@ -493,7 +508,7 @@ export default function CajaScreen() {
 
               {closeAmt.length > 0 && (
                 <View style={[s.diffBox, { backgroundColor: diff >= 0 ? Colors.success + "14" : Colors.red + "14" }]}>
-                  <Text style={[s.diffLabel, { color: t.text }]}>Diferencia</Text>
+                  <Text style={[s.diffLabel, { color: t.text }]}>Diferencia vs efectivo esperado</Text>
                   <Text style={[s.diffValue, { color: diff >= 0 ? Colors.success : Colors.red }]}>
                     {diff >= 0 ? "+" : ""}{fmtMoneyFull(diff)}  ({diff >= 0 ? "sobrante" : "faltante"})
                   </Text>
