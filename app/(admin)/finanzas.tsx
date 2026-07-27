@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, MonoLabel, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { supabase } from "@/lib/supabase";
+import { salePaymentLines, saleUsesMethod, type PaymentLine } from "@/lib/pos-payments";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ interface Sale {
   id: string;
   total: number;
   payment_method: string;
+  /** Reparto real cuando el cobro se dividió en varios métodos (null = uno solo). */
+  payments: PaymentLine[] | null;
   created_at: string;
   client_id: string | null;
   clients: { name: string } | null;
@@ -57,7 +60,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 const PM_COLOR: Record<string, string> = {
-  efectivo: "#10b981", tarjeta: "#6366f1", nequi: "#0027fe", daviplata: "#f59e0b", qr: "#8b5cf6",
+  efectivo: "#10b981", tarjeta: "#6366f1", nequi: "#0027fe", daviplata: "#f59e0b", qr: "#8b5cf6", mixto: "#64748b",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,7 +112,10 @@ function groupByDay(sales: Sale[], days: number): { label: string; pct: number }
 
 function groupByPaymentMethod(sales: Sale[]): Record<string, number> {
   const result: Record<string, number> = {};
-  for (const s of sales) result[s.payment_method] = (result[s.payment_method] ?? 0) + s.total;
+  // Un pago dividido se reparte por método real (efectivo, nequi, ...) en vez
+  // de acumularse como un bucket "mixto".
+  for (const s of sales)
+    for (const l of salePaymentLines(s)) result[l.method] = (result[l.method] ?? 0) + l.amount;
   return result;
 }
 
@@ -362,7 +368,8 @@ function TabVentas({ sales, period, onPeriodChange, loading }: {
   const [pmFilter, setPmFilter] = useState("todos");
   if (loading) return <LoadingView />;
 
-  const filtered = pmFilter === "todos" ? sales : sales.filter(s => s.payment_method === pmFilter);
+  // Una venta dividida aparece bajo CADA método que la compone.
+  const filtered = pmFilter === "todos" ? sales : sales.filter(s => saleUsesMethod(s, pmFilter));
   const total    = filtered.reduce((a, s) => a + s.total, 0);
 
   return (
@@ -384,7 +391,7 @@ function TabVentas({ sales, period, onPeriodChange, loading }: {
       <Animated.View entering={FadeInDown.delay(40).duration(320)}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={s.filterPillsH}>
-            {["todos", "efectivo", "nequi", "daviplata", "tarjeta"].map(pm => (
+            {["todos", "efectivo", "nequi", "daviplata", "tarjeta", "qr"].map(pm => (
               <TouchableOpacity key={pm} activeOpacity={0.7}
                 style={[s.pmPill, { backgroundColor: t.bgAlt, borderColor: t.border },
                   pmFilter === pm && { backgroundColor: (PM_COLOR[pm] ?? Colors.ink) + "20", borderColor: PM_COLOR[pm] ?? Colors.ink }]}
@@ -601,7 +608,7 @@ export default function FinanzasScreen() {
     const [salesRes, sessionRes] = await Promise.all([
       supabase
         .from("pos_sales")
-        .select("id, total, payment_method, created_at, client_id, clients(name), pos_sale_items(quantity, unit_price, services(name))")
+        .select("id, total, payment_method, payments, created_at, client_id, clients(name), pos_sale_items(quantity, unit_price, services(name))")
         .eq("tenant_id", tid).gte("created_at", startDate)
         .order("created_at", { ascending: false }).limit(500),
       supabase
