@@ -12,16 +12,17 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmtDateShort, fmtPhone, localDateStr } from "@/lib/format";
+import { fmtDateShort, localDateStr } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import Avatar from "@/components/Avatar";
 import {
   type LoyaltyReward, type LoyaltyRedemption,
   describeReward, getClientRewardStatuses,
 } from "@/lib/loyalty";
+import { COUNTRIES, DEFAULT_COUNTRY_DIAL, flagEmoji, combinePhone, splitPhone } from "@/lib/countries";
 
 type Client = {
-  id: string; name: string; phone?: string; email?: string | null; no_shows?: number;
+  id: string; name: string; phone?: string; phone_country_code?: string | null; email?: string | null; no_shows?: number;
   created_at?: string; notes?: string | null; birthday?: string | null;
 };
 type Appt = {
@@ -55,6 +56,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
   const isNew = client === null;
   const [name, setName]   = useState("");
   const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_DIAL);
+  const [countryPicker, setCountryPicker] = useState(false);
   const [email, setEmail] = useState("");
   const [birthday, setBirthday] = useState("");
   const [notes, setNotes] = useState("");
@@ -62,7 +65,10 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
 
   useEffect(() => {
     if (visible) {
-      setName(client?.name ?? ""); setPhone(client?.phone ?? ""); setEmail(client?.email ?? "");
+      const { countryCode: cc, phone: national } = client?.phone
+        ? splitPhone(client.phone, client.phone_country_code)
+        : { countryCode: DEFAULT_COUNTRY_DIAL, phone: "" };
+      setName(client?.name ?? ""); setPhone(national); setCountryCode(cc); setEmail(client?.email ?? "");
       setBirthday(client?.birthday ?? ""); setNotes(client?.notes ?? "");
     }
   }, [visible, client]);
@@ -78,8 +84,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
     }
     setSaving(true);
     const payload = {
-      name: name.trim(), phone: fmtPhone(phone.trim()), email: email.trim() || null,
-      birthday: bday || null, notes: notes.trim() || null,
+      name: name.trim(), phone: combinePhone(countryCode, phone.trim()), phone_country_code: countryCode,
+      email: email.trim() || null, birthday: bday || null, notes: notes.trim() || null,
     };
     if (isNew) {
       const { data } = await supabase.from("clients").insert({ ...payload, tenant_id: tenantId }).select().single();
@@ -123,19 +129,32 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
         </LinearGradient>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-            {[
-              { label: "Nombre completo *", val: name, set: setName, ph: "Ej: Juan García", cap: "words" as const },
-              { label: "Teléfono *", val: phone, set: setPhone, ph: "3001234567", kb: "phone-pad" as const },
-              { label: "Correo electrónico", val: email, set: setEmail, ph: "juan@email.com", kb: "email-address" as const },
-              { label: "Cumpleaños (AAAA-MM-DD)", val: birthday, set: setBirthday, ph: "1995-06-24", kb: "numbers-and-punctuation" as const },
-            ].map(f => (
-              <View key={f.label} style={em.field}>
-                <Text style={em.fieldLabel}>{f.label}</Text>
-                <TextInput style={em.input} value={f.val} onChangeText={f.set} placeholder={f.ph}
-                  placeholderTextColor={Colors.subtle} keyboardType={f.kb ?? "default"}
-                  autoCapitalize={f.cap ?? "none"} />
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Nombre completo *</Text>
+              <TextInput style={em.input} value={name} onChangeText={setName} placeholder="Ej: Juan García"
+                placeholderTextColor={Colors.subtle} autoCapitalize="words" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Teléfono * <Text style={em.fieldLabelNote}>(sin indicativo)</Text></Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity style={em.countryBtn} onPress={() => setCountryPicker(true)} activeOpacity={0.8}>
+                  <Text style={em.countryBtnText}>{flagEmoji(COUNTRIES.find(c => c.dial === countryCode)?.iso2 ?? "CO")} +{countryCode}</Text>
+                  <Ionicons name="chevron-down" size={13} color={Colors.muted} />
+                </TouchableOpacity>
+                <TextInput style={[em.input, { flex: 1 }]} value={phone} onChangeText={setPhone} placeholder="3001234567"
+                  placeholderTextColor={Colors.subtle} keyboardType="phone-pad" />
               </View>
-            ))}
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Correo electrónico</Text>
+              <TextInput style={em.input} value={email} onChangeText={setEmail} placeholder="juan@email.com"
+                placeholderTextColor={Colors.subtle} keyboardType="email-address" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Cumpleaños (AAAA-MM-DD)</Text>
+              <TextInput style={em.input} value={birthday} onChangeText={setBirthday} placeholder="1995-06-24"
+                placeholderTextColor={Colors.subtle} keyboardType="numbers-and-punctuation" />
+            </View>
             <View style={em.field}>
               <Text style={em.fieldLabel}>Notas internas</Text>
               <TextInput
@@ -156,6 +175,31 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Country picker */}
+      <Modal visible={countryPicker} animationType="slide" transparent onRequestClose={() => setCountryPicker(false)}>
+        <View style={m.overlay}>
+          <View style={[m.sheet, { maxHeight: "70%" }]}>
+            <View style={m.handle} />
+            <Text style={m.title}>Indicativo de país</Text>
+            <FlatList
+              data={COUNTRIES}
+              keyExtractor={c => `${c.iso2}-${c.dial}`}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: Colors.border }} />}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={m.clientRow}
+                  onPress={() => { setCountryCode(item.dial); setCountryPicker(false); }}
+                >
+                  <Text style={{ fontSize: 20 }}>{flagEmoji(item.iso2)}</Text>
+                  <Text style={m.clientName}>{item.name} <Text style={{ color: Colors.subtle }}>+{item.dial}</Text></Text>
+                  {countryCode === item.dial && <Ionicons name="checkmark" size={18} color={Colors.red} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -502,7 +546,7 @@ export default function ClientsScreen() {
   const loadClients = async () => {
     if (!tenantId) return;
     const { data } = await supabase.from("clients")
-      .select("id, name, phone, email, no_shows, created_at, notes, birthday")
+      .select("id, name, phone, phone_country_code, email, no_shows, created_at, notes, birthday")
       .eq("tenant_id", tenantId).order("name");
     const c = data ?? [];
     setClients(c);
@@ -705,9 +749,22 @@ const em = StyleSheet.create({
   headerTitle:{ fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
   field:      { marginBottom: 16 },
   fieldLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 },
+  fieldLabelNote: { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.subtle, textTransform: "none", letterSpacing: 0 },
   input:      { ...Glass.cardStrong, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
+  countryBtn:     { ...Glass.cardStrong, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
+  countryBtnText: { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
   bottomBar:  { padding: 20, paddingBottom: 34, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.6)", backgroundColor: "rgba(244,244,249,0.85)" },
   btn:        { borderRadius: Radius.full, overflow: "hidden" },
   btnGrad: { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
   btnText:    { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
+});
+
+// Country picker sheet styles
+const m = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  sheet:      { backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, gap: 14 },
+  handle:     { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 8 },
+  title:      { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
+  clientRow:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  clientName: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
 });
