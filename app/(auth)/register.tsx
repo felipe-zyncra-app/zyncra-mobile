@@ -45,7 +45,7 @@ const GOALS = [
   { id: "noshows",     emoji: "🚫", label: "Reducir no-shows" },
   { id: "whatsapp",    emoji: "💬", label: "Agenda WhatsApp" },
   { id: "pos",         emoji: "💳", label: "POS y cobros" },
-  { id: "billing",     emoji: "📄", label: "Facturas DIAN" },
+  { id: "billing",     emoji: "📄", label: "Control de caja" },
   { id: "reviews",     emoji: "⭐", label: "Reseñas Google" },
   { id: "commissions", emoji: "💰", label: "Comisiones" },
   { id: "marketing",   emoji: "📣", label: "Marketing WA" },

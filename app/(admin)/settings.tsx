@@ -83,7 +83,8 @@ export default function SettingsScreen() {
         { icon: "cube-outline",          label: "Inventario",           sub: "Stock y alertas de productos",         route: "/(admin)/inventario" },
         { icon: "wallet-outline",        label: "Caja",                 sub: "Control de ingresos y egresos",        route: "/(admin)/caja" },
         { icon: "ribbon-outline",        label: "Comisiones",           sub: "Paga a tu equipo de trabajo",          route: "/(admin)/commissions" },
-        { icon: "document-text-outline", label: "Factura Electrónica",  sub: "Emite facturas DIAN vía Factus",       route: "/(admin)/invoices" },
+        // Factura Electrónica retirada temporalmente del menú (la pantalla
+        // invoices.tsx y la integración con Factus siguen en el código).
       ],
     },
     {
