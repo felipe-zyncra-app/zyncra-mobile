@@ -22,6 +22,8 @@ const BIZ_TYPES = [
   { id: "spa",       emoji: "💆", label: "Spa" },
   { id: "manicure",  emoji: "💅", label: "Manicure" },
   { id: "estetica",  emoji: "🏥", label: "Estética" },
+  { id: "odontologia", emoji: "🦷", label: "Odontología" },
+  { id: "medico",    emoji: "⚕️", label: "Consultorio" },
   { id: "masajes",   emoji: "🧘", label: "Masajes" },
   { id: "tatuajes",  emoji: "🎨", label: "Tatuajes" },
   { id: "otro",      emoji: "🏪", label: "Otro" },
@@ -169,8 +171,21 @@ export default function RegisterScreen() {
         createdUserId.current = userId;
       }
       const slug = createSlug(businessName);
+      // biz_type va en settings: la tabla business_profiles que se usa más
+      // abajo no existe en la base, así que ese insert falla en silencio y el
+      // dato se perdía. Habilita los módulos verticales (Historias Clínicas).
+      // Se repiten los valores del DEFAULT de tenants.settings porque pasar
+      // el campo lo reemplaza entero — omitirlos dejaría al negocio sin
+      // primaryColor ni la config de depósitos.
       const { data: td, error: te } = await supabase.from("tenants")
-        .insert([{ owner_id: userId, name: businessName, slug }])
+        .insert([{
+          owner_id: userId, name: businessName, slug,
+          settings: {
+            logo: "", coverImage: "", primaryColor: "#2563EB",
+            depositAmount: 0, requireDeposit: false,
+            biz_type: bizType,
+          },
+        }])
         .select().single();
       if (te) { if (te.code === "23505") throw new Error("Ese nombre ya está en uso."); throw te; }
       if (td) {
