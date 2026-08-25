@@ -10,13 +10,13 @@
     "scheme": "zyncra",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "co.zyncra.app",
+      "bundleIdentifier": "com.zyncra.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "co.zyncra.app",
+      "package": "com.zyncra.app",
       "adaptiveIcon": {
         "backgroundColor": "#07071a",
         "foregroundImage": "./assets/icon.png"
@@ -36,6 +36,14 @@
           "icon": "./assets/icon.png",
           "color": "#fb0f05",
           "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Zyncra necesita acceso a tus fotos para que puedas subir la foto de tu negocio o de tu equipo.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
