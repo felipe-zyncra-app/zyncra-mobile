@@ -160,6 +160,15 @@ export default function LoginScreen() {
               <SolidButton label="Iniciar sesión" onPress={handleLogin} loading={loading} />
             </Animated.View>
 
+            {/* Aviso de acceso B2B (App Store 3.1.3(c)): la app es para negocios con
+                cuenta existente. Solo informativo — sin link, precio ni registro. */}
+            <Animated.View entering={FadeInDown.delay(520).duration(400)} style={s.accessNote}>
+              <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.35)" style={{ marginTop: 1 }} />
+              <Text style={s.accessNoteText}>
+                App para negocios con cuenta Zyncra activa. Si trabajas en un negocio que ya usa Zyncra, pide tu acceso al administrador.
+              </Text>
+            </Animated.View>
+
           </Animated.View>
         </ScrollView>
       </View>
@@ -321,5 +330,21 @@ const s = StyleSheet.create({
     color: "#ff6060",
     fontSize: 13,
     fontFamily: "SpaceGrotesk_600SemiBold",
+  },
+  accessNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+  accessNoteText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "SpaceGrotesk_400Regular",
+    color: "rgba(255,255,255,0.38)",
   },
 });
