@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { Config, authedFetch } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
@@ -141,6 +142,44 @@ export default function StaffProfileScreen() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Eliminar cuenta",
+      "Se eliminará tu cuenta de Zyncra. Esta acción no se puede deshacer.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Continuar", style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "¿Confirmas la eliminación?",
+              "Esta es tu última oportunidad para cancelar.",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Eliminar cuenta", style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
+                      if (!res.ok) {
+                        const body = await res.json().catch(() => ({}));
+                        throw new Error(body.error || "No se pudo eliminar la cuenta.");
+                      }
+                      await supabase.auth.signOut();
+                      router.replace("/(auth)/login");
+                    } catch (e: any) {
+                      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   const initials = info
     ? info.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
     : "?";
@@ -273,6 +312,13 @@ export default function StaffProfileScreen() {
             <Text style={s.logoutText}>Cerrar sesión</Text>
           </TouchableOpacity>
         </Animated.View>
+
+        {/* Eliminar cuenta */}
+        <Animated.View entering={FadeInDown.delay(300).duration(400)} style={{ marginTop: 10 }}>
+          <TouchableOpacity style={s.deleteRow} onPress={handleDeleteAccount} activeOpacity={0.6}>
+            <Text style={[s.deleteText, { color: t.muted }]}>Eliminar cuenta</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -323,4 +369,6 @@ const s = StyleSheet.create({
 
   logoutBtn:  { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 16, flexDirection: "row", alignItems: "center", gap: 10 },
   logoutText: { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red },
+  deleteRow:  { alignItems: "center", paddingVertical: 10 },
+  deleteText: { fontSize: 12.5, fontFamily: "SpaceGrotesk_400Regular", textDecorationLine: "underline" },
 });
