@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { Config, authedFetch } from "@/lib/config";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -63,6 +64,44 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Eliminar cuenta",
+      "Se eliminará tu cuenta y todos los datos de tu negocio (clientes, citas, ventas, reportes). Esta acción no se puede deshacer.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Continuar", style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "¿Confirmas la eliminación?",
+              "Esta es tu última oportunidad para cancelar.",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Eliminar cuenta", style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
+                      if (!res.ok) {
+                        const body = await res.json().catch(() => ({}));
+                        throw new Error(body.error || "No se pudo eliminar la cuenta.");
+                      }
+                      await supabase.auth.signOut();
+                      router.replace("/(auth)/login");
+                    } catch (e: any) {
+                      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  };
+
   const SECTIONS = [
     {
       title: "Marketing",
@@ -112,7 +151,6 @@ export default function SettingsScreen() {
       color: "#f59e0b",
       items: [
         { icon: "person-outline",      label: "Mi perfil",            sub: "Datos personales y contraseña",        route: "/settings/profile" },
-        { icon: "card-outline",        label: "Plan y facturación",   sub: "Plan actual: Trial",                   route: "/settings/billing" },
       ],
     },
   ];
@@ -186,6 +224,8 @@ export default function SettingsScreen() {
         <Animated.View entering={FadeInDown.delay(400).duration(400)}>
           <View style={[s.group, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
             <SettingRow icon="log-out-outline" label="Cerrar sesión" onPress={handleLogout} danger />
+            <View style={[s.divider, { backgroundColor: t.divider }]} />
+            <SettingRow icon="trash-outline" label="Eliminar cuenta" onPress={handleDeleteAccount} danger />
           </View>
         </Animated.View>
 

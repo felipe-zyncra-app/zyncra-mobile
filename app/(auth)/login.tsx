@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, Pressable,
   Image, Dimensions,
 } from "react-native";
@@ -9,7 +9,7 @@ import Animated, {
   FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import { Link, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Radius } from "@/constants/theme";
@@ -160,14 +160,13 @@ export default function LoginScreen() {
               <SolidButton label="Iniciar sesión" onPress={handleLogin} loading={loading} />
             </Animated.View>
 
-            {/* Register link */}
-            <Animated.View entering={FadeInDown.delay(510).duration(400)} style={s.footer}>
-              <Text style={s.footerText}>¿No tienes cuenta? </Text>
-              <Link href="/(auth)/register" asChild>
-                <TouchableOpacity>
-                  <Text style={s.footerLink}>Regístrate gratis</Text>
-                </TouchableOpacity>
-              </Link>
+            {/* Aviso de acceso B2B (App Store 3.1.3(c)): la app es para negocios con
+                cuenta existente. Solo informativo — sin link, precio ni registro. */}
+            <Animated.View entering={FadeInDown.delay(520).duration(400)} style={s.accessNote}>
+              <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.35)" style={{ marginTop: 1 }} />
+              <Text style={s.accessNoteText}>
+                App para negocios con cuenta Zyncra activa. Si trabajas en un negocio que ya usa Zyncra, pide tu acceso al administrador.
+              </Text>
             </Animated.View>
 
           </Animated.View>
@@ -332,20 +331,20 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: "SpaceGrotesk_600SemiBold",
   },
-  footer: {
+  accessNote: {
     flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 24,
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
   },
-  footerText: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.38)",
+  accessNoteText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
     fontFamily: "SpaceGrotesk_400Regular",
-  },
-  footerLink: {
-    fontSize: 14,
-    color: Colors.red,
-    fontFamily: "SpaceGrotesk_700Bold",
+    color: "rgba(255,255,255,0.38)",
   },
 });

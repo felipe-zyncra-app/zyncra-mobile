@@ -7,6 +7,7 @@ export const Config = {
   supabaseUrl: SUPABASE_URL,
   edgeFunctions: {
     createStaffUser: `${SUPABASE_URL}/functions/v1/create-staff-user`,
+    deleteAccount: `${SUPABASE_URL}/functions/v1/delete-account`,
   },
   // Host canónico CON www: zyncra.app responde 308 hacia www y un redirect
   // cross-host hace que varios clientes HTTP (OkHttp/Android) descarten el
