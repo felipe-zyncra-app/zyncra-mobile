@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, Pressable,
   Image, Dimensions,
 } from "react-native";
@@ -9,7 +9,7 @@ import Animated, {
   FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import { Link, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Radius } from "@/constants/theme";
@@ -158,16 +158,6 @@ export default function LoginScreen() {
             {/* CTA */}
             <Animated.View entering={FadeInDown.delay(440).duration(400)} style={{ marginTop: 8 }}>
               <SolidButton label="Iniciar sesión" onPress={handleLogin} loading={loading} />
-            </Animated.View>
-
-            {/* Register link */}
-            <Animated.View entering={FadeInDown.delay(510).duration(400)} style={s.footer}>
-              <Text style={s.footerText}>¿No tienes cuenta? </Text>
-              <Link href="/(auth)/register" asChild>
-                <TouchableOpacity>
-                  <Text style={s.footerLink}>Regístrate gratis</Text>
-                </TouchableOpacity>
-              </Link>
             </Animated.View>
 
           </Animated.View>
@@ -331,21 +321,5 @@ const s = StyleSheet.create({
     color: "#ff6060",
     fontSize: 13,
     fontFamily: "SpaceGrotesk_600SemiBold",
-  },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 24,
-  },
-  footerText: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.38)",
-    fontFamily: "SpaceGrotesk_400Regular",
-  },
-  footerLink: {
-    fontSize: 14,
-    color: Colors.red,
-    fontFamily: "SpaceGrotesk_700Bold",
   },
 });

@@ -30,7 +30,24 @@ export default function HannaFab() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Si la cuenta no tiene Hanna, el botón simplemente no se muestra: nunca se
+  // le ofrece al usuario algo que no puede usar.
+  const [available, setAvailable] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authedFetch(Config.api.hannaChat, { method: "GET" });
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled) setAvailable(res.ok && json.available === true);
+      } catch {
+        if (!cancelled) setAvailable(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (open) setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
@@ -49,16 +66,24 @@ export default function HannaFab() {
         body: JSON.stringify({ messages: next.slice(-12) }),
       });
       const json = await res.json().catch(() => ({}));
-      setMsgs(m => [...m, {
-        role: "assistant",
-        content: res.ok && json.reply ? json.reply : (json.error ?? "No pude procesar tu pregunta, intenta de nuevo."),
-      }]);
+      if (res.ok && json.reply) {
+        setMsgs(m => [...m, { role: "assistant", content: json.reply }]);
+      } else if (json.unavailable) {
+        // La cuenta perdió el acceso: se cierra el chat y se retira el botón,
+        // sin mostrar mensajes de suscripción.
+        setOpen(false);
+        setAvailable(false);
+      } else {
+        setMsgs(m => [...m, { role: "assistant", content: "No pude procesar tu pregunta, intenta de nuevo." }]);
+      }
     } catch {
       setMsgs(m => [...m, { role: "assistant", content: "Error de conexión, intenta de nuevo." }]);
     } finally {
       setBusy(false);
     }
   };
+
+  if (!available) return null;
 
   return (
     <>

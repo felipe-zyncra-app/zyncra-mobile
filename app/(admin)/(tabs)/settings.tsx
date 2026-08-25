@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { Config, authedFetch } from "@/lib/config";
 import { Colors, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
@@ -82,7 +83,6 @@ const SECTIONS: {
     title: "Cuenta",
     items: [
       { icon: "person-outline", color: "#6366f1",   label: "Mi perfil",          sub: "Datos personales y contraseña", route: "/settings/profile" },
-      { icon: "card-outline",   color: Colors.blue, label: "Plan y facturación", sub: "Tu suscripción de Zyncra",      route: "/settings/billing" },
     ],
   },
 ];
@@ -103,6 +103,44 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Eliminar cuenta",
+      "Se eliminará tu cuenta y todos los datos de tu negocio (clientes, citas, ventas, reportes). Esta acción no se puede deshacer.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Continuar", style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "¿Confirmas la eliminación?",
+              "Esta es tu última oportunidad para cancelar.",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Eliminar cuenta", style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
+                      if (!res.ok) {
+                        const body = await res.json().catch(() => ({}));
+                        throw new Error(body.error || "No se pudo eliminar la cuenta.");
+                      }
+                      await supabase.auth.signOut();
+                      router.replace("/(auth)/login");
+                    } catch (e: any) {
+                      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -170,6 +208,13 @@ export default function SettingsScreen() {
           </Card>
         </Animated.View>
 
+        {/* ── Eliminar cuenta ── */}
+        <Animated.View entering={FadeInDown.delay(540).duration(400)} style={{ marginTop: 10 }}>
+          <TouchableOpacity style={s.deleteRow} onPress={handleDeleteAccount} activeOpacity={0.6}>
+            <Text style={[s.deleteText, { color: t.subtle }]}>Eliminar cuenta</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
         <Animated.View entering={FadeInDown.delay(580).duration(400)} style={{ alignItems: "center", marginTop: 24 }}>
           <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v1.0.0 · Hecho en Colombia 🇨🇴</Text>
         </Animated.View>
@@ -184,5 +229,7 @@ const s = StyleSheet.create({
   logoutRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
   logoutIcon:  { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   logoutText:  { fontSize: 13.5, fontFamily: Fonts.semibold, color: Colors.red },
+  deleteRow:   { alignItems: "center", paddingVertical: 10 },
+  deleteText:  { fontSize: 12.5, fontFamily: Fonts.regular, textDecorationLine: "underline" },
   footer:      { fontSize: 12, fontFamily: Fonts.regular },
 });

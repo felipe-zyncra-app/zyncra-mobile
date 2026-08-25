@@ -113,7 +113,16 @@ export default function HannaScreen() {
     try {
       const res = await authedFetch(Config.api.hannaCampaigns, { method: "POST", body: "{}" });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) { Alert.alert("Error", json.error ?? "No se pudieron generar campañas"); return; }
+      if (!res.ok) {
+        // Nunca se expone el motivo del servidor: podría mencionar planes.
+        Alert.alert(
+          json.unavailable ? "No disponible" : "Error",
+          json.unavailable
+            ? "Esta función no está disponible en esta cuenta."
+            : "No se pudieron generar campañas.",
+        );
+        return;
+      }
       setDrafts(json.campanas ?? []);
     } catch {
       Alert.alert("Error de red", "Revisa tu conexión e intenta de nuevo.");

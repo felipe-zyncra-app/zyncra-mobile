@@ -7,6 +7,7 @@ export const Config = {
   edgeFunctions: {
     createStaffUser: `${SUPABASE_URL}/functions/v1/create-staff-user`,
     sendPush: `${SUPABASE_URL}/functions/v1/send-push`,
+    deleteAccount: `${SUPABASE_URL}/functions/v1/delete-account`,
   },
   api: {
     factus: "https://zyncra.app/api/factus",
