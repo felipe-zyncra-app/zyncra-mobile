@@ -1,13 +1,14 @@
 ﻿import { useEffect, useState } from "react";
 import {
   View, Text, Modal, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
+  TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
-import { getActiveLocationId } from "@/lib/active-location";
+import { recordSale } from "@/lib/record-sale";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 
 const METHODS = [
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export default function ManualSaleModal({ visible, tenantId, onClose, onSaved }: Props) {
+  const router = useRouter();
   const [description, setDescription] = useState("");
   const [amount, setAmount]           = useState("");
   const [method, setMethod]           = useState("efectivo");
@@ -63,26 +65,33 @@ export default function ManualSaleModal({ visible, tenantId, onClose, onSaved }:
     if (!canSave) return;
     setSaving(true);
     try {
-      // Sede activa: sin location_id la venta no aparece en caja/POS/finanzas
-      // del panel web al filtrar por sede
-      const locationId = await getActiveLocationId(tenantId);
-      const { data: sale } = await supabase.from("pos_sales").insert({
-        tenant_id: tenantId,
-        client_id: selectedClient?.id ?? null,
-        subtotal: total,
+      // recordSale escribe venta + ítem + ingreso en la caja abierta de la
+      // sede activa (antes faltaba el movimiento de caja y la venta directa
+      // nunca aparecía en el arqueo).
+      const concept = description.trim();
+      const res = await recordSale({
+        tenantId,
         total,
-        payment_method: method,
-        note: description.trim(),
-        ...(locationId ? { location_id: locationId } : {}),
-      }).select("id").single();
-
-      if (sale) {
-        await supabase.from("pos_sale_items").insert({
-          sale_id: sale.id,
-          name: description.trim(),
-          price: total,
-          quantity: 1,
-        });
+        paymentMethod: method,
+        clientId: selectedClient?.id ?? null,
+        note: concept,
+        description: `Venta POS${selectedClient ? ` · ${selectedClient.name}` : ""} · ${concept}`,
+        items: [{ name: concept, price: total, quantity: 1, item_type: "service" }],
+      });
+      if (!res.ok) {
+        if (res.error === "NO_CASH_SESSION") {
+          Alert.alert(
+            "La caja está cerrada",
+            "Abre la caja de esta sede antes de registrar la venta. Así queda en el arqueo del día, igual que en el panel web.",
+            [
+              { text: "Ahora no", style: "cancel" },
+              { text: "Abrir caja", onPress: () => { onClose(); router.push("/(admin)/caja"); } },
+            ],
+          );
+        } else {
+          Alert.alert("No se pudo registrar la venta", "Revisa tu conexión e inténtalo de nuevo.");
+        }
+        return;
       }
       onSaved();
       onClose();

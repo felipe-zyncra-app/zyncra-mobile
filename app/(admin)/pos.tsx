@@ -13,7 +13,7 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmt12, localDateStr } from "@/lib/format";
-import { getActiveLocationId } from "@/lib/active-location";
+import { recordSale, voidSale as voidRecordedSale } from "@/lib/record-sale";
 import ManualSaleModal from "@/components/ManualSaleModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -327,31 +327,48 @@ export default function PosScreen() {
 
   const onRefresh = async () => { setRefreshing(true); await load(date); setRefreshing(false); };
 
+  // Misma regla que el POS web: sin caja abierta en la sede no se cobra. Si el
+  // cobro no pasa por la caja, no aparece en el arqueo ni en el cierre del día.
+  const alertNoCashSession = () => {
+    Alert.alert(
+      "La caja está cerrada",
+      "Abre la caja de esta sede antes de cobrar. Así el cobro queda en el arqueo del día, igual que en el panel web.",
+      [
+        { text: "Ahora no", style: "cancel" },
+        { text: "Abrir caja", onPress: () => router.push("/(admin)/caja") },
+      ],
+    );
+  };
+
   const handlePay = async (appt: Appt, paymentMethod: string) => {
+    if (!tenantId) return;
     const price = Number((appt.services as any)?.price ?? 0);
-    const prevStatus = appt.status;
-    const { error: statusError } = await supabase.from("appointments").update({ status: "completed" }).eq("id", appt.id);
-    if (statusError) {
-      Alert.alert("No se pudo registrar el cobro", "Revisa tu conexión e inténtalo de nuevo.");
-      return;
-    }
-    // client_id: sin él, el "Total gastado" del CRM web no suma este cobro.
-    // location_id: la sede de la cita (o la activa) — sin ella la venta no
-    // aparece en caja/POS/finanzas del panel web al filtrar por sede.
-    const locationId = appt.location_id ?? await getActiveLocationId(tenantId);
-    const { error: saleError } = await supabase.from("pos_sales").insert({
-      tenant_id: tenantId,
-      client_id: appt.client_id ?? null,
-      appointment_id: appt.id,
-      subtotal: price,
+    const serviceName = appt.services?.name ?? "Servicio";
+    // recordSale escribe venta + ítems + ingreso en caja y marca la cita
+    // completada al final (antes el móvil solo escribía pos_sales y la Caja
+    // nunca veía estos cobros). client_id y location_id (sede de la cita)
+    // siguen siendo necesarios para el CRM y los filtros por sede del web.
+    const res = await recordSale({
+      tenantId,
       total: price,
-      payment_method: paymentMethod,
+      paymentMethod,
+      clientId: appt.client_id,
+      appointmentId: appt.id,
+      locationId: appt.location_id,
       note: appt.services?.name ?? null,
-      ...(locationId ? { location_id: locationId } : {}),
+      description: `Venta POS${appt.clients?.name ? ` · ${appt.clients.name}` : ""} · ${serviceName}`,
+      items: [{ name: serviceName, price, quantity: 1, item_type: "service" }],
     });
-    if (saleError) {
-      await supabase.from("appointments").update({ status: prevStatus }).eq("id", appt.id);
-      Alert.alert("No se pudo registrar el cobro", "Revisa tu conexión e inténtalo de nuevo.");
+    if (!res.ok) {
+      setPayAppt(null);
+      if (res.error === "NO_CASH_SESSION") { alertNoCashSession(); return; }
+      Alert.alert(
+        "No se pudo registrar el cobro",
+        res.error === "APPOINTMENT_FAILED"
+          ? "El cobro quedó registrado en caja, pero la cita no se marcó como completada. Revísala en la agenda."
+          : "Revisa tu conexión e inténtalo de nuevo.",
+      );
+      await load(date);
       return;
     }
     setPayAppt(null);
@@ -375,12 +392,10 @@ export default function PosScreen() {
       { text: "No", style: "cancel" },
       { text: "Anular", style: "destructive",
         onPress: async () => {
-          if (sale.appointment_id) {
-            await supabase.from("appointments").update({ status: "confirmed" }).eq("id", sale.appointment_id);
-          }
-          await supabase.from("pos_sale_items").delete().eq("sale_id", sale.id);
-          const { error: voidError } = await supabase.from("pos_sales").delete().eq("id", sale.id);
-          if (voidError) Alert.alert("No se pudo anular el cobro", "Revisa tu conexión e inténtalo de nuevo.");
+          // Borra también el ingreso de caja: la FK es SET NULL, no cascade,
+          // y antes la venta anulada seguía sumando en el arqueo.
+          const { ok } = await voidRecordedSale(sale.id, sale.appointment_id);
+          if (!ok) Alert.alert("No se pudo anular el cobro", "Revisa tu conexión e inténtalo de nuevo.");
           await load(date);
         },
       },

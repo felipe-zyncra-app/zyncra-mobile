@@ -63,9 +63,14 @@ export default function CajaScreen() {
   const loadSession = useCallback(async () => {
     if (!tenantId) return;
     setLoading(true);
-    const { data: s } = await supabase.from("cash_sessions")
-      .select("*").eq("tenant_id", tenantId).is("closed_at", null)
-      .order("opened_at", { ascending: false }).limit(1).maybeSingle();
+    // Misma regla que /admin/caja y el POS web: la caja abierta es la de la
+    // sede activa. Sin este filtro, en un negocio multi-sede el móvil mostraba
+    // la caja de otra sucursal como si fuera la propia.
+    const locationId = await getActiveLocationId(tenantId);
+    let q = supabase.from("cash_sessions")
+      .select("*").eq("tenant_id", tenantId).is("closed_at", null);
+    if (locationId) q = q.eq("location_id", locationId);
+    const { data: s } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
     setSession(s ?? null);
     if (s) {
       const { data: mv } = await supabase.from("cash_movements")
