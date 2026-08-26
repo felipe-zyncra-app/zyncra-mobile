@@ -14,28 +14,21 @@ import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull } from "@/lib/format";
-
-type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+import { salePaymentLines } from "@/lib/pos-payments";
+import { voidSale as voidRecordedSale } from "@/lib/record-sale";
+import { PAY_METHODS, methodCfg as getMethodCfg } from "@/components/ChargeSheet";
 
 type HistorySale = {
   id: string;
   created_at: string;
   total: number;
   payment_method: string;
+  payments: { method: string; amount: number }[] | null;
   note: string | null;
   appointment_id: string | null;
   clients: { name: string } | null;
   pos_sale_items: { name: string; price: number; quantity: number }[];
 };
-
-const METHODS: { key: string; label: string; icon: IoniconName; color: string }[] = [
-  { key: "efectivo",      label: "Efectivo",      icon: "cash-outline",           color: Colors.success },
-  { key: "tarjeta",       label: "Tarjeta",        icon: "card-outline",           color: Colors.blue },
-  { key: "transferencia", label: "Transferencia",  icon: "phone-portrait-outline", color: Colors.purple },
-  { key: "nequi",         label: "Nequi",          icon: "logo-whatsapp",          color: "#00b5a5" },
-  { key: "daviplata",     label: "Daviplata",      icon: "phone-portrait-outline", color: "#f59e0b" },
-  { key: "qr",            label: "QR",             icon: "qr-code-outline",        color: "#8b5cf6" },
-];
 
 function addMonths(d: Date, n: number) {
   return new Date(d.getFullYear(), d.getMonth() + n, 1);
@@ -57,7 +50,7 @@ export default function PosHistoryScreen() {
     const end   = new Date(y, mo + 1, 0).toISOString().slice(0, 10);
     const { data } = await supabase
       .from("pos_sales")
-      .select("id,created_at,total,payment_method,note,appointment_id,clients(name),pos_sale_items(name,price,quantity)")
+      .select("id,created_at,total,payment_method,payments,note,appointment_id,clients(name),pos_sale_items(name,price,quantity)")
       .eq("tenant_id", tenantId)
       .gte("created_at", `${start}T00:00:00`)
       .lte("created_at", `${end}T23:59:59`)
@@ -78,12 +71,16 @@ export default function PosHistoryScreen() {
   const monthLabel = month.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
 
   const totalRevenue = sales.reduce((s, v) => s + Number(v.total), 0);
-  const byMethod = METHODS
-    .map(m => ({
-      ...m,
-      total: sales.filter(s => s.payment_method === m.key).reduce((sum, s) => sum + Number(s.total), 0),
-      count: sales.filter(s => s.payment_method === m.key).length,
-    }))
+  // Pago dividido ("mixto"): se expande el desglose para sumar por método real
+  const byMethod = PAY_METHODS
+    .map(m => {
+      const withMethod = sales.filter(s => salePaymentLines(s).some(l => l.method === m.key));
+      return {
+        ...m,
+        total: withMethod.reduce((sum, s) => sum + salePaymentLines(s).filter(l => l.method === m.key).reduce((a, l) => a + l.amount, 0), 0),
+        count: withMethod.length,
+      };
+    })
     .filter(m => m.total > 0);
 
   const grouped = useMemo(() => {
@@ -100,11 +97,9 @@ export default function PosHistoryScreen() {
     Alert.alert("Anular cobro", `¿Anular ${fmtMoneyFull(Number(sale.total))}?`, [
       { text: "No", style: "cancel" },
       { text: "Anular", style: "destructive", onPress: async () => {
-        if (sale.appointment_id) {
-          await supabase.from("appointments").update({ status: "confirmed" }).eq("id", sale.appointment_id);
-        }
-        await supabase.from("pos_sale_items").delete().eq("sale_id", sale.id);
-        await supabase.from("pos_sales").delete().eq("id", sale.id);
+        // Borra también el ingreso de caja (FK SET NULL, no cascade) y devuelve la cita a confirmada
+        const { ok } = await voidRecordedSale(sale.id, sale.appointment_id);
+        if (!ok) Alert.alert("No se pudo anular el cobro", "Revisa tu conexión e inténtalo de nuevo.");
         load(month);
       }},
     ]);
@@ -190,7 +185,7 @@ export default function PosHistoryScreen() {
                   </View>
 
                   {group.sales.map(sale => {
-                    const methodCfg = METHODS.find(m => m.key === sale.payment_method);
+                    const methodCfg = getMethodCfg(sale.payment_method);
                     const timeStr = new Date(sale.created_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
                     return (
                       <View key={sale.id} style={[s.saleCard, Shadow.sm]}>

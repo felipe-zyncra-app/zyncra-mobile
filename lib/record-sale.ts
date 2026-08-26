@@ -46,12 +46,23 @@ export interface SaleItemInput {
   service_id?: string | null;
   product_id?: string | null;
   item_type?: "service" | "product";
+  /** Costo unitario del producto (para el costo de lo vendido en inventario). */
+  unit_cost?: number | null;
 }
+
+export interface PaymentLine { method: string; amount: number }
 
 export interface RecordSaleInput {
   tenantId: string;
   total: number;
+  /** Antes del descuento. Default: total. */
+  subtotal?: number;
+  discountType?: "percentage" | "fixed" | null;
+  discountValue?: number;
+  /** Método único, o "mixto" si viene `payments` (pago dividido, igual que el POS web). */
   paymentMethod: string;
+  /** Pago dividido: un movimiento de caja por cada línea, para que Caja los separe sola. */
+  payments?: PaymentLine[] | null;
   items: SaleItemInput[];
   clientId?: string | null;
   appointmentId?: string | null;
@@ -71,15 +82,22 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
   const session = await findOpenCashSession(input.tenantId, locationId);
   if (!session) return { ok: false, error: "NO_CASH_SESSION" };
 
+  const payments = input.payments && input.payments.length > 0 ? input.payments : null;
+  const paymentMethod = payments ? "mixto" : input.paymentMethod;
+  const saleLocation = locationId ?? session.location_id;
+
   const { data: sale, error: saleErr } = await supabase.from("pos_sales").insert({
     tenant_id: input.tenantId,
     // En vista sin sede la venta hereda la sede de la caja abierta (igual que el web)
-    location_id: locationId ?? session.location_id,
+    location_id: saleLocation,
     client_id: input.clientId ?? null,
     appointment_id: input.appointmentId ?? null,
-    subtotal: input.total,
+    subtotal: input.subtotal ?? input.total,
+    discount_type: input.discountType ?? null,
+    discount_value: input.discountValue ?? 0,
     total: input.total,
-    payment_method: input.paymentMethod,
+    payment_method: paymentMethod,
+    payments,
     note: input.note ?? null,
   }).select("id").single();
   if (saleErr || !sale) return { ok: false, error: "SALE_FAILED" };
@@ -96,16 +114,38 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
     })),
   );
 
-  await supabase.from("cash_movements").insert({
+  // Productos vendidos → salida de inventario (el stock se recalcula desde los
+  // movimientos, igual que hace el POS web).
+  const productItems = input.items.filter(i => i.product_id);
+  if (productItems.length > 0) {
+    await supabase.from("inventory_movements").insert(
+      productItems.map(i => ({
+        tenant_id: input.tenantId,
+        product_id: i.product_id,
+        type: "sale",
+        quantity: -i.quantity,
+        reference: sale.id,
+        notes: `Venta POS${input.note ? ` · ${input.note}` : ""}`,
+        unit_cost: i.unit_cost ?? null,
+        ...(saleLocation ? { location_id: saleLocation } : {}),
+      })),
+    );
+  }
+
+  const description = input.description ?? `Venta POS${input.note ? ` · ${input.note}` : ""}`;
+  const movementBase = {
     session_id: session.id,
     tenant_id: input.tenantId,
     type: "ingreso",
-    amount: input.total,
-    description: input.description ?? `Venta POS${input.note ? ` · ${input.note}` : ""}`,
+    description,
     category: "POS",
     pos_sale_id: sale.id,
-    payment_method: input.paymentMethod,
-  });
+  };
+  await supabase.from("cash_movements").insert(
+    payments
+      ? payments.map(p => ({ ...movementBase, amount: p.amount, payment_method: p.method }))
+      : [{ ...movementBase, amount: input.total, payment_method: input.paymentMethod }],
+  );
 
   // La cita se marca al final: si no hay caja o la venta falla, la cita no
   // queda "completada" sin cobro registrado.

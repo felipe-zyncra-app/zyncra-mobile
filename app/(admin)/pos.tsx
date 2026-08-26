@@ -2,7 +2,7 @@
 import { useRouter } from "expo-router";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Modal, Alert,
+  RefreshControl, ActivityIndicator, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
@@ -13,8 +13,9 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmt12, localDateStr } from "@/lib/format";
-import { recordSale, voidSale as voidRecordedSale } from "@/lib/record-sale";
-import ManualSaleModal from "@/components/ManualSaleModal";
+import { voidSale as voidRecordedSale } from "@/lib/record-sale";
+import { salePaymentLines } from "@/lib/pos-payments";
+import ChargeSheet, { PAY_METHODS, methodCfg as getMethodCfg, type ChargeTarget, type LinkedAppt } from "@/components/ChargeSheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ type Appt = {
   appointment_time: string;
   status: string;
   client_id: string | null;
+  service_id: string | null;
   location_id: string | null;
   clients: { name: string } | null;
   services: { name: string; price: number } | null;
@@ -33,145 +35,29 @@ type PosSale = {
   created_at: string;
   total: number;
   payment_method: string;
+  payments: { method: string; amount: number }[] | null;
   note: string | null;
   appointment_id: string | null;
   clients: { name: string } | null;
   pos_sale_items: { name: string; price: number; quantity: number }[];
 };
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-
-const METHODS = [
-  { key: "efectivo",      label: "Efectivo",       icon: "cash-outline" as const,           color: Colors.success },
-  { key: "tarjeta",       label: "Tarjeta",         icon: "card-outline" as const,           color: Colors.blue },
-  { key: "transferencia", label: "Transferencia",   icon: "phone-portrait-outline" as const, color: Colors.purple },
-  { key: "nequi",         label: "Nequi",           icon: "logo-whatsapp" as const,          color: "#00b5a5" },
-  { key: "daviplata",     label: "Daviplata",       icon: "phone-portrait-outline" as const, color: "#f59e0b" },
-  { key: "qr",            label: "QR",              icon: "qr-code-outline" as const,        color: "#8b5cf6" },
-];
-
 function addDays(d: Date, n: number) {
   const r = new Date(d); r.setDate(r.getDate() + n); return r;
 }
 
-// ─── Payment Modal ────────────────────────────────────────────────────────────
-
-function PaymentModal({ appt, onConfirm, onClose }: {
-  appt: Appt | null;
-  onConfirm: (method: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const { t } = useTheme();
-  const [method, setMethod] = useState("efectivo");
-  const [saving, setSaving] = useState(false);
-  const price = Number((appt?.services as any)?.price ?? 0);
-
-  useEffect(() => { setMethod("efectivo"); setSaving(false); }, [appt]);
-  if (!appt) return null;
-
-  return (
-    <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={pm.header}>
-          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-          <View style={pm.headerRow}>
-            <TouchableOpacity onPress={onClose} style={pm.closeBtn}>
-              <Ionicons name="close" size={20} color="white" />
-            </TouchableOpacity>
-            <Text style={pm.title}>Cobrar cita</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {/* Receipt summary */}
-          <View style={pm.receipt}>
-            <View style={pm.receiptRow}>
-              <Text style={pm.receiptLabel}>Cliente</Text>
-              <Text style={pm.receiptVal}>{appt.clients?.name ?? "Sin cliente"}</Text>
-            </View>
-            <View style={pm.divider} />
-            <View style={pm.receiptRow}>
-              <Text style={pm.receiptLabel}>Servicio</Text>
-              <Text style={pm.receiptVal}>{appt.services?.name ?? "Sin servicio"}</Text>
-            </View>
-            <View style={pm.divider} />
-            <View style={pm.receiptRow}>
-              <Text style={pm.receiptLabel}>Hora</Text>
-              <Text style={pm.receiptVal}>{fmt12(appt.appointment_time.slice(0, 5))}</Text>
-            </View>
-            <View style={[pm.divider, { backgroundColor: "rgba(255,255,255,.3)" }]} />
-            <View style={pm.receiptRow}>
-              <Text style={[pm.receiptLabel, { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold" }]}>Total</Text>
-              <Text style={pm.totalVal}>{price > 0 ? fmtMoneyFull(price) : "—"}</Text>
-            </View>
-          </View>
-        </LinearGradient>
-
-        <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 120 }}>
-          <Text style={pm.sectionLabel}>¿Cómo pagó el cliente?</Text>
-          {METHODS.map(m => {
-            const active = method === m.key;
-            return (
-              <TouchableOpacity
-                key={m.key}
-                style={[pm.methodRow, active && pm.methodRowActive]}
-                onPress={() => setMethod(m.key)}
-                activeOpacity={0.75}
-              >
-                {active && <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.red, borderRadius: Radius.md }]} />}
-                <View style={[pm.methodIcon, { backgroundColor: active ? "rgba(255,255,255,.2)" : m.color + "15" }]}>
-                  <Ionicons name={m.icon} size={20} color={active ? "white" : m.color} />
-                </View>
-                <Text style={[pm.methodLabel, active && { color: "white" }]}>{m.label}</Text>
-                {active && <Ionicons name="checkmark-circle" size={20} color="white" style={{ marginLeft: "auto" }} />}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        <View style={pm.bottomBar}>
-          <TouchableOpacity
-            style={[pm.btn, saving && { opacity: 0.6 }]}
-            onPress={async () => { setSaving(true); await onConfirm(method); setSaving(false); }}
-            disabled={saving}
-            activeOpacity={0.85}
-          >
-            <View style={pm.btnGrad}>
-              {saving
-                ? <ActivityIndicator color="white" />
-                : <>
-                    <Ionicons name="checkmark-circle" size={18} color="white" />
-                    <Text style={pm.btnText}>{price > 0 ? `Confirmar cobro · ${fmtMoneyFull(price)}` : "Completar cita"}</Text>
-                  </>
-              }
-            </View>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
+function toLinkedAppt(a: Appt): LinkedAppt {
+  return {
+    id: a.id,
+    clientId: a.client_id,
+    clientName: a.clients?.name ?? null,
+    serviceId: a.service_id,
+    serviceName: a.services?.name ?? null,
+    servicePrice: Number(a.services?.price ?? 0),
+    locationId: a.location_id,
+    time: a.appointment_time,
+  };
 }
-
-const pm = StyleSheet.create({
-  header:       { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 24 },
-  headerRow:    { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
-  closeBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,.2)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
-  title:        { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  receipt:      { backgroundColor: "rgba(255,255,255,.18)", borderRadius: Radius.lg, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
-  receiptRow:   { flexDirection: "row", justifyContent: "space-between", paddingVertical: 11 },
-  receiptLabel: { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,.75)" },
-  receiptVal:   { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "white" },
-  totalVal:     { fontSize: 20, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  divider:      { height: 1, backgroundColor: "rgba(255,255,255,.15)" },
-  sectionLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 12 },
-  methodRow:       { flexDirection: "row", alignItems: "center", gap: 14, ...Glass.cardStrong, borderRadius: Radius.md, padding: 14, marginBottom: 10, overflow: "hidden" },
-  methodRowActive: { borderWidth: 0 },
-  methodIcon:      { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  methodLabel:     { fontSize: 15, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  bottomBar:    { padding: 20, paddingBottom: 34, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.6)", backgroundColor: "rgba(244,244,249,0.85)" },
-  btn:          { borderRadius: Radius.full, overflow: "hidden" },
-  btnGrad: { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
-  btnText:      { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-});
 
 // ─── Appointment card ─────────────────────────────────────────────────────────
 
@@ -189,7 +75,9 @@ function ApptCard({ appt, linkedSale, onCobrar, onCancel, index }: {
   const isCancelled = appt.status === "cancelled";
 
   const accentColor = isPaid ? Colors.success : isCancelled ? Colors.muted : Colors.red;
-  const methodCfg   = METHODS.find(m => m.key === linkedSale?.payment_method);
+  const method      = getMethodCfg(linkedSale?.payment_method);
+  // Lo realmente cobrado (puede incluir adicionales, productos o descuento)
+  const paidTotal   = linkedSale ? Number(linkedSale.total) : null;
 
   return (
     <Animated.View entering={FadeInRight.delay(index * 60).duration(320)}>
@@ -204,8 +92,8 @@ function ApptCard({ appt, linkedSale, onCobrar, onCancel, index }: {
               <Ionicons name="time-outline" size={11} color={accentColor} />
               <Text style={[ac.timeText, { color: accentColor }]}>{time}</Text>
             </View>
-            {price > 0 && (
-              <Text style={[ac.price, isPaid && { color: Colors.success }]}>{fmtMoneyFull(price)}</Text>
+            {(paidTotal ?? price) > 0 && (
+              <Text style={[ac.price, isPaid && { color: Colors.success }]}>{fmtMoneyFull(paidTotal ?? price)}</Text>
             )}
           </View>
 
@@ -237,10 +125,10 @@ function ApptCard({ appt, linkedSale, onCobrar, onCancel, index }: {
                 <Ionicons name="checkmark-circle" size={13} color={Colors.success} />
                 <Text style={ac.paidText}>Cobrado</Text>
               </View>
-              {methodCfg && (
-                <View style={[ac.methodTag, { backgroundColor: methodCfg.color + "12" }]}>
-                  <Ionicons name={methodCfg.icon} size={11} color={methodCfg.color} />
-                  <Text style={[ac.methodTagText, { color: methodCfg.color }]}>{methodCfg.label}</Text>
+              {method && (
+                <View style={[ac.methodTag, { backgroundColor: method.color + "12" }]}>
+                  <Ionicons name={method.icon} size={11} color={method.color} />
+                  <Text style={[ac.methodTagText, { color: method.color }]}>{method.label}</Text>
                 </View>
               )}
             </View>
@@ -290,8 +178,8 @@ export default function PosScreen() {
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab]   = useState<"citas" | "cobros">("citas");
-  const [payAppt, setPayAppt]       = useState<Appt | null>(null);
-  const [showManual, setShowManual] = useState(false);
+  // Hoja de cobro: una cita (precarga servicio + adicionales + cliente) o venta directa
+  const [charge, setCharge]         = useState<ChargeTarget | null>(null);
 
   const load = useCallback(async (d: Date) => {
     if (!tenantId) return;
@@ -301,12 +189,12 @@ export default function PosScreen() {
     const dayEnd   = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
     const [{ data: apptData }, { data: salesData }] = await Promise.all([
       supabase.from("appointments")
-        .select("id, appointment_time, status, client_id, location_id, clients(name), services(name, price)")
+        .select("id, appointment_time, status, client_id, service_id, location_id, clients(name), services(name, price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
       supabase.from("pos_sales")
-        .select("id, created_at, total, payment_method, note, appointment_id, clients(name), pos_sale_items(name, price, quantity)")
+        .select("id, created_at, total, payment_method, payments, note, appointment_id, clients(name), pos_sale_items(name, price, quantity)")
         .eq("tenant_id", tenantId)
         .gte("created_at", dayStart.toISOString())
         .lt("created_at", dayEnd.toISOString())
@@ -326,54 +214,6 @@ export default function PosScreen() {
   }, [tenantId, date]);
 
   const onRefresh = async () => { setRefreshing(true); await load(date); setRefreshing(false); };
-
-  // Misma regla que el POS web: sin caja abierta en la sede no se cobra. Si el
-  // cobro no pasa por la caja, no aparece en el arqueo ni en el cierre del día.
-  const alertNoCashSession = () => {
-    Alert.alert(
-      "La caja está cerrada",
-      "Abre la caja de esta sede antes de cobrar. Así el cobro queda en el arqueo del día, igual que en el panel web.",
-      [
-        { text: "Ahora no", style: "cancel" },
-        { text: "Abrir caja", onPress: () => router.push("/(admin)/caja") },
-      ],
-    );
-  };
-
-  const handlePay = async (appt: Appt, paymentMethod: string) => {
-    if (!tenantId) return;
-    const price = Number((appt.services as any)?.price ?? 0);
-    const serviceName = appt.services?.name ?? "Servicio";
-    // recordSale escribe venta + ítems + ingreso en caja y marca la cita
-    // completada al final (antes el móvil solo escribía pos_sales y la Caja
-    // nunca veía estos cobros). client_id y location_id (sede de la cita)
-    // siguen siendo necesarios para el CRM y los filtros por sede del web.
-    const res = await recordSale({
-      tenantId,
-      total: price,
-      paymentMethod,
-      clientId: appt.client_id,
-      appointmentId: appt.id,
-      locationId: appt.location_id,
-      note: appt.services?.name ?? null,
-      description: `Venta POS${appt.clients?.name ? ` · ${appt.clients.name}` : ""} · ${serviceName}`,
-      items: [{ name: serviceName, price, quantity: 1, item_type: "service" }],
-    });
-    if (!res.ok) {
-      setPayAppt(null);
-      if (res.error === "NO_CASH_SESSION") { alertNoCashSession(); return; }
-      Alert.alert(
-        "No se pudo registrar el cobro",
-        res.error === "APPOINTMENT_FAILED"
-          ? "El cobro quedó registrado en caja, pero la cita no se marcó como completada. Revísala en la agenda."
-          : "Revisa tu conexión e inténtalo de nuevo.",
-      );
-      await load(date);
-      return;
-    }
-    setPayAppt(null);
-    await load(date);
-  };
 
   const cancelAppt = (appt: Appt) => {
     Alert.alert("Cancelar cita", `¿Cancelar la cita de ${appt.clients?.name ?? "este cliente"}?`, [
@@ -406,9 +246,10 @@ export default function PosScreen() {
   const cobrado   = sales.reduce((s, v) => s + Number(v.total), 0);
   const pendingAppts = appts.filter(a => a.status === "pending" || a.status === "confirmed");
   const projected = pendingAppts.reduce((s, a) => s + Number((a.services as any)?.price ?? 0), 0);
-  const byMethod  = METHODS.map(m => ({
+  // Pago dividido: se expande el desglose para sumar por método real (no "mixto")
+  const byMethod  = PAY_METHODS.map(m => ({
     ...m,
-    total: sales.filter(s => s.payment_method === m.key).reduce((sum, s) => sum + Number(s.total), 0),
+    total: sales.reduce((sum, s) => sum + salePaymentLines(s).filter(l => l.method === m.key).reduce((a, l) => a + l.amount, 0), 0),
   })).filter(m => m.total > 0);
 
   const isToday   = date.toDateString() === new Date().toDateString();
@@ -438,7 +279,7 @@ export default function PosScreen() {
           <TouchableOpacity style={s.headerActionBtn} onPress={() => router.push("/(admin)/pos-history" as any)} activeOpacity={0.8}>
             <Ionicons name="time-outline" size={17} color="white" />
           </TouchableOpacity>
-          <TouchableOpacity style={s.headerActionBtn} onPress={() => setShowManual(true)} activeOpacity={0.8}>
+          <TouchableOpacity style={s.headerActionBtn} onPress={() => setCharge({ kind: "direct" })} activeOpacity={0.8}>
             <Ionicons name="add" size={20} color="white" />
           </TouchableOpacity>
         </View>
@@ -557,7 +398,7 @@ export default function PosScreen() {
                       key={a.id}
                       appt={a}
                       linkedSale={sales.find(s => s.appointment_id === a.id)}
-                      onCobrar={() => setPayAppt(a)}
+                      onCobrar={() => setCharge({ kind: "appointment", appt: toLinkedAppt(a) })}
                       onCancel={() => cancelAppt(a)}
                       index={i}
                     />
@@ -576,7 +417,7 @@ export default function PosScreen() {
                 </Animated.View>
               ) : (
                 sales.map((sale, i) => {
-                  const methodCfg = METHODS.find(m => m.key === sale.payment_method);
+                  const methodCfg = getMethodCfg(sale.payment_method);
                   const timeStr   = new Date(sale.created_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
                   const linkedAppt = appts.find(a => a.id === sale.appointment_id);
 
@@ -619,17 +460,12 @@ export default function PosScreen() {
         </ScrollView>
       )}
 
-      <PaymentModal
-        appt={payAppt}
-        onConfirm={(method) => handlePay(payAppt!, method)}
-        onClose={() => setPayAppt(null)}
-      />
-
       {tenantId && (
-        <ManualSaleModal
-          visible={showManual}
+        <ChargeSheet
+          visible={!!charge}
           tenantId={tenantId}
-          onClose={() => setShowManual(false)}
+          target={charge}
+          onClose={() => setCharge(null)}
           onSaved={() => load(date)}
         />
       )}
