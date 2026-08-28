@@ -16,12 +16,13 @@ import { useTheme } from "@/lib/theme";
 import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmtTime, fmtDateFull } from "@/lib/format";
+import { getActiveLocationId } from "@/lib/active-location";
 
 type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
 
 type Session  = { id: string; opening_amount: number; opening_note: string | null; opened_at: string; closed_at: string | null; closing_amount: number | null; closing_note: string | null };
-type Movement = { id: string; session_id: string; type: MoveType; amount: number; description: string; category: string | null; created_at: string };
+type Movement = { id: string; session_id: string; type: MoveType; amount: number; description: string; category: string | null; payment_method: string | null; created_at: string };
 
 const INGRESO_CATS = ["Servicio", "Producto", "Propina", "Otro"];
 const EGRESO_CATS  = ["Arriendo", "Nómina", "Insumos", "Servicios públicos", "Otro"];
@@ -63,9 +64,14 @@ export default function CajaScreen() {
   const loadSession = useCallback(async () => {
     if (!tenantId) return;
     setLoading(true);
-    const { data: s } = await supabase.from("cash_sessions")
-      .select("*").eq("tenant_id", tenantId).is("closed_at", null)
-      .order("opened_at", { ascending: false }).limit(1).maybeSingle();
+    // Misma regla que /admin/caja y el POS web: la caja abierta es la de la
+    // sede activa. Sin este filtro, en un negocio multi-sede el móvil mostraba
+    // la caja de otra sucursal como si fuera la propia.
+    const locationId = await getActiveLocationId(tenantId);
+    let q = supabase.from("cash_sessions")
+      .select("*").eq("tenant_id", tenantId).is("closed_at", null);
+    if (locationId) q = q.eq("location_id", locationId);
+    const { data: s } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
     setSession(s ?? null);
     if (s) {
       const { data: mv } = await supabase.from("cash_movements")
@@ -117,11 +123,19 @@ export default function CajaScreen() {
     const amt = parseFloat(openAmt.replace(/\./g, "").replace(",", "."));
     if (isNaN(amt) || amt < 0) { Alert.alert("Error", "Ingresa un fondo inicial válido."); return; }
     setOpening(true);
-    const { data: s } = await supabase.from("cash_sessions").insert({
+    // Sede activa: el POS web exige caja abierta EN LA SEDE ACTIVA para
+    // cobrar — una sesión sin location_id no cuenta para ese candado
+    const locationId = await getActiveLocationId(tenantId);
+    const { data: s, error: openError } = await supabase.from("cash_sessions").insert({
       tenant_id: tenantId, opening_amount: amt, opening_note: openNote.trim() || null,
+      ...(locationId ? { location_id: locationId } : {}),
     }).select("*").single();
-    if (s) { setSession(s as Session); setMovements([]); setOpenAmt(""); setOpenNote(""); }
     setOpening(false);
+    if (openError || !s) {
+      Alert.alert("No se pudo abrir la caja", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setSession(s as Session); setMovements([]); setOpenAmt(""); setOpenNote("");
   };
 
   const handleMovement = async () => {
@@ -129,14 +143,18 @@ export default function CajaScreen() {
     if (!session || isNaN(amt) || amt <= 0) { Alert.alert("Error", "Ingresa un monto válido."); return; }
     if (!movDesc.trim()) { Alert.alert("Error", "La descripción es obligatoria."); return; }
     setMovSaving(true);
-    const { data: mv } = await supabase.from("cash_movements").insert({
+    const { data: mv, error: movError } = await supabase.from("cash_movements").insert({
       session_id: session.id, tenant_id: tenantId,
       type: movType, amount: amt, description: movDesc.trim(),
       category: movCat || null,
     }).select("*").single();
-    if (mv) setMovements(prev => [mv as Movement, ...prev]);
-    setMovAmt(""); setMovDesc(""); setMovCat("");
     setMovSaving(false);
+    if (movError || !mv) {
+      Alert.alert("No se pudo guardar el movimiento", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setMovements(prev => [mv as Movement, ...prev]);
+    setMovAmt(""); setMovDesc(""); setMovCat("");
     setMovModal(false);
   };
 
@@ -145,12 +163,16 @@ export default function CajaScreen() {
     const amt = parseFloat(closeAmt.replace(/\./g, "").replace(",", "."));
     if (isNaN(amt) || amt < 0) { Alert.alert("Error", "Ingresa un monto de cierre válido."); return; }
     setClosing(true);
-    await supabase.from("cash_sessions").update({
+    const { error: closeError } = await supabase.from("cash_sessions").update({
       closed_at: new Date().toISOString(), closing_amount: amt,
       closing_note: closeNote.trim() || null,
     }).eq("id", session.id);
-    setSession(null); setMovements([]); setCloseAmt(""); setCloseNote("");
     setClosing(false);
+    if (closeError) {
+      Alert.alert("No se pudo cerrar la caja", "Revisa tu conexión e inténtalo de nuevo.");
+      return;
+    }
+    setSession(null); setMovements([]); setCloseAmt(""); setCloseNote("");
     setCloseModal(false);
     Alert.alert("Caja cerrada", "La sesión fue cerrada correctamente.");
   };
@@ -159,8 +181,15 @@ export default function CajaScreen() {
   const ingresos = movements.filter(m => m.type === "ingreso").reduce((a, m) => a + Number(m.amount), 0);
   const egresos  = movements.filter(m => m.type === "egreso").reduce((a, m) => a + Number(m.amount), 0);
   const balance  = session ? Number(session.opening_amount) + ingresos - egresos : 0;
+  // Efectivo que debe estar FÍSICAMENTE en el cajón: lo cobrado por Nequi,
+  // tarjeta o QR no entra a caja, así que el arqueo se compara solo contra esto.
+  const ingresosEfectivo = movements
+    .filter(m => m.type === "ingreso" && (!m.payment_method || m.payment_method === "efectivo"))
+    .reduce((a, m) => a + Number(m.amount), 0);
+  const efectivoEsperado = session ? Number(session.opening_amount) + ingresosEfectivo - egresos : 0;
+  const ingresosElectronicos = ingresos - ingresosEfectivo;
   const closeBalance = parseFloat(closeAmt.replace(/\./g, "").replace(",", ".")) || 0;
-  const diff     = closeBalance - balance;
+  const diff     = closeBalance - efectivoEsperado;
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "caja",      label: "Caja" },
@@ -436,9 +465,9 @@ export default function CajaScreen() {
               {/* Summary */}
               <View style={[s.summaryBox, Shadow.sm, { backgroundColor: t.bgAlt }]}>
                 {[
-                  { label: "Fondo inicial",   value: fmtMoneyFull(session ? Number(session.opening_amount) : 0), color: Colors.text },
-                  { label: "Total ingresos",   value: fmtMoneyFull(ingresos), color: Colors.success },
-                  { label: "Total egresos",    value: fmtMoneyFull(egresos),  color: Colors.red },
+                  { label: "Fondo inicial",        value: fmtMoneyFull(session ? Number(session.opening_amount) : 0), color: Colors.text },
+                  { label: "Ingresos en efectivo", value: fmtMoneyFull(ingresosEfectivo), color: Colors.success },
+                  { label: "Total egresos",        value: fmtMoneyFull(egresos),  color: Colors.red },
                 ].map(r => (
                   <View key={r.label} style={s.summaryRow}>
                     <Text style={[s.summaryLabel, { color: t.muted }]}>{r.label}</Text>
@@ -447,9 +476,17 @@ export default function CajaScreen() {
                 ))}
                 <View style={[s.summaryDivider, { backgroundColor: t.border }]} />
                 <View style={s.summaryRow}>
-                  <Text style={[s.summaryLabel, { fontFamily: "SpaceGrotesk_700Bold", color: t.text }]}>Balance esperado</Text>
-                  <Text style={[s.summaryValue, { color: Colors.purple, fontFamily: "SpaceGrotesk_700Bold" }]}>{fmtMoneyFull(balance)}</Text>
+                  <Text style={[s.summaryLabel, { fontFamily: "SpaceGrotesk_700Bold", color: t.text }]}>Efectivo esperado en caja</Text>
+                  <Text style={[s.summaryValue, { color: Colors.purple, fontFamily: "SpaceGrotesk_700Bold" }]}>{fmtMoneyFull(efectivoEsperado)}</Text>
                 </View>
+                {ingresosElectronicos > 0 && (
+                  <View style={s.summaryRow}>
+                    <Text style={[s.summaryLabel, { color: t.subtle, fontSize: 11 }]}>
+                      + {fmtMoneyFull(ingresosElectronicos)} por Nequi/tarjeta/QR
+                    </Text>
+                    <Text style={[s.summaryValue, { color: t.subtle, fontSize: 11 }]}>no está en el cajón</Text>
+                  </View>
+                )}
               </View>
 
               <Text style={[s.label, { color: t.muted }]}>Efectivo contado *</Text>
@@ -463,7 +500,7 @@ export default function CajaScreen() {
 
               {closeAmt.length > 0 && (
                 <View style={[s.diffBox, { backgroundColor: diff >= 0 ? Colors.success + "14" : Colors.red + "14" }]}>
-                  <Text style={[s.diffLabel, { color: t.text }]}>Diferencia</Text>
+                  <Text style={[s.diffLabel, { color: t.text }]}>Diferencia vs efectivo esperado</Text>
                   <Text style={[s.diffValue, { color: diff >= 0 ? Colors.success : Colors.red }]}>
                     {diff >= 0 ? "+" : ""}{fmtMoneyFull(diff)}  ({diff >= 0 ? "sobrante" : "faltante"})
                   </Text>

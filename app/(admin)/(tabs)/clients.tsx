@@ -12,16 +12,38 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmtDateShort } from "@/lib/format";
+import { fmtDateShort, localDateStr } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import Avatar from "@/components/Avatar";
 import { MonoTag } from "@/components/ui";
+import {
+  type LoyaltyReward, type LoyaltyRedemption,
+  describeReward, getClientRewardStatuses,
+} from "@/lib/loyalty";
+import { COUNTRIES, DEFAULT_COUNTRY_DIAL, flagEmoji, combinePhone, splitPhone } from "@/lib/countries";
 
-type Client = { id: string; name: string; phone?: string; email?: string | null; no_shows?: number; created_at?: string };
+type Client = {
+  id: string; name: string; phone?: string; phone_country_code?: string | null; email?: string | null; no_shows?: number;
+  created_at?: string; notes?: string | null; birthday?: string | null;
+};
 type Appt = {
   id: string; appointment_date: string; appointment_time: string; status: string; notes?: string;
   services: { name: string; price: number } | null;
 };
+
+// Segmentos — misma definición que el CRM del panel web
+type Segment = { key: "nuevo" | "recurrente" | "riesgo" | "perdido"; label: string; color: string };
+function computeSegment(appts: Appt[]): Segment {
+  const today = localDateStr();
+  const d30 = localDateStr(new Date(Date.now() - 30 * 86400000));
+  const d60 = localDateStr(new Date(Date.now() - 60 * 86400000));
+  const past = appts.filter(a => a.status !== "cancelled" && a.appointment_date <= today);
+  const last = past.reduce<string | null>((acc, a) => (!acc || a.appointment_date > acc ? a.appointment_date : acc), null);
+  if (!last) return { key: "nuevo", label: "Nuevo", color: Colors.blue };
+  if (last >= d30) return { key: "recurrente", label: "Recurrente", color: Colors.success };
+  if (last >= d60) return { key: "riesgo", label: "En riesgo", color: "#f59e0b" };
+  return { key: "perdido", label: "Perdido", color: Colors.red };
+}
 type CustomField = { id: string; name: string; field_type: string };
 type FieldValue  = { field_id: string; value: string | null };
 
@@ -35,12 +57,20 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
   const isNew = client === null;
   const [name, setName]   = useState("");
   const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_DIAL);
+  const [countryPicker, setCountryPicker] = useState(false);
   const [email, setEmail] = useState("");
+  const [birthday, setBirthday] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
-      setName(client?.name ?? ""); setPhone(client?.phone ?? ""); setEmail(client?.email ?? "");
+      const { countryCode: cc, phone: national } = client?.phone
+        ? splitPhone(client.phone, client.phone_country_code)
+        : { countryCode: DEFAULT_COUNTRY_DIAL, phone: "" };
+      setName(client?.name ?? ""); setPhone(national); setCountryCode(cc); setEmail(client?.email ?? "");
+      setBirthday(client?.birthday ?? ""); setNotes(client?.notes ?? "");
     }
   }, [visible, client]);
 
@@ -48,8 +78,16 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
 
   const handleSave = async () => {
     if (!canSave) return;
+    const bday = birthday.trim();
+    if (bday && !/^\d{4}-\d{2}-\d{2}$/.test(bday)) {
+      Alert.alert("Cumpleaños inválido", "Usa el formato AAAA-MM-DD, por ejemplo 1995-06-24.");
+      return;
+    }
     setSaving(true);
-    const payload = { name: name.trim(), phone: phone.trim(), email: email.trim() || null };
+    const payload = {
+      name: name.trim(), phone: combinePhone(countryCode, phone.trim()), phone_country_code: countryCode,
+      email: email.trim() || null, birthday: bday || null, notes: notes.trim() || null,
+    };
     if (isNew) {
       const { data } = await supabase.from("clients").insert({ ...payload, tenant_id: tenantId }).select().single();
       setSaving(false);
@@ -92,18 +130,41 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
         </View>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-            {[
-              { label: "Nombre completo *", val: name, set: setName, ph: "Ej: Juan García", cap: "words" as const },
-              { label: "Teléfono *", val: phone, set: setPhone, ph: "3001234567", kb: "phone-pad" as const },
-              { label: "Correo electrónico", val: email, set: setEmail, ph: "juan@email.com", kb: "email-address" as const },
-            ].map(f => (
-              <View key={f.label} style={em.field}>
-                <Text style={em.fieldLabel}>{f.label}</Text>
-                <TextInput style={em.input} value={f.val} onChangeText={f.set} placeholder={f.ph}
-                  placeholderTextColor={Colors.subtle} keyboardType={f.kb ?? "default"}
-                  autoCapitalize={f.cap ?? "none"} />
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Nombre completo *</Text>
+              <TextInput style={em.input} value={name} onChangeText={setName} placeholder="Ej: Juan García"
+                placeholderTextColor={Colors.subtle} autoCapitalize="words" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Teléfono * <Text style={em.fieldLabelNote}>(sin indicativo)</Text></Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity style={em.countryBtn} onPress={() => setCountryPicker(true)} activeOpacity={0.8}>
+                  <Text style={em.countryBtnText}>{flagEmoji(COUNTRIES.find(c => c.dial === countryCode)?.iso2 ?? "CO")} +{countryCode}</Text>
+                  <Ionicons name="chevron-down" size={13} color={Colors.muted} />
+                </TouchableOpacity>
+                <TextInput style={[em.input, { flex: 1 }]} value={phone} onChangeText={setPhone} placeholder="3001234567"
+                  placeholderTextColor={Colors.subtle} keyboardType="phone-pad" />
               </View>
-            ))}
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Correo electrónico</Text>
+              <TextInput style={em.input} value={email} onChangeText={setEmail} placeholder="juan@email.com"
+                placeholderTextColor={Colors.subtle} keyboardType="email-address" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Cumpleaños (AAAA-MM-DD)</Text>
+              <TextInput style={em.input} value={birthday} onChangeText={setBirthday} placeholder="1995-06-24"
+                placeholderTextColor={Colors.subtle} keyboardType="numbers-and-punctuation" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Notas internas</Text>
+              <TextInput
+                style={[em.input, { height: 90, textAlignVertical: "top" }]}
+                value={notes} onChangeText={setNotes} multiline
+                placeholder="Preferencias, alergias, cómo le gusta el corte…"
+                placeholderTextColor={Colors.subtle}
+              />
+            </View>
           </ScrollView>
           <View style={em.bottomBar}>
             <TouchableOpacity style={[em.btn, !canSave && { opacity: 0.4 }]}
@@ -115,6 +176,31 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Country picker */}
+      <Modal visible={countryPicker} animationType="slide" transparent onRequestClose={() => setCountryPicker(false)}>
+        <View style={m.overlay}>
+          <View style={[m.sheet, { maxHeight: "70%" }]}>
+            <View style={m.handle} />
+            <Text style={m.title}>Indicativo de país</Text>
+            <FlatList
+              data={COUNTRIES}
+              keyExtractor={c => `${c.iso2}-${c.dial}`}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: Colors.border }} />}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={m.clientRow}
+                  onPress={() => { setCountryCode(item.dial); setCountryPicker(false); }}
+                >
+                  <Text style={{ fontSize: 20 }}>{flagEmoji(item.iso2)}</Text>
+                  <Text style={m.clientName}>{item.name} <Text style={{ color: Colors.subtle }}>+{item.dial}</Text></Text>
+                  {countryCode === item.dial && <Ionicons name="checkmark" size={18} color={Colors.red} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -132,15 +218,20 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
   const [editOpen, setEditOpen] = useState(false);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [fieldValues, setFieldValues]   = useState<Record<string, string>>({});
+  const [posTotal, setPosTotal] = useState(0);
+  const [rewards, setRewards] = useState<LoyaltyReward[]>([]);
+  const [redemptions, setRedemptions] = useState<LoyaltyRedemption[]>([]);
+  const [serviceNames, setServiceNames] = useState<Record<string, string>>({});
+  const [redeeming, setRedeeming] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [apptRes, cfRes, fvRes] = await Promise.all([
+    const [apptRes, cfRes, fvRes, salesRes, rewardsRes, redRes, svcRes] = await Promise.all([
       supabase.from("appointments")
         .select("id,appointment_date,appointment_time,status,notes,services(name,price)")
         .eq("client_id", initialClient.id)
         .order("appointment_date", { ascending: false })
-        .limit(50),
+        .limit(200),
       supabase.from("custom_fields")
         .select("id,name,field_type")
         .eq("tenant_id", tenantId)
@@ -150,12 +241,20 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
       supabase.from("client_field_values")
         .select("field_id,value")
         .eq("client_id", initialClient.id),
+      supabase.from("pos_sales").select("total").eq("client_id", initialClient.id).limit(1000),
+      supabase.from("loyalty_rewards").select("*").eq("tenant_id", tenantId).eq("active", true).order("visits_required"),
+      supabase.from("loyalty_redemptions").select("*").eq("client_id", initialClient.id),
+      supabase.from("services").select("id,name").eq("tenant_id", tenantId),
     ]);
     setAppts((apptRes.data ?? []) as unknown as Appt[]);
     setCustomFields((cfRes.data ?? []) as CustomField[]);
     const map: Record<string, string> = {};
     (fvRes.data ?? []).forEach((r: any) => { map[r.field_id] = r.value ?? ""; });
     setFieldValues(map);
+    setPosTotal((salesRes.data ?? []).reduce((s: number, r: any) => s + (Number(r.total) || 0), 0));
+    setRewards((rewardsRes.data ?? []) as LoyaltyReward[]);
+    setRedemptions((redRes.data ?? []) as LoyaltyRedemption[]);
+    setServiceNames(Object.fromEntries(((svcRes.data ?? []) as { id: string; name: string }[]).map(sv => [sv.id, sv.name])));
     setLoading(false);
   }, [initialClient.id, tenantId]);
 
@@ -163,9 +262,28 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
 
   const completed  = appts.filter(a => a.status === "completed");
   const noShows    = appts.filter(a => a.status === "no_show").length;
-  const totalSpent = completed.reduce((s, a) => s + Number(a.services?.price ?? 0), 0);
+  // Gastado real (POS) — igual que el CRM web; si no hay ventas, precios de citas completadas
+  const totalSpent = posTotal > 0 ? posTotal : completed.reduce((s, a) => s + Number(a.services?.price ?? 0), 0);
   const since      = client.created_at ? fmtDateShort(client.created_at.slice(0, 10)) : "—";
   const fmtMoney   = (n: number) => n >= 1000 ? `$${(n / 1000).toFixed(0)}k` : `$${n}`;
+  const segment    = computeSegment(appts);
+
+  // Fidelización — mismas visitas que el panel web (pasadas, no canceladas)
+  const today = localDateStr();
+  const visits = appts.filter(a => a.status !== "cancelled" && a.appointment_date <= today).length;
+  const loyaltyStatuses = getClientRewardStatuses(rewards, visits, redemptions);
+  const loyaltyAvailable = loyaltyStatuses.filter(st => st.available > 0);
+  const loyaltyNext = loyaltyStatuses.filter(st => st.available === 0).sort((a, b) => a.remaining - b.remaining)[0] ?? null;
+
+  const handleRedeem = async (rewardId: string) => {
+    setRedeeming(true);
+    const { error } = await supabase.from("loyalty_redemptions").insert({
+      tenant_id: tenantId, client_id: client.id, reward_id: rewardId, visits_at_redemption: visits,
+    });
+    setRedeeming(false);
+    if (error) { Alert.alert("No se pudo registrar la entrega", "Revisa tu conexión e inténtalo de nuevo."); return; }
+    load();
+  };
 
   const handleEditSaved = (updated?: Client) => {
     if (!updated) { onClose(); onRefresh(); return; }
@@ -190,7 +308,12 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
           <View style={p.identity}>
             <Avatar name={client.name} size={72} />
             <Text style={p.clientName}>{client.name}</Text>
-            <Text style={p.clientSince}>Cliente desde {since}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={p.clientSince}>Cliente desde {since}</Text>
+              <View style={[p.segmentPill, { backgroundColor: segment.color + "28", borderColor: segment.color + "55" }]}>
+                <Text style={[p.segmentText, { color: "white" }]}>{visits >= 5 ? "VIP · " : ""}{segment.label}</Text>
+              </View>
+            </View>
             <View style={p.actions}>
               {client.phone && (
                 <>
@@ -238,6 +361,64 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
             </View>
           </Animated.View>
 
+          {/* Fidelización */}
+          {rewards.length > 0 && (
+            <Animated.View entering={FadeInDown.delay(30).duration(300)}>
+              <Text style={p.sectionLabel}>Fidelización</Text>
+              {loyaltyAvailable.length > 0 ? (
+                loyaltyAvailable.map(st => (
+                  <View key={st.reward.id} style={[p.card, Shadow.sm, { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: "#a855f7" + "45", marginBottom: 8 }]}>
+                    <View style={[p.infoIcon, { backgroundColor: "#a855f7" + "18" }]}>
+                      <Ionicons name="gift-outline" size={15} color="#a855f7" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={p.infoText} numberOfLines={1}>{st.reward.label}</Text>
+                      <Text style={{ fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: "#a855f7", marginTop: 2 }}>
+                        {describeReward(st.reward, serviceNames[st.reward.service_id ?? ""] ?? null)}{st.available > 1 ? ` · ×${st.available}` : ""}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleRedeem(st.reward.id)}
+                      disabled={redeeming}
+                      style={{ backgroundColor: "#a855f7", borderRadius: Radius.full, paddingVertical: 9, paddingHorizontal: 14, opacity: redeeming ? 0.6 : 1 }}
+                      activeOpacity={0.8}
+                    >
+                      {redeeming ? <ActivityIndicator size="small" color="white" /> : (
+                        <Text style={{ fontSize: 12, fontFamily: "SpaceGrotesk_700Bold", color: "white" }}>Entregar</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : loyaltyNext ? (
+                <View style={[p.card, Shadow.sm]}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <Text style={p.infoText} numberOfLines={1}>{loyaltyNext.reward.label}</Text>
+                    <Text style={{ fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted }}>
+                      Falta{loyaltyNext.remaining !== 1 ? "n" : ""} <Text style={{ color: Colors.blue, fontFamily: "SpaceGrotesk_700Bold" }}>{loyaltyNext.remaining}</Text> visita{loyaltyNext.remaining !== 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                  <View style={{ height: 6, borderRadius: 4, backgroundColor: Colors.border, overflow: "hidden" }}>
+                    <View style={{ height: "100%", width: `${Math.min(100, (loyaltyNext.progressCurrent / loyaltyNext.progressTarget) * 100)}%`, backgroundColor: Colors.blue, borderRadius: 4 }} />
+                  </View>
+                </View>
+              ) : (
+                <View style={[p.card, Shadow.sm]}>
+                  <Text style={{ fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted }}>Sin visitas suficientes todavía.</Text>
+                </View>
+              )}
+            </Animated.View>
+          )}
+
+          {/* Notas internas */}
+          {client.notes ? (
+            <Animated.View entering={FadeInDown.delay(45).duration(300)}>
+              <Text style={p.sectionLabel}>Notas internas</Text>
+              <View style={[p.card, Shadow.sm]}>
+                <Text style={{ fontSize: 13.5, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text, lineHeight: 20 }}>{client.notes}</Text>
+              </View>
+            </Animated.View>
+          ) : null}
+
           {/* Contact */}
           {(client.phone || client.email) && (
             <Animated.View entering={FadeInDown.delay(60).duration(300)}>
@@ -259,6 +440,17 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
                     </View>
                     <Text style={p.infoText}>{client.email}</Text>
                   </View>
+                )}
+                {client.birthday && (
+                  <>
+                    <View style={p.infoDivider} />
+                    <View style={p.infoRow}>
+                      <View style={[p.infoIcon, { backgroundColor: "#f59e0b" + "18" }]}>
+                        <Ionicons name="balloon-outline" size={15} color="#f59e0b" />
+                      </View>
+                      <Text style={p.infoText}>Cumple el {fmtDateShort(client.birthday)}</Text>
+                    </View>
+                  </>
                 )}
               </View>
             </Animated.View>
@@ -354,7 +546,7 @@ export default function ClientsScreen() {
   const loadClients = async () => {
     if (!tenantId) return;
     const { data } = await supabase.from("clients")
-      .select("id, name, phone, email, no_shows, created_at")
+      .select("id, name, phone, phone_country_code, email, no_shows, created_at, notes, birthday")
       .eq("tenant_id", tenantId).order("name");
     const c = data ?? [];
     setClients(c);
@@ -410,6 +602,7 @@ export default function ClientsScreen() {
         data={filtered}
         keyExtractor={(item) => item.id}
         style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         ListEmptyComponent={
@@ -495,6 +688,8 @@ const p = StyleSheet.create({
   identity:    { alignItems: "center", gap: 6 },
   clientName:  { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.4, marginTop: 6, textAlign: "center" },
   clientSince: { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,.75)" },
+  segmentPill: { borderRadius: Radius.full, paddingHorizontal: 9, paddingVertical: 3, borderWidth: 1 },
+  segmentText: { fontSize: 10, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: 0.3 },
   actions:     { flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap", justifyContent: "center" },
   actionBtn:   { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,.2)", borderRadius: Radius.full, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
   actionLabel: { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: "white" },
@@ -538,9 +733,22 @@ const em = StyleSheet.create({
   headerTitle:{ fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
   field:      { marginBottom: 16 },
   fieldLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 },
+  fieldLabelNote: { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.subtle, textTransform: "none", letterSpacing: 0 },
   input:      { ...Glass.cardStrong, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
+  countryBtn:     { ...Glass.cardStrong, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
+  countryBtnText: { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
   bottomBar:  { padding: 20, paddingBottom: 34, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.6)", backgroundColor: "rgba(244,244,249,0.85)" },
   btn:        { borderRadius: Radius.full, overflow: "hidden" },
   btnGrad: { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
   btnText:    { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
+});
+
+// Country picker sheet styles
+const m = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  sheet:      { backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, gap: 14 },
+  handle:     { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 8 },
+  title:      { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
+  clientRow:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  clientName: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
 });

@@ -2,7 +2,7 @@ export const Colors = {
   red:     "#fb0f05",
   blue:    "#0027fe",
   purple:  "#0027fe",
-  ink:     "#1a1a2e",
+  ink:     "#111118",
   // Backgrounds
   cream:   "#FFFFFF",
   cream2:  "#F4F4F9",

@@ -1,7 +1,6 @@
 export function fmtMoney(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
-  return `$${Math.round(n).toLocaleString("es-CO")}`;
+  return "$" + Math.round(n).toLocaleString("es-CO");
 }
 
 export function fmtMoneyFull(n: number): string {
@@ -9,6 +8,11 @@ export function fmtMoneyFull(n: number): string {
 }
 
 const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+// "YYYY-MM-DD" en hora local — toISOString() usa UTC y corre el día después de las 7 PM en UTC-5
+export function localDateStr(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export function fmtDateShort(d: string): string {
   const dt = new Date(d + "T00:00:00");

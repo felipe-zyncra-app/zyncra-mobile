@@ -196,7 +196,7 @@ export default function ServicesScreen() {
       >
         {services.length === 0 ? (
           <Animated.View entering={FadeInDown.duration(400)} style={[s.empty, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-            <Ionicons name="cut-outline" size={44} color={t.subtle} style={{ marginBottom: 12 }} />
+            <Ionicons name="pricetags-outline" size={44} color={t.subtle} style={{ marginBottom: 12 }} />
             <Text style={[s.emptyTitle, { color: t.text }]}>Sin servicios</Text>
             <Text style={[s.emptySub, { color: t.muted }]}>Toca + para agregar tu primer servicio</Text>
           </Animated.View>
@@ -209,7 +209,7 @@ export default function ServicesScreen() {
                 activeOpacity={0.75}
               >
                 <View style={[s.iconBox, { backgroundColor: Colors.purple + "12" }]}>
-                  <Ionicons name="cut-outline" size={18} color={Colors.purple} />
+                  <Ionicons name="pricetags-outline" size={18} color={Colors.purple} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.name, { color: t.text }]} numberOfLines={1}>{svc.name}</Text>

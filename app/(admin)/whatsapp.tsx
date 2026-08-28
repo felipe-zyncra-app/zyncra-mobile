@@ -16,7 +16,7 @@ import { useTheme } from "@/lib/theme";
 import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
-import { fmtPhone, fmtDateCompact } from "@/lib/format";
+import { fmtPhone, fmtDateCompact, localDateStr } from "@/lib/format";
 
 type Tab = "nueva" | "plantillas" | "historial" | "bot" | "conversaciones";
 type Segment = "all" | "active" | "inactive";
@@ -160,7 +160,7 @@ export default function WhatsappScreen() {
     cutoff.setDate(cutoff.getDate() - 90);
     const { data: appts } = await supabase.from("appointments")
       .select("client_id").eq("tenant_id", tid)
-      .gte("appointment_date", cutoff.toISOString().split("T")[0]);
+      .gte("appointment_date", localDateStr(cutoff));
     const activeIds = new Set((appts ?? []).map((a: any) => a.client_id));
     if (seg === "active") return allC.filter(c => activeIds.has(c.id));
     return allC.filter(c => !activeIds.has(c.id));
@@ -722,7 +722,7 @@ const s = StyleSheet.create({
   convoAvatar:  { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.red + "14", alignItems: "center", justifyContent: "center" },
   convoPhone:   { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
   convoPreview: { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 2 },
-  msgBubbleBot: { backgroundColor: "#1a1a2e", borderRadius: 12, borderTopLeftRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-start" },
+  msgBubbleBot: { backgroundColor: Colors.ink, borderRadius: 12, borderTopLeftRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-start" },
   msgBubbleUser:{ backgroundColor: Colors.cream2, borderRadius: 12, borderTopRightRadius: 4, padding: 10, maxWidth: "80%", alignSelf: "flex-end", borderWidth: 1, borderColor: Colors.border },
   msgText:      { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", lineHeight: 18 },
 

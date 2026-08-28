@@ -11,7 +11,9 @@ import { useTheme } from "@/lib/theme";
 import { MonoTag } from "@/components/ui";
 import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
 import { buildWeek } from "@/lib/scheduling";
+import { localDateStr } from "@/lib/format";
 import ErrorState from "@/components/ErrorState";
+import { useStaffPermissions } from "@/lib/permissions";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
@@ -28,11 +30,12 @@ function ApptDetailModal({ appt, onClose, onStatusChange }: {
   appt: Appt | null; onClose: () => void;
   onStatusChange: (id: string, status: string) => void;
 }) {
+  // Hooks antes del return condicional (regla de hooks: el orden no puede variar entre renders)
+  const { t } = useTheme();
+  const perms = useStaffPermissions();
   if (!appt) return null;
   const time = appt.appointment_time.substring(0, 5);
   const current = STATUS_OPTIONS.find(o => o.status === appt.status);
-
-  const { t } = useTheme();
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -74,7 +77,7 @@ function ApptDetailModal({ appt, onClose, onStatusChange }: {
             })}
           </View>
 
-          {appt.clients?.phone && (
+          {perms.contact && appt.clients?.phone && (
             <View style={[dm.infoCard, Shadow.sm]}>
               <Ionicons name="call-outline" size={16} color={Colors.muted} />
               <Text style={dm.infoText}>{appt.clients.phone}</Text>
@@ -128,7 +131,7 @@ export default function StaffAgendaScreen() {
     if (!professionalId) return;
     try {
       setError(false);
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = localDateStr(selectedDate);
       const { data, error: err } = await supabase
         .from("appointments")
         .select("id, appointment_date, appointment_time, status, clients(name, phone), services(name, price)")

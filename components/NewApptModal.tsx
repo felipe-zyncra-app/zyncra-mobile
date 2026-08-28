@@ -2,7 +2,7 @@
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,13 +10,16 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { scheduleAppointmentReminder } from "@/lib/notifications";
-import { timeToMins, generateSlotsForDay, buildWeek, chunk } from "@/lib/scheduling";
-import { fmt12Hour } from "@/lib/format";
+import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, effectiveDayHours } from "@/lib/scheduling";
+import { useClientSearch } from "@/lib/useClientSearch";
+import { fmt12Hour, localDateStr } from "@/lib/format";
+import { getActiveLocationId } from "@/lib/active-location";
 
 type Service      = { id: string; name: string; duration_minutes: number; price: number };
 type Client       = { id: string; name: string; phone: string };
-type Professional = { id: string; name: string; role: string };
+type Professional = { id: string; name: string; role: string; schedule?: any };
 type ExistingBlock = { appointment_time: string; duration: number };
+type ApptField    = { id: string; name: string; field_key: string; field_type: string; options: string[]; required: boolean };
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
@@ -55,6 +58,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const [clientSearch, setClientSearch]       = useState("");
   const [isNewClient, setIsNewClient]         = useState(false);
   const [newClientName, setNewClientName]     = useState("");
+  const [newClientPhone, setNewClientPhone]   = useState("");
+  const [apptFields, setApptFields]           = useState<ApptField[]>([]);
+  const [fieldValues, setFieldValues]         = useState<Record<string, string>>({});
   const [selectedClient, setSelectedClient]   = useState<Client | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedDate, setSelectedDate]       = useState(initialDate ?? new Date());
@@ -75,6 +81,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setDayClosed(false);
     setClientSearch("");
     setNewClientName("");
+    setNewClientPhone("");
     setIsNewClient(false);
     const base = initialDate ?? new Date();
     setSelectedDate(base);
@@ -89,17 +96,34 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     }
   }, [step, selectedDate]);
 
+  // Campos personalizados del servicio (los mismos que captura la reserva online del web)
+  useEffect(() => {
+    if (!selectedService) { setApptFields([]); setFieldValues({}); return; }
+    let cancelled = false;
+    supabase.from("custom_fields")
+      .select("id, name, field_key, field_type, options, required")
+      .eq("service_id", selectedService.id)
+      .eq("active", true)
+      .order("position")
+      .then(({ data }) => {
+        if (cancelled) return;
+        setApptFields((data ?? []).map((f: any) => ({ ...f, options: Array.isArray(f.options) ? f.options : [] })));
+        setFieldValues({});
+      });
+    return () => { cancelled = true; };
+  }, [selectedService?.id]);
+
   const fetchData = async () => {
     setLoading(true);
     const [{ data: svcs }, { data: pros }, { data: clis }, { data: tenant }] = await Promise.all([
       supabase.from("services").select("id, name, duration_minutes, price").eq("tenant_id", tenantId).order("name"),
-      supabase.from("professionals").select("id, name, role").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+      supabase.from("professionals").select("id, name, role, schedule").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
       supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name").limit(150),
       supabase.from("tenants").select("settings").eq("id", tenantId).single(),
     ]);
     setServices(svcs ?? []);
     setPros(pros ?? []);
-    setClients(clis ?? []);
+    setClients((clis ?? []).map(c => ({ ...c, phone: c.phone ?? "" })));
     setSchedule((tenant?.settings as any)?.schedule ?? null);
     setLoading(false);
   };
@@ -114,9 +138,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setSelectedTime(null);
     setDayClosed(false);
 
-    // Check if business is open on this day (JS day: 0=Sun … 6=Sat)
-    const dayKey = String(date.getDay());
-    const dayConfig = tenantSchedule?.[dayKey];
+    // Horario efectivo del día: el propio del profesional (si tiene) sobre el del negocio
+    const dayConfig = effectiveDayHours(date, tenantSchedule, selectedPro?.schedule);
 
     if (!dayConfig?.open) {
       setDayClosed(true);
@@ -128,7 +151,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     // Generate hourly slots that fit within business hours
     const slots = generateSlotsForDay(dayConfig.start, dayConfig.end, newDuration);
 
-    const dateStr = date.toISOString().split("T")[0];
+    const dateStr = localDateStr(date);
     const { data: appts } = await supabase
       .from("appointments")
       .select("appointment_time, service_id")
@@ -159,7 +182,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setLoadingSlots(false);
   };
 
-  const filteredClients = clients.filter(c =>
+  // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
+  const serverClients = useClientSearch(tenantId, clientSearch);
+  const filteredClients = serverClients ?? clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.phone.includes(clientSearch)
   );
@@ -168,24 +193,37 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const canStep0   = selectedPro !== null;
   const canStep1   = isNewClient ? newClientName.trim().length >= 2 : selectedClient !== null;
   const canStep2   = selectedService !== null;
-  const canSave    = selectedTime !== null;
+  const requiredFieldsOk = apptFields.every(f => !f.required || (fieldValues[f.id] ?? "").trim().length > 0);
+  const canSave    = selectedTime !== null && requiredFieldsOk;
 
   const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
 
   const handleSave = async () => {
-    if (!canSave || !selectedService || !selectedPro) return;
+    if (!canSave || !selectedService || !selectedPro || !selectedTime) return;
     setSaving(true);
     try {
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const dateStr = localDateStr(selectedDate);
+
+      // El slot pudo ocuparse desde otro dispositivo mientras se completaba el formulario
+      if (await hasSlotConflict(selectedPro.id, dateStr, timeToMins(selectedTime), selectedService.duration_minutes)) {
+        Alert.alert("Horario ya ocupado", "Ese horario acaba de reservarse. Elige otro.");
+        loadSlots(selectedPro.id, selectedDate, selectedService.duration_minutes, schedule);
+        return;
+      }
+
       let clientId = selectedClient?.id ?? null;
 
       if (isNewClient && newClientName.trim()) {
-        const { data: newCli } = await supabase
+        const { data: newCli, error: cliError } = await supabase
           .from("clients")
-          .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: "—" })
+          .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: newClientPhone.trim() || null })
           .select("id")
           .single();
-        if (newCli) clientId = newCli.id;
+        if (cliError || !newCli) {
+          Alert.alert("No se pudo crear el cliente", "Revisa tu conexión e inténtalo de nuevo.");
+          return;
+        }
+        clientId = newCli.id;
       }
 
       const payload: Record<string, unknown> = {
@@ -197,26 +235,43 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         status:           "pending",
       };
       if (clientId) payload.client_id = clientId;
+      // Sede activa: sin esto la cita no aparece en el panel web al filtrar
+      // por sede ni bloquea el horario en la reserva pública por sede
+      const locationId = await getActiveLocationId(tenantId);
+      if (locationId) payload.location_id = locationId;
 
-      const { data: inserted } = await supabase
+      const { data: inserted, error: apptError } = await supabase
         .from("appointments").insert(payload).select("id").single();
 
-      if (inserted) {
-        const { data: settings } = await supabase
-          .from("reminder_settings").select("hours_before, message_template")
-          .eq("tenant_id", tenantId).single();
-        await scheduleAppointmentReminder(
-          {
-            id: inserted.id,
-            date: dateStr,
-            time: `${selectedTime}:00`,
-            clientName: isNewClient ? newClientName.trim() : (selectedClient?.name ?? "Cliente"),
-            serviceName: selectedService.name,
-          },
-          settings?.hours_before ?? 24,
-          settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
-        );
+      if (apptError || !inserted) {
+        Alert.alert("No se pudo guardar la cita", "Revisa tu conexión e inténtalo de nuevo.");
+        return;
       }
+
+      // Valores de los campos del servicio — mismo destino que la reserva online (client_field_values)
+      if (clientId && apptFields.length > 0) {
+        const upserts = apptFields
+          .filter(f => (fieldValues[f.id] ?? "").trim())
+          .map(f => ({ tenant_id: tenantId, client_id: clientId, field_id: f.id, field_key: f.field_key, value: fieldValues[f.id].trim() }));
+        if (upserts.length > 0) {
+          await supabase.from("client_field_values").upsert(upserts, { onConflict: "client_id,field_id" });
+        }
+      }
+
+      const { data: settings } = await supabase
+        .from("reminder_settings").select("hours_before, message_template")
+        .eq("tenant_id", tenantId).single();
+      await scheduleAppointmentReminder(
+        {
+          id: inserted.id,
+          date: dateStr,
+          time: `${selectedTime}:00`,
+          clientName: isNewClient ? newClientName.trim() : (selectedClient?.name ?? "Cliente"),
+          serviceName: selectedService.name,
+        },
+        settings?.hours_before ?? 24,
+        settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
+      ).catch(() => {});
 
       onSuccess();
       onClose();
@@ -323,6 +378,15 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         placeholderTextColor={Colors.subtle}
                         autoFocus
                       />
+                      <Text style={[s.fieldLabel, { marginTop: 14 }]}>Teléfono (opcional)</Text>
+                      <TextInput
+                        style={s.input}
+                        value={newClientPhone}
+                        onChangeText={setNewClientPhone}
+                        placeholder="Ej: 300 123 4567"
+                        placeholderTextColor={Colors.subtle}
+                        keyboardType="phone-pad"
+                      />
                     </View>
                   ) : (
                     <>
@@ -418,7 +482,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                   </TouchableOpacity>
                   {week.map((d, i) => {
                     const isPast   = d < today;
-                    const isClosed = schedule ? schedule[String(d.getDay())]?.open === false : false;
+                    const isClosed = schedule ? effectiveDayHours(d, schedule, selectedPro?.schedule)?.open === false : false;
                     const isBlocked = isPast || isClosed;
                     const isSel   = d.toDateString() === selectedDate.toDateString();
                     const isToday = d.toDateString() === new Date().toDateString();
@@ -499,6 +563,43 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                           {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
                             <View key={`pad-${i}`} style={{ flex: 1 }} />
                           ))}
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {apptFields.length > 0 && !dayClosed && availableSlots.length > 0 && (
+                    <View style={[s.card, Shadow.sm, { marginTop: 18 }]}>
+                      <Text style={s.fieldLabel}>Datos de la cita</Text>
+                      {apptFields.map(f => (
+                        <View key={f.id} style={{ marginTop: 10 }}>
+                          <Text style={s.svcMeta}>{f.name}{f.required ? " *" : ""}</Text>
+                          {f.field_type === "select" && f.options.length > 0 ? (
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                              {f.options.map(opt => (
+                                <TouchableOpacity
+                                  key={opt}
+                                  style={[s.timeSlot, { paddingHorizontal: 14 }, fieldValues[f.id] === opt && s.timeSlotActive]}
+                                  onPress={() => setFieldValues(v => ({ ...v, [f.id]: v[f.id] === opt ? "" : opt }))}
+                                  activeOpacity={0.75}
+                                >
+                                  {fieldValues[f.id] === opt && (
+                                    <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                                  )}
+                                  <Text style={[s.timeSlotText, fieldValues[f.id] === opt && { color: "white" }]}>{opt}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          ) : (
+                            <TextInput
+                              style={[s.input, { marginTop: 6 }]}
+                              value={fieldValues[f.id] ?? ""}
+                              onChangeText={txt => setFieldValues(v => ({ ...v, [f.id]: txt }))}
+                              placeholder={f.name}
+                              placeholderTextColor={Colors.subtle}
+                              keyboardType={f.field_type === "number" ? "numeric" : "default"}
+                            />
+                          )}
                         </View>
                       ))}
                     </View>

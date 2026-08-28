@@ -205,10 +205,12 @@ export default function CommissionsScreen() {
     const [prosRes, rulesRes, apptRes] = await Promise.all([
       supabase.from("professionals").select("id, name, color").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
       supabase.from("commission_rules").select("*").eq("tenant_id", tenantId),
+      // Solo citas COBRADAS — una cita agendada o confirmada todavía no es
+      // ingreso ni genera comisión hasta que se cobra en el POS.
       supabase.from("appointments")
-        .select("professional_id, appointment_date, services(price)")
+        .select("id, professional_id, appointment_date, services(price)")
         .eq("tenant_id", tenantId)
-        .neq("status", "cancelled")
+        .eq("status", "completed")
         .gte("appointment_date", start)
         .lte("appointment_date", end),
     ]);
@@ -217,11 +219,26 @@ export default function CommissionsScreen() {
     const rulesList: CommissionRule[] = rulesRes.data ?? [];
     const appts: any[]              = apptRes.data ?? [];
 
+    // Lo REALMENTE cobrado (pos_sales) manda sobre el precio de lista del
+    // servicio — cubre descuentos, precio variable por foto, etc.
+    const aptIds = appts.map((a: any) => a.id).filter(Boolean);
+    const posSaleMap: Record<string, number> = {};
+    if (aptIds.length > 0) {
+      const { data: posSales } = await supabase
+        .from("pos_sales")
+        .select("appointment_id, total")
+        .in("appointment_id", aptIds);
+      (posSales ?? []).forEach((s: any) => {
+        if (s.appointment_id) posSaleMap[s.appointment_id] = Number(s.total);
+      });
+    }
+    const aptRevenue = (a: any) => posSaleMap[a.id] ?? (a.services?.price ?? 0);
+
     const result: ProSummary[] = pros.map((pro) => {
       const rule = rulesList.find(r => r.professional_id === pro.id) ?? null;
       const proAppts = appts.filter(a => a.professional_id === pro.id);
       const count   = proAppts.length;
-      const revenue = proAppts.reduce((sum: number, a: any) => sum + (a.services?.price ?? 0), 0);
+      const revenue = proAppts.reduce((sum: number, a: any) => sum + aptRevenue(a), 0);
       const commission = calcCommission(rule, revenue, count);
       return { pro, rule, appointments_count: count, revenue_total: revenue, commission_amount: commission };
     });
@@ -240,7 +257,7 @@ export default function CommissionsScreen() {
         const d = new Date(baseDate); d.setDate(baseDate.getDate() + i);
         const ds = d.toISOString().slice(0, 10);
         const dayAppts = appts.filter((a: any) => (a.appointment_date ?? "").startsWith(ds));
-        const dayRev = dayAppts.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
+        const dayRev = dayAppts.reduce((s: number, a: any) => s + aptRevenue(a), 0);
         slots.push(dayRev);
         labels.push(period === "week" ? ["L","M","X","J","V","S","D"][i] : String(i + 1));
       }

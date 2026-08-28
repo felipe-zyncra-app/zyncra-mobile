@@ -25,7 +25,7 @@ const HOUR_OPTIONS = [
 
 const VARIABLES = [
   { key: "{{nombre}}",   label: "Nombre",   icon: "person-outline" as const },
-  { key: "{{servicio}}", label: "Servicio",  icon: "cut-outline" as const },
+  { key: "{{servicio}}", label: "Servicio",  icon: "pricetags-outline" as const },
   { key: "{{fecha}}",    label: "Fecha",     icon: "calendar-outline" as const },
   { key: "{{hora}}",     label: "Hora",      icon: "time-outline" as const },
 ];
@@ -105,7 +105,7 @@ export default function RemindersScreen() {
       <ScreenHeader
         crumb="Panel"
         title="Recordatorios"
-        subtitle="Mensajes automáticos por WhatsApp"
+        subtitle="Avisos automáticos para tus clientes"
         onBack={() => router.back()}
       />
 
@@ -207,11 +207,11 @@ export default function RemindersScreen() {
                 {/* Chat header */}
                 <View style={s.chatHeader}>
                   <View style={s.chatAvatar}>
-                    <Ionicons name="logo-whatsapp" size={16} color="white" />
+                    <Ionicons name="mail-outline" size={16} color="white" />
                   </View>
                   <View>
                     <Text style={s.chatName}>Zyncra · Tu negocio</Text>
-                    <Text style={s.chatStatus}>en línea</Text>
+                    <Text style={s.chatStatus}>correo al cliente</Text>
                   </View>
                 </View>
 
@@ -219,7 +219,7 @@ export default function RemindersScreen() {
                 <View style={s.chatBg}>
                   <View style={s.bubble}>
                     <Text style={s.bubbleText}>{previewText(template)}</Text>
-                    <Text style={s.bubbleTime}>10:00 AM ✓✓</Text>
+                    <Text style={s.bubbleTime}>10:00 AM</Text>
                   </View>
                 </View>
 

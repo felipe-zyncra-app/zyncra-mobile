@@ -14,7 +14,12 @@ import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { MonoTag } from "@/components/ui";
 import { STATUS_META } from "@/constants/status";
-import { fmtDateShort, fmtMoneyFull } from "@/lib/format";
+import { fmtDateShort, fmtMoneyFull, localDateStr } from "@/lib/format";
+import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
+import {
+  type LoyaltyReward, type LoyaltyRedemption,
+  describeReward, getClientRewardStatuses,
+} from "@/lib/loyalty";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 
@@ -38,13 +43,59 @@ type ApptHistoryItem = {
   price: number;
 };
 
+// Ventana de datos de esta pantalla: últimos 12 meses (lista y estadísticas usan el mismo corte)
+function twelveMonthsAgo(): string {
+  const d = new Date();
+  return localDateStr(new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()));
+}
+
 // ─── Client detail modal ──────────────────────────────────────────────────────
 
-function ClientModal({ client, proId, onClose }: {
-  client: ClientEntry | null; proId: string | null; onClose: () => void;
+function ClientModal({ client, proId, perms, onClose }: {
+  client: ClientEntry | null; proId: string | null; perms: StaffPermissions; onClose: () => void;
 }) {
+  const { tenantId } = useAuth();
   const [history, setHistory] = useState<ApptHistoryItem[]>([]);
+  const [totalSpent, setTotalSpent] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Fidelización — visitas totales del cliente en el negocio (no solo con este profesional)
+  const [rewards, setRewards] = useState<LoyaltyReward[]>([]);
+  const [redemptions, setRedemptions] = useState<LoyaltyRedemption[]>([]);
+  const [totalVisits, setTotalVisits] = useState(0);
+  const [serviceNames, setServiceNames] = useState<Record<string, string>>({});
+  const [redeeming, setRedeeming] = useState(false);
+
+  const loadLoyalty = useCallback(async () => {
+    if (!client || !tenantId) return;
+    const [{ data: rw }, { data: rd }, { data: visitRows }, { data: svcs }] = await Promise.all([
+      supabase.from("loyalty_rewards").select("*").eq("tenant_id", tenantId).eq("active", true).order("visits_required"),
+      supabase.from("loyalty_redemptions").select("*").eq("client_id", client.id),
+      supabase.from("appointments").select("id,status,appointment_date").eq("client_id", client.id).limit(1000),
+      supabase.from("services").select("id,name").eq("tenant_id", tenantId),
+    ]);
+    setRewards((rw ?? []) as LoyaltyReward[]);
+    setRedemptions((rd ?? []) as LoyaltyRedemption[]);
+    const today = localDateStr();
+    setTotalVisits((visitRows ?? []).filter((a: any) => a.status !== "cancelled" && a.appointment_date <= today).length);
+    setServiceNames(Object.fromEntries(((svcs ?? []) as { id: string; name: string }[]).map(sv => [sv.id, sv.name])));
+  }, [client, tenantId]);
+
+  useEffect(() => { loadLoyalty(); }, [loadLoyalty]);
+
+  const loyaltyStatuses = getClientRewardStatuses(rewards, totalVisits, redemptions);
+  const loyaltyAvailable = loyaltyStatuses.filter(st => st.available > 0);
+  const loyaltyNext = loyaltyStatuses.filter(st => st.available === 0).sort((a, b) => a.remaining - b.remaining)[0] ?? null;
+
+  const handleRedeem = async (rewardId: string) => {
+    if (!client || !tenantId) return;
+    setRedeeming(true);
+    const { error } = await supabase.from("loyalty_redemptions").insert({
+      tenant_id: tenantId, client_id: client.id, reward_id: rewardId, visits_at_redemption: totalVisits,
+    });
+    setRedeeming(false);
+    if (!error) loadLoyalty();
+  };
 
   useEffect(() => {
     if (!client || !proId) return;
@@ -68,13 +119,22 @@ function ClientModal({ client, proId, onClose }: {
         })));
         setLoading(false);
       });
+    // El total se calcula aparte: el historial visible se corta en 20 citas
+    supabase.from("appointments")
+      .select("services(price)")
+      .eq("client_id", client.id)
+      .eq("professional_id", proId)
+      .eq("status", "completed")
+      .gte("appointment_date", twelveMonthsAgo())
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTotalSpent((data ?? []).reduce((s: number, a: any) => s + Number(a.services?.price ?? 0), 0));
+      });
     return () => { cancelled = true; };
   }, [client, proId]);
 
   const { t } = useTheme();
   if (!client) return null;
-
-  const totalSpent = history.filter(a => a.status === "completed").reduce((s, a) => s + a.price, 0);
 
   return (
     <Modal visible={!!client} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -90,10 +150,10 @@ function ClientModal({ client, proId, onClose }: {
           <View style={{ alignItems: "center" }}>
             <Avatar name={client.name} size={68} />
             <Text style={cm.clientName}>{client.name}</Text>
-            {client.phone && <Text style={cm.clientPhone}>{client.phone}</Text>}
+            {perms.contact && client.phone && <Text style={cm.clientPhone}>{client.phone}</Text>}
           </View>
           <View style={cm.quickActions}>
-            {client.phone && (
+            {perms.contact && client.phone && (
               <>
                 <TouchableOpacity style={cm.actionBtn} onPress={() => Linking.openURL(`tel:${client.phone}`)}>
                   <Ionicons name="call-outline" size={17} color="white" />
@@ -105,7 +165,7 @@ function ClientModal({ client, proId, onClose }: {
                 </TouchableOpacity>
               </>
             )}
-            {client.email && (
+            {perms.contact && client.email && (
               <TouchableOpacity style={cm.actionBtn} onPress={() => Linking.openURL(`mailto:${client.email}`)}>
                 <Ionicons name="mail-outline" size={17} color="white" />
                 <Text style={cm.actionLabel}>Correo</Text>
@@ -126,12 +186,60 @@ function ClientModal({ client, proId, onClose }: {
               <Text style={[cm.statVal, { color: Colors.success }]}>{client.completedCount}</Text>
               <Text style={cm.statLabel}>Completadas</Text>
             </View>
-            <View style={cm.statDivider} />
-            <View style={cm.statBox}>
-              <Text style={[cm.statVal, { color: Colors.purple }]}>{fmtMoneyFull(totalSpent)}</Text>
-              <Text style={cm.statLabel}>Total gastado</Text>
-            </View>
+            {perms.amounts && (
+              <>
+                <View style={cm.statDivider} />
+                <View style={cm.statBox}>
+                  <Text style={[cm.statVal, { color: Colors.purple }]}>{fmtMoneyFull(totalSpent)}</Text>
+                  <Text style={cm.statLabel}>Total gastado</Text>
+                </View>
+              </>
+            )}
           </View>
+
+          {/* Fidelización */}
+          {rewards.length > 0 && (
+            <>
+              <Text style={cm.sectionLabel}>Fidelización</Text>
+              {loyaltyAvailable.length > 0 ? (
+                loyaltyAvailable.map(st => (
+                  <View key={st.reward.id} style={[cm.apptRow, Shadow.sm, { borderWidth: 1, borderColor: "#a855f7" + "45" }]}>
+                    <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#a855f7" + "18", alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name="gift-outline" size={16} color="#a855f7" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={cm.apptService} numberOfLines={1}>{st.reward.label}</Text>
+                      <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: "#a855f7", marginTop: 2 }}>
+                        {describeReward(st.reward, serviceNames[st.reward.service_id ?? ""] ?? null)}{st.available > 1 ? ` · ×${st.available}` : ""}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleRedeem(st.reward.id)}
+                      disabled={redeeming}
+                      style={{ backgroundColor: "#a855f7", borderRadius: Radius.full, paddingVertical: 8, paddingHorizontal: 13, opacity: redeeming ? 0.6 : 1 }}
+                      activeOpacity={0.8}
+                    >
+                      {redeeming ? <ActivityIndicator size="small" color="white" /> : (
+                        <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: "white" }}>Entregar</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : loyaltyNext ? (
+                <View style={[cm.apptRow, Shadow.sm, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={cm.apptService} numberOfLines={1}>{loyaltyNext.reward.label}</Text>
+                    <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted }}>
+                      Falta{loyaltyNext.remaining !== 1 ? "n" : ""} <Text style={{ color: Colors.blue, fontFamily: "SpaceGrotesk_700Bold" }}>{loyaltyNext.remaining}</Text> visita{loyaltyNext.remaining !== 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                  <View style={{ height: 6, borderRadius: 4, backgroundColor: Colors.border, overflow: "hidden" }}>
+                    <View style={{ height: "100%", width: `${Math.min(100, (loyaltyNext.progressCurrent / loyaltyNext.progressTarget) * 100)}%`, backgroundColor: Colors.blue, borderRadius: 4 }} />
+                  </View>
+                </View>
+              ) : null}
+            </>
+          )}
 
           {/* Appointment history */}
           <Text style={cm.sectionLabel}>Historial de citas</Text>
@@ -155,7 +263,7 @@ function ClientModal({ client, proId, onClose }: {
                     <Text style={cm.apptTime}>{a.time}</Text>
                   </View>
                   <View style={{ alignItems: "flex-end", gap: 4 }}>
-                    {a.price > 0 && <Text style={cm.apptPrice}>{fmtMoneyFull(a.price)}</Text>}
+                    {perms.amounts && a.price > 0 && <Text style={cm.apptPrice}>{fmtMoneyFull(a.price)}</Text>}
                     <View style={[cm.statusPill, { backgroundColor: meta.color + "15" }]}>
                       <Text style={[cm.statusText, { color: meta.color }]}>{meta.label}</Text>
                     </View>
@@ -204,6 +312,7 @@ export default function StaffClientsScreen() {
   const { user } = useAuth();
   const { t } = useTheme();
   const [proId, setProId]           = useState<string | null>(null);
+  const [perms, setPerms]           = useState<StaffPermissions>(DEFAULT_PERMISSIONS);
   const [clients, setClients]       = useState<ClientEntry[]>([]);
   const [filtered, setFiltered]     = useState<ClientEntry[]>([]);
   const [query, setQuery]           = useState("");
@@ -215,8 +324,12 @@ export default function StaffClientsScreen() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    supabase.from("professionals").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (!cancelled && data) setProId(data.id); });
+    supabase.from("professionals").select("id, permissions").eq("user_id", user.id).single()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setProId(data.id);
+        setPerms(parsePermissions(data.permissions));
+      });
     return () => { cancelled = true; };
   }, [user]);
 
@@ -225,12 +338,23 @@ export default function StaffClientsScreen() {
     setLoading(true);
     setError(false);
     try {
-    const { data: appts, error: err } = await supabase
-      .from("appointments")
-      .select("appointment_date, client_id, status, clients(id,name,phone,email), services(name,price)")
-      .eq("professional_id", proId)
-      .not("client_id", "is", null)
-      .order("appointment_date", { ascending: false });
+    // Últimos 12 meses, paginado: sin rango ni paginación Supabase corta en 1000 filas
+    // en silencio y desaparecen clientes de la lista
+    const PAGE = 1000;
+    const appts: any[] = [];
+    for (let from = 0; from < 5000; from += PAGE) {
+      const { data: page, error: err } = await supabase
+        .from("appointments")
+        .select("appointment_date, client_id, status, clients(id,name,phone,email), services(name,price)")
+        .eq("professional_id", proId)
+        .not("client_id", "is", null)
+        .gte("appointment_date", twelveMonthsAgo())
+        .order("appointment_date", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (err) throw err;
+      appts.push(...(page ?? []));
+      if (!page || page.length < PAGE) break;
+    }
 
     const map = new Map<string, ClientEntry>();
     (appts ?? []).forEach((a: any) => {
@@ -288,7 +412,7 @@ export default function StaffClientsScreen() {
           )}
         </View>
         <View style={s.actionBtns}>
-          {item.phone && (
+          {perms.contact && item.phone && (
             <TouchableOpacity
               style={s.iconBtn}
               onPress={() => Linking.openURL(`https://wa.me/${item.phone!.replace(/\D/g, "")}`)}
@@ -344,6 +468,7 @@ export default function StaffClientsScreen() {
           data={filtered}
           keyExtractor={item => item.id}
           renderItem={renderItem}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
           ListEmptyComponent={
@@ -358,7 +483,7 @@ export default function StaffClientsScreen() {
         />
       )}
 
-      <ClientModal client={selected} proId={proId} onClose={() => setSelected(null)} />
+      <ClientModal client={selected} proId={proId} perms={perms} onClose={() => setSelected(null)} />
     </SafeAreaView>
   );
 }

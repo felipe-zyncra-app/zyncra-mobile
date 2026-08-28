@@ -81,29 +81,45 @@ export default function StaffProfileScreen() {
     const { start: ms, end: me } = getMonthRange();
     const { start: ws, end: we } = getWeekRange();
 
+    // Solo citas COBRADAS — una cita agendada o confirmada todavía no es
+    // ingreso ni genera comisión hasta que se cobra en el POS.
     const [ruleRes, monthAppts, weekAppts] = await Promise.all([
       supabase.from("commission_rules").select("type, value").eq("professional_id", proId).eq("tenant_id", tenantId).maybeSingle(),
       supabase.from("appointments")
-        .select("status, services(price)")
+        .select("id, status, services(price)")
         .eq("professional_id", proId)
         .eq("tenant_id", tenantId)
-        .in("status", ["completed", "confirmed"])
+        .eq("status", "completed")
         .gte("appointment_date", ms)
         .lte("appointment_date", me),
       supabase.from("appointments")
-        .select("status, services(price)")
+        .select("id, status, services(price)")
         .eq("professional_id", proId)
         .eq("tenant_id", tenantId)
-        .in("status", ["completed", "confirmed"])
+        .eq("status", "completed")
         .gte("appointment_date", ws)
         .lte("appointment_date", we),
     ]);
 
     const rule = ruleRes.data ?? null;
 
+    // Lo REALMENTE cobrado (pos_sales) manda sobre el precio de lista del
+    // servicio — cubre descuentos, precio variable por foto, etc.
+    const allIds = [...(monthAppts.data ?? []), ...(weekAppts.data ?? [])].map((a: any) => a.id).filter(Boolean);
+    const posSaleMap: Record<string, number> = {};
+    if (allIds.length > 0) {
+      const { data: posSales } = await supabase
+        .from("pos_sales")
+        .select("appointment_id, total")
+        .in("appointment_id", [...new Set(allIds)]);
+      (posSales ?? []).forEach((s: any) => {
+        if (s.appointment_id) posSaleMap[s.appointment_id] = Number(s.total);
+      });
+    }
+
     const calcComm = (appts: any[]) => {
       const count   = appts.length;
-      const revenue = appts.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
+      const revenue = appts.reduce((s: number, a: any) => s + (posSaleMap[a.id] ?? (a.services?.price ?? 0)), 0);
       let commission = 0;
       if (rule) {
         commission = rule.type === "percentage"
@@ -236,6 +252,18 @@ export default function StaffProfileScreen() {
                     <Text style={s.commStatLabel}>Ingresos generados</Text>
                   </View>
                 </View>
+
+                {/* Reparto: cuánto es para mí vs. cuánto se queda el negocio */}
+                <View style={s.splitRow}>
+                  <View style={[s.splitCell, { backgroundColor: Colors.success + "12" }]}>
+                    <Text style={[s.splitVal, { color: Colors.success }]}>{fmtMoneyFull(commMonth.commission_amount)}</Text>
+                    <Text style={s.splitLabel}>Para mí</Text>
+                  </View>
+                  <View style={[s.splitCell, { backgroundColor: t.bg }]}>
+                    <Text style={[s.splitVal, { color: t.muted }]}>{fmtMoneyFull(Math.max(0, commMonth.revenue_total - commMonth.commission_amount))}</Text>
+                    <Text style={s.splitLabel}>Para el negocio</Text>
+                  </View>
+                </View>
               </>
             ) : null}
           </View>
@@ -322,6 +350,11 @@ const s = StyleSheet.create({
   commStatDivider: { width: 1, backgroundColor: Colors.border, alignSelf: "stretch" },
   commStatVal:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
   commStatLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
+
+  splitRow:   { flexDirection: "row", gap: 8, marginTop: 12 },
+  splitCell:  { flex: 1, borderRadius: Radius.md, padding: 10, alignItems: "center", gap: 2 },
+  splitVal:   { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold" },
+  splitLabel: { fontSize: 10, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
 
   weekCard:    { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg, padding: 14 },
   weekIconBox: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },

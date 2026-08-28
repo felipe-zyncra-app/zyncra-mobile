@@ -9,14 +9,12 @@ type Props = {
   rightAction?: { icon: React.ComponentProps<typeof Ionicons>["name"]; onPress: () => void };
 };
 
-// Header de modal en tinta (#0C0C14) con barra de acento gradiente —
-// mismo patrón que los headers de modales del resto del app.
 export default function ModalHeader({ title, onClose, rightAction }: Props) {
   return (
-    <View style={s.header}>
+    <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
       <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.accent} />
       <View style={s.row}>
-        <TouchableOpacity onPress={onClose} style={s.btn}>
+        <TouchableOpacity onPress={onClose} style={s.btn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="close" size={20} color="white" />
         </TouchableOpacity>
         <Text style={s.title}>{title}</Text>
@@ -28,12 +26,12 @@ export default function ModalHeader({ title, onClose, rightAction }: Props) {
           <View style={{ width: 40 }} />
         )}
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 const s = StyleSheet.create({
-  header: { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 20, backgroundColor: "#0C0C14" },
+  header: { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 20 },
   accent: { position: "absolute", top: 0, left: 0, right: 0, height: 3 },
   row:    { flexDirection: "row", alignItems: "center", gap: 12 },
   btn:    { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.18)", alignItems: "center", justifyContent: "center" },

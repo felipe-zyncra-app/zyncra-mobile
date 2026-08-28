@@ -51,7 +51,7 @@ const DARK = {
   inputBorder:  "rgba(255,255,255,0.12)",
   bottomBar:    "rgba(13,13,20,0.92)",
   bottomBorder: "rgba(255,255,255,0.08)",
-  tabBarBg:     "rgba(22,22,31,0.75)",
+  tabBarBg:     "rgba(17,17,24,0.75)",
   tabBarBorder: "rgba(255,255,255,0.08)",
   // ── Tokens estilo portal web, mapeados sobre la sidebar oscura (#0C0C14) ──
   canvas:       "#0D0D14",
