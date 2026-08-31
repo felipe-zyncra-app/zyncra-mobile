@@ -10,23 +10,26 @@
       "es-MX": {
         "description": "Zyncra es la app para gestionar tu negocio de servicios desde el celular: agenda, clientes, cobros y reportes en un solo lugar.\n\nCon Zyncra puedes:\n\n- Gestionar tu agenda y las citas de tus clientes en tiempo real\n- Llevar el historial y los datos de cada cliente, incluyendo historias clinicas\n- Registrar cobros y ventas de tu negocio\n- Controlar tu inventario\n- Consultar reportes y el estado financiero de tu negocio\n- Recibir notificaciones push al instante\n- Sincronizar tu equipo con el portal web de Zyncra\n- Conectar WhatsApp para comunicarte con tus clientes\n- Contar con Hanna, tu copiloto con inteligencia artificial, para resolver dudas y ayudarte a operar el negocio\n\nZyncra esta pensada para negocios de servicios que necesitan organizar su operacion diaria desde cualquier lugar.",
         "keywords": [
+          "barberia",
           "peluqueria",
-          "citas",
+          "salon",
+          "spa",
           "estetica",
+          "ia",
+          "agente",
+          "chatbot",
+          "asistente",
+          "pos",
           "reservas",
-          "ventas",
-          "clientes",
-          "caja",
-          "inventario",
           "whatsapp",
-          "facturacion",
+          "caja",
           "crm"
         ],
         "releaseNotes": "Registro desde la app\nYa puedes crear la cuenta de tu negocio sin salir de Zyncra, con 14 días de prueba.\n\nApariencia automática\nEl tema claro u oscuro sigue la configuración de tu iPhone, incluido el cambio automático de noche.\n\nEstado de tu cuenta\nNueva pantalla de estado y avisos anticipados cuando tu prueba o tu plan están por terminar, para que nada te tome por sorpresa.\n\nCorrecciones\nSe retiró una opción interna de notificaciones que aparecía por error en todas las cuentas.",
         "promoText": "Gestiona tu negocio de servicios: agenda, clientes, cobros, inventario y reportes en un solo lugar, con Hanna, tu copiloto con IA.",
         "supportUrl": "https://zyncra.app/soporte",
         "title": "Zyncra: Agenda para Negocios",
-        "subtitle": "Barbería, salón, spa y POS",
+        "subtitle": "Citas, ventas y automatización",
         "privacyPolicyUrl": "https://zyncra.app/privacidad",
         "screenshots": {
           "APP_IPHONE_65": [
