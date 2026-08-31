@@ -1,7 +1,11 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { useColorScheme } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+/** Esquema realmente pintado. Nunca es "system": ya está resuelto. */
 export type ThemeMode = "light" | "dark";
+/** Lo que el usuario eligió en Ajustes. "system" sigue al dispositivo. */
+export type ThemePreference = ThemeMode | "system";
 
 const LIGHT = {
   bg:           "#F4F4F9",
@@ -71,38 +75,56 @@ export type ThemeColors = Omit<typeof LIGHT, "blurTint" | "statusBar"> & {
 };
 
 type ThemeCtx = {
+  /** Esquema en uso, ya resuelto contra el dispositivo. */
   mode: ThemeMode;
+  /** Elección del usuario: "system" | "light" | "dark". */
+  preference: ThemePreference;
   t: ThemeColors;
+  setPreference: (p: ThemePreference) => void;
+  /** Alterna claro/oscuro fijando la preferencia (deja de seguir al sistema). */
   toggle: () => void;
 };
 
 const ThemeContext = createContext<ThemeCtx>({
   mode: "light",
+  preference: "system",
   t: LIGHT,
+  setPreference: () => {},
   toggle: () => {},
 });
 
 const STORAGE_KEY = "@zyncra_theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>("light");
+  // Apariencia del dispositivo. Cambia sola cuando el SO alterna claro/oscuro
+  // (ajuste manual o el horario automático de noche), y este hook re-renderiza.
+  // Devuelve null si el SO aún no la reporta; se trata como claro.
+  const device = useColorScheme();
+  // Por defecto seguimos al dispositivo; una cuenta nueva no elige nada.
+  const [preference, setPref] = useState<ThemePreference>("system");
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((v) => {
-      if (v === "dark" || v === "light") setMode(v);
+      // Los valores que guardó la versión anterior ("light"/"dark") siguen
+      // siendo preferencias válidas: quien ya había elegido, la conserva.
+      if (v === "dark" || v === "light" || v === "system") setPref(v);
     });
   }, []);
 
-  const toggle = () => {
-    const next = mode === "light" ? "dark" : "light";
-    setMode(next);
-    AsyncStorage.setItem(STORAGE_KEY, next);
+  const setPreference = (p: ThemePreference) => {
+    setPref(p);
+    AsyncStorage.setItem(STORAGE_KEY, p);
   };
+
+  const mode: ThemeMode =
+    preference === "system" ? (device === "dark" ? "dark" : "light") : preference;
+
+  const toggle = () => setPreference(mode === "light" ? "dark" : "light");
 
   const t = mode === "dark" ? DARK : LIGHT;
 
   return (
-    <ThemeContext.Provider value={{ mode, t, toggle }}>
+    <ThemeContext.Provider value={{ mode, preference, t, setPreference, toggle }}>
       {children}
     </ThemeContext.Provider>
   );

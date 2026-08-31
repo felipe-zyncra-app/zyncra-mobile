@@ -1,14 +1,15 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Switch } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Config, authedFetch } from "@/lib/config";
+import Constants from "expo-constants";
 import { Colors, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
-import { Card, MonoTag, SectionLabel, ListRow, TenantBadge } from "@/components/ui";
+import { Card, MonoTag, SectionLabel, ListRow, TenantBadge, SegmentedControl } from "@/components/ui";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -22,12 +23,6 @@ const SECTIONS: {
     title: "Soporte",
     items: [
       { icon: "help-buoy-outline", color: Colors.blue, label: "Centro de ayuda", sub: "Guías paso a paso para usar Zyncra", route: "/(admin)/help" },
-    ],
-  },
-  {
-    title: "Evento especial",
-    items: [
-      { icon: "airplane-outline", color: Colors.red, label: "Enviar notificación ahora", sub: "Botones rápidos para el salto en paracaídas 🪂", route: "/(admin)/push-now" },
     ],
   },
   {
@@ -91,7 +86,7 @@ const SECTIONS: {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { mode, t, toggle } = useTheme();
+  const { mode, preference, t, setPreference } = useTheme();
   const { tenant: tenantData } = useTenant();
 
   const handleLogout = () => {
@@ -162,20 +157,27 @@ export default function SettingsScreen() {
           <SectionLabel>Apariencia</SectionLabel>
           <Card>
             <ListRow
-              icon={mode === "dark" ? "moon" : "sunny"}
-              color={mode === "dark" ? "#6366f1" : "#f59e0b"}
-              label="Modo oscuro"
-              sub={mode === "dark" ? "Activado" : "Desactivado"}
+              icon={preference === "system" ? "phone-portrait" : mode === "dark" ? "moon" : "sunny"}
+              color={preference === "system" ? Colors.blue : mode === "dark" ? "#6366f1" : "#f59e0b"}
+              label="Tema"
+              sub={
+                preference === "system"
+                  ? `Igual que tu dispositivo · ahora ${mode === "dark" ? "oscuro" : "claro"}`
+                  : preference === "dark" ? "Siempre oscuro" : "Siempre claro"
+              }
               last
-              right={(
-                <Switch
-                  value={mode === "dark"}
-                  onValueChange={toggle}
-                  trackColor={{ false: "rgba(20,15,30,0.12)", true: Colors.red + "60" }}
-                  thumbColor={mode === "dark" ? Colors.red : "#f4f3f4"}
-                />
-              )}
             />
+            <View style={s.themePicker}>
+              <SegmentedControl
+                value={preference}
+                onChange={setPreference}
+                options={[
+                  { value: "system", label: "Automático" },
+                  { value: "light",  label: "Claro" },
+                  { value: "dark",   label: "Oscuro" },
+                ]}
+              />
+            </View>
           </Card>
         </Animated.View>
 
@@ -218,7 +220,7 @@ export default function SettingsScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(580).duration(400)} style={{ alignItems: "center", marginTop: 24 }}>
-          <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v1.0.0 · Hecho en Colombia 🇨🇴</Text>
+          <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v{Constants.expoConfig?.version ?? "1.0.0"} · Hecho en Colombia 🇨🇴</Text>
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
@@ -227,6 +229,7 @@ export default function SettingsScreen() {
 
 const s = StyleSheet.create({
   headerRow:   { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  themePicker: { paddingHorizontal: 16, paddingBottom: 14, marginTop: -4 },
   headerTitle: { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
   logoutRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
   logoutIcon:  { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },

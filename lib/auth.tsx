@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useRouter, useSegments } from "expo-router";
 import { supabase } from "./supabase";
 import type { Session, User } from "@supabase/supabase-js";
@@ -11,6 +11,11 @@ type AuthCtx = {
   role: UserRole;
   tenantId: string | null;
   loading: boolean;
+  /** Vuelve a resolver el rol contra la base. Hace falta cuando el rol cambia
+   *  DESPUÉS del SIGNED_IN: al registrarse, el signUp dispara SIGNED_IN antes
+   *  de que exista el negocio, así que el rol queda en null y el guard de
+   *  (admin) rebotaría al login. */
+  refreshRole: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthCtx>({
@@ -19,6 +24,7 @@ const AuthContext = createContext<AuthCtx>({
   role: null,
   tenantId: null,
   loading: true,
+  refreshRole: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -57,6 +63,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(null);
     setTenantId(null);
   }
+
+  const refreshRole = useCallback(async () => {
+    const { data: { session: s } } = await supabase.auth.getSession();
+    if (s?.user) await resolveRole(s.user.id);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: s } }) => {
@@ -126,6 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role,
         tenantId,
         loading,
+        refreshRole,
       }}
     >
       {children}

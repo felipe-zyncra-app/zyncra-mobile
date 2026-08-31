@@ -13,6 +13,7 @@ import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
 import { buildWeek } from "@/lib/scheduling";
 import { localDateStr } from "@/lib/format";
 import ErrorState from "@/components/ErrorState";
+import SubscriptionBanner from "@/components/SubscriptionBanner";
 import { useStaffPermissions } from "@/lib/permissions";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
@@ -164,6 +165,9 @@ export default function StaffAgendaScreen() {
           <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>{dateStr}</Text>
         </Animated.View>
       </View>
+
+      {/* El equipo también se entera: si el negocio no paga, se les bloquea */}
+      <SubscriptionBanner style={{ marginHorizontal: 20, marginBottom: 12 }} />
 
       {/* Week strip */}
       <View style={[s.weekStrip, Shadow.sm, { backgroundColor: t.bgAlt }]}>

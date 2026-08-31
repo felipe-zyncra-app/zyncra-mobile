@@ -1,7 +1,6 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
-import { Config, authedFetch } from "./config";
 import { localDateStr } from "./format";
 
 // How notifications appear when the app is in foreground
@@ -163,37 +162,4 @@ export async function refreshAllReminders() {
       template
     );
   }
-}
-
-// ─── Send an immediate remote push to the tenant owner's device ──────────────
-
-export async function sendPushNow(body: string, title?: string): Promise<{ ok: true; ticket: unknown }> {
-  const res = await authedFetch(Config.edgeFunctions.sendPush, {
-    method: "POST",
-    body: JSON.stringify({ title, body }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data as any)?.error) {
-    throw new Error((data as any)?.error || "No se pudo enviar la notificación");
-  }
-  return data as { ok: true; ticket: unknown };
-}
-
-// ─── Send a staggered sequence of pushes (delivered server-side, so it keeps
-// firing even if the screen is off / the app is backgrounded) ────────────────
-
-export type PushSequenceItem = { title?: string; body: string; delayMs: number };
-
-export async function sendPushSequence(messages: PushSequenceItem[]): Promise<{ ok: true; scheduled: number }> {
-  const res = await authedFetch(Config.edgeFunctions.sendPush, {
-    method: "POST",
-    body: JSON.stringify({ messages }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data as any)?.error) {
-    throw new Error((data as any)?.error || "No se pudo programar la secuencia");
-  }
-  return data as { ok: true; scheduled: number };
 }

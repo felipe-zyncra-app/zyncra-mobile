@@ -10,6 +10,7 @@ import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth";
 import { TenantProvider } from "@/lib/tenant";
+import { SubscriptionProvider } from "@/lib/subscription";
 import ZyncraIntro from "@/components/ZyncraIntro";
 import { registerForPushNotifications, scheduleDailyBriefing } from "@/lib/notifications";
 
@@ -58,7 +59,9 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <TenantProvider>
-          <AppContent />
+          <SubscriptionProvider>
+            <AppContent />
+          </SubscriptionProvider>
         </TenantProvider>
       </AuthProvider>
     </ThemeProvider>

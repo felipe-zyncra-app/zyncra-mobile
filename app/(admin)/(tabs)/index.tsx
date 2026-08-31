@@ -14,6 +14,7 @@ import { fmtMoney } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import { refreshAllReminders } from "@/lib/notifications";
 import NewApptModal from "@/components/NewApptModal";
+import SubscriptionBanner from "@/components/SubscriptionBanner";
 import { Card, CardHead, MonoTag, TrendChip, TenantBadge, SegmentedControl, useCountUp } from "@/components/ui";
 import { Spark, AreaChart, Bars, Donut, RankBars, ChartEmpty } from "@/components/charts";
 
@@ -376,6 +377,9 @@ export default function DashboardScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 14 }}
       >
+        {/* Aviso de prueba por terminar / plan por vencer / pago en mora */}
+        <SubscriptionBanner />
+
         {/* ── Header compacto (patrón del web: título + fecha serif) ── */}
         <Animated.View entering={FadeInDown.duration(350)}>
           <View style={s.headerRow}>
