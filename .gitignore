@@ -42,3 +42,8 @@ yarn-error.*
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Screenshots que baja "eas metadata:pull" desde App Store Connect.
+# Son una copia de lo que ya vive en ASC (3 MB de binarios); el repo ya
+# versiona los originales en marketing-screenshots/. Se regenera con pull.
+store/
