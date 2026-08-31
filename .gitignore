@@ -47,3 +47,9 @@ yarn-error.*
 # Son una copia de lo que ya vive en ASC (3 MB de binarios); el repo ya
 # versiona los originales en marketing-screenshots/. Se regenera con pull.
 store/
+
+# store.config.json lleva apple.review: usuario y contrasena de la cuenta demo
+# para App Review, mas telefono y correo de contacto. Este repo es publico, asi
+# que el archivo NO se versiona. Se regenera con "eas metadata:pull" y se
+# sincroniza con "eas metadata:push".
+store.config.json
