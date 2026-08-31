@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth";
 import { fmtDateShort, localDateStr } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
 import Avatar from "@/components/Avatar";
+import { MonoTag } from "@/components/ui";
 import {
   type LoyaltyReward, type LoyaltyRedemption,
   describeReward, getClientRewardStatuses,
@@ -113,7 +114,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={em.header}>
+        <View style={[em.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={em.headerRow}>
             <TouchableOpacity onPress={onClose} style={em.iconBtn}>
@@ -126,7 +127,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
               </TouchableOpacity>
             ) : <View style={{ width: 40 }} />}
           </View>
-        </LinearGradient>
+        </View>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <View style={em.field}>
@@ -294,8 +295,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
         {/* Header */}
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={[p.header, { paddingTop: insets.top + 12 }]}>
+        <View style={[p.header, { paddingTop: insets.top + 12, backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={p.headerRow}>
             <TouchableOpacity onPress={onClose} style={p.iconBtn}>
@@ -338,7 +338,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
               )}
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}>
           {/* Stats */}
@@ -570,32 +570,22 @@ export default function ClientsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerBlob1} />
-        <View style={s.headerBlob2} />
-
-        <View style={s.headerTopRow}>
-          <View style={s.headerIconBox}>
-            <Ionicons name="people" size={16} color="white" />
-          </View>
-          <Text style={s.headerLabel}>Clientes</Text>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={s.addBtn} onPress={() => setNewModal(true)} activeOpacity={0.8}>
-            <Ionicons name="person-add-outline" size={18} color="white" />
-          </TouchableOpacity>
+      <View style={s.header}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <MonoTag>Clientes</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]}>Tu base de clientes</Text>
+          <Text style={[s.headerSub, { color: t.muted }]}>
+            {clients.length} cliente{clients.length !== 1 ? "s" : ""} registrado{clients.length !== 1 ? "s" : ""}
+          </Text>
         </View>
+        <TouchableOpacity onPress={() => setNewModal(true)} activeOpacity={0.85} style={s.addBtnWrap}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.addBtn}>
+            <Ionicons name="person-add-outline" size={17} color="white" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
-        <Text style={s.headerTitle}>Tu base de clientes</Text>
-
-        <View style={s.headerStatsRow}>
-          <View style={s.headerStatPill}>
-            <Ionicons name="people" size={12} color="rgba(255,255,255,.9)" />
-            <Text style={s.headerStatText}>{clients.length} cliente{clients.length !== 1 ? "s" : ""}</Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <View style={s.searchWrap}>
+      <View style={[s.searchWrap, { backgroundColor: t.card, borderBottomColor: t.line }]}>
         <Ionicons name="search-outline" size={16} color={Colors.subtle} style={{ marginRight: 8 }} />
         <TextInput
           style={s.search} placeholder="Buscar por nombre o teléfono"
@@ -674,18 +664,12 @@ export default function ClientsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  header:          { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 16, overflow: "hidden" },
-  headerBlob1:     { position: "absolute", width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,.06)", top: -80, right: -40 },
-  headerBlob2:     { position: "absolute", width: 100, height: 100, borderRadius: 50, backgroundColor: "rgba(0,0,0,.05)", bottom: -30, left: -20 },
-  headerTopRow:    { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, position: "relative", zIndex: 1 },
-  headerIconBox:   { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
-  headerLabel:     { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.8)" },
-  headerTitle:     { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.5, marginBottom: 12, position: "relative", zIndex: 1 },
-  headerStatsRow:  { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,.14)", borderRadius: Radius.full, paddingVertical: 8, paddingHorizontal: 14, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", position: "relative", zIndex: 1 },
-  headerStatPill:  { flexDirection: "row", alignItems: "center", gap: 6 },
-  headerStatText:  { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.9)" },
-  addBtn:          { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
-  searchWrap:  { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.65)", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.5)" },
+  header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
+  headerTitle: { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, marginTop: 3 },
+  headerSub:   { fontSize: 12.5, fontFamily: "SpaceGrotesk_400Regular", marginTop: 3 },
+  addBtnWrap:  { borderRadius: 19, overflow: "hidden" },
+  addBtn:      { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
+  searchWrap:  { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
   search:      { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
   row:         { ...Glass.cardStrong, borderRadius: Radius.md, padding: 14, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
   name:        { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },

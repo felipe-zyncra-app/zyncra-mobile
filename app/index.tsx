@@ -18,5 +18,5 @@ export default function Index() {
 
   if (!session) return <Redirect href="/(auth)/login" />;
   if (role === "staff") return <Redirect href="/(staff)/agenda" />;
-  return <Redirect href="/(admin)" />;
+  return <Redirect href="/(admin)/(tabs)" />;
 }

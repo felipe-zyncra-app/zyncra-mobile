@@ -13,7 +13,9 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { fmtPhone, fmtDateCompact, localDateStr } from "@/lib/format";
 
 type Tab = "nueva" | "plantillas" | "historial" | "bot" | "conversaciones";
@@ -40,7 +42,8 @@ export default function WhatsappScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const [bizName, setBizName]         = useState("");
+  const { tenant: tenantData } = useTenant();
+  const bizName = tenantData?.name ?? "";
   const [tab, setTab]                 = useState<Tab>("nueva");
 
   // Nueva campaña
@@ -76,12 +79,6 @@ export default function WhatsappScreen() {
   const [conversations, setConversations]   = useState<Conversation[]>([]);
   const [convoLoading, setConvoLoading]     = useState(false);
   const [expandedConvo, setExpandedConvo]   = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!tenantId) return;
-    supabase.from("tenants").select("name").eq("id", tenantId).single()
-      .then(({ data }) => { if (data) setBizName(data.name ?? ""); });
-  }, [tenantId]);
 
   const loadTemplates = useCallback(async () => {
     if (!tenantId) return;
@@ -255,21 +252,7 @@ export default function WhatsappScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Campañas WhatsApp</Text>
-            <Text style={s.headerSub}>Mensajes masivos personalizados</Text>
-          </View>
-          <View style={[s.backBtn, { backgroundColor: "rgba(255,255,255,.18)" }]}>
-            <Ionicons name="logo-whatsapp" size={20} color="white" />
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Marketing" title="Campañas WhatsApp" subtitle="Mensajes masivos personalizados" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>
@@ -282,8 +265,8 @@ export default function WhatsappScreen() {
 
       {/* ── NUEVA CAMPAÑA ── */}
       {tab === "nueva" && (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
             <Animated.View entering={FadeInDown.duration(350)}>
 
               {/* Name */}
@@ -405,7 +388,7 @@ export default function WhatsappScreen() {
 
       {/* ── PLANTILLAS ── */}
       {tab === "plantillas" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           {templates.length === 0 ? (
             <Animated.View entering={FadeInDown.duration(350)} style={[s.emptyCard, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <Text style={{ fontSize: 32, marginBottom: 10 }}>📝</Text>
@@ -439,7 +422,7 @@ export default function WhatsappScreen() {
 
       {/* ── HISTORIAL ── */}
       {tab === "historial" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           {campaigns.length === 0 ? (
             <Animated.View entering={FadeInDown.duration(350)} style={[s.emptyCard, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <Text style={{ fontSize: 32, marginBottom: 10 }}>📣</Text>
@@ -492,7 +475,7 @@ export default function WhatsappScreen() {
 
       {/* ── BOT IA ── */}
       {tab === "bot" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           <Animated.View entering={FadeInDown.duration(350)}>
             <View style={[s.botRow, Shadow.sm, { backgroundColor: t.bgAlt }]}>
               <View style={{ flex: 1 }}>
@@ -538,7 +521,7 @@ export default function WhatsappScreen() {
 
       {/* ── CONVERSACIONES ── */}
       {tab === "conversaciones" && (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           {convoLoading ? (
             <ActivityIndicator color={Colors.red} style={{ marginTop: 40 }} />
           ) : conversations.length === 0 ? (

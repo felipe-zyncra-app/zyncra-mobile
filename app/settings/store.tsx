@@ -12,10 +12,11 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { Config } from "@/lib/config";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 import BottomSaveBar from "@/components/BottomSaveBar";
 import FormField from "@/components/FormField";
 
@@ -99,6 +100,7 @@ export default function StoreScreen() {
   const router = useRouter();
   const { tenantId } = useAuth();
   const { t } = useTheme();
+  const { patch: patchTenant } = useTenant();
 
   const [slug,       setSlug]       = useState<string>("");
   const [loading,    setLoading]    = useState(true);
@@ -199,6 +201,13 @@ export default function StoreScreen() {
       secondary_color: secondColor,
     }, { onConflict: "tenant_id" });
 
+    patchTenant({
+      name:    bizName.trim(),
+      phone:   phone.trim(),
+      address: address.trim(),
+      slug:    slug.trim(),
+    });
+
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -221,15 +230,15 @@ export default function StoreScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
+      <ScreenHeader crumb="Negocio" title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
             {/* ── Booking link card ──────────────────────────────────── */}
             <Animated.View entering={FadeInDown.delay(60).duration(400)} style={[s.linkCard, Shadow.md]}>

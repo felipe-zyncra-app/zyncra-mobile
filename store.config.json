@@ -1,0 +1,88 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.1.0",
+    "copyright": "2026 Zyncra SAS",
+    "release": {
+      "automaticRelease": true
+    },
+    "info": {
+      "es-MX": {
+        "description": "Zyncra es la app para gestionar tu negocio de servicios desde el celular: agenda, clientes, cobros y reportes en un solo lugar.\n\nCon Zyncra puedes:\n\n- Gestionar tu agenda y las citas de tus clientes en tiempo real\n- Llevar el historial y los datos de cada cliente, incluyendo historias clinicas\n- Registrar cobros y ventas de tu negocio\n- Controlar tu inventario\n- Consultar reportes y el estado financiero de tu negocio\n- Recibir notificaciones push al instante\n- Sincronizar tu equipo con el portal web de Zyncra\n- Conectar WhatsApp para comunicarte con tus clientes\n- Contar con Hanna, tu copiloto con inteligencia artificial, para resolver dudas y ayudarte a operar el negocio\n\nZyncra esta pensada para negocios de servicios que necesitan organizar su operacion diaria desde cualquier lugar.",
+        "keywords": [
+          "peluqueria",
+          "citas",
+          "estetica",
+          "reservas",
+          "ventas",
+          "clientes",
+          "caja",
+          "inventario",
+          "whatsapp",
+          "facturacion",
+          "crm"
+        ],
+        "releaseNotes": "Registro desde la app\nYa puedes crear la cuenta de tu negocio sin salir de Zyncra, con 14 días de prueba.\n\nApariencia automática\nEl tema claro u oscuro sigue la configuración de tu iPhone, incluido el cambio automático de noche.\n\nEstado de tu cuenta\nNueva pantalla de estado y avisos anticipados cuando tu prueba o tu plan están por terminar, para que nada te tome por sorpresa.\n\nCorrecciones\nSe retiró una opción interna de notificaciones que aparecía por error en todas las cuentas.",
+        "promoText": "Gestiona tu negocio de servicios: agenda, clientes, cobros, inventario y reportes en un solo lugar, con Hanna, tu copiloto con IA.",
+        "supportUrl": "https://zyncra.app/soporte",
+        "title": "Zyncra: Agenda para Negocios",
+        "subtitle": "Barbería, salón, spa y POS",
+        "privacyPolicyUrl": "https://zyncra.app/privacidad",
+        "screenshots": {
+          "APP_IPHONE_65": [
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/07_recordatorios.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/06_hanna.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/04_cobros.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/03_clientes.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/01_panel.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/02_agenda.png",
+            "store/apple/screenshot/es-MX/APP_IPHONE_65/05_ajustes.png"
+          ]
+        }
+      }
+    },
+    "categories": [
+      "BUSINESS",
+      "PRODUCTIVITY"
+    ],
+    "advisory": {
+      "ageRatingOverride": "NONE",
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "gamblingSimulated": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "unrestrictedWebAccess": false,
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "advertising": false,
+      "ageAssurance": false,
+      "ageRatingOverrideV2": "NONE",
+      "developerAgeRatingInfoUrl": null,
+      "gunsOrOtherWeapons": "NONE",
+      "healthOrWellnessTopics": false,
+      "messagingAndChat": false,
+      "parentalControls": false,
+      "userGeneratedContent": false
+    },
+    "review": {
+      "firstName": "Felipe",
+      "lastName": "Contreras",
+      "email": "soypipecontreras@gmail.com",
+      "phone": "3188886055",
+      "demoUsername": "criales66@gmail.com",
+      "demoPassword": "123456",
+      "demoRequired": true,
+      "notes": "\nThank you for the feedback on our previous submissions. We have made a substantive\nchange to our commercial offering to comply with guideline 3.1.3(c).\n\n**What changed since the last submission**\n\nOur previous plan lineup included an entry-level plan for a single practitioner. You\ncorrectly identified that this meant our service was also sold to individual users,\nwhich made guideline 3.1.3(c) unavailable to us.\n\n**We have discontinued that plan.** As of this submission, every plan Zyncra sells is\nfor a business with a team of employees:\n\n| Plan | Team size |\n|---|---|\n| Growth | 2–5 employees |\n| Pro | 6–15 employees |\n| Enterprise | 15+ employees, multi-location |\n\nThere is no longer any plan available for a single user, consumer, or family use.\n\nThis is verifiable on our public pricing page: https://www.zyncra.app/pricing\nThe page is in Spanish; the team-size line of each plan reads \"2 a 5 colaboradores\"\n(2 to 5 team members), \"6 a 15 colaboradores\" and \"15+ colaboradores / ilimitados\".\nEvery plan's call to action is \"Hablar con ventas\" (talk to sales) — there is no\n\"buy\" or \"sign up\" button anywhere on the page.\n\n**How Zyncra is sold**\n\nZyncra is business management software licensed to registered companies in Colombia —\nhair salons, barbershops, spas, and dental/aesthetic clinics that manage appointments,\nstaff, point of sale, inventory and client records. The contract is signed with the\ncompany and invoiced to its tax ID (NIT). Accounts are provisioned by our team after a\ncommercial agreement; there is no online self-service sign-up.\n\n**The app sells nothing to the user, and nothing that would require In-App Purchase**\n\n- No account registration or business sign-up.\n- No prices, plans, subscription tiers, trials, or upgrade prompts **for Zyncra itself**.\n- No way to buy, renew or upgrade Zyncra from inside the app, and no link to any page\n  where Zyncra can be bought.\n- The app is unusable without an existing account provisioned to a business.\n- The login screen states that access is for businesses with an active Zyncra account.\n\n**Two screens do show money — neither is a purchase by the app's user (guideline 3.1.5(a))**\n\nWe want to flag these proactively so nothing looks hidden:\n\n1. **Cobros / POS.** This is the business charging *its own walk-in customers* for a\n   haircut, a manicure or a treatment performed in its physical premises. The app only\n   records the amount and the payment method the customer already paid at the counter;\n   it processes no payment and moves no money. These are physical services consumed\n   outside the app.\n\n2. **Ajustes → Compras → Proveedores.** A wholesale catalogue where the business orders\n   *physical inventory* (shampoo, dye, tools) from its suppliers. Placing an order\n   creates a purchase order with `payment_status: pending`; the supplier is paid later\n   by bank transfer, outside the app. No payment is taken in the app.\n\nNeither is a digital good or service, and neither is Zyncra selling anything to the\nperson using the app. Under guideline 3.1.5(a) these do not use In-App Purchase.\n\n**Account deletion (guideline 5.1.1(v))**\n\n- Business owner: Ajustes → Eliminar cuenta (deletes the business and all its data).\n- Staff member: Perfil → Eliminar cuenta (deletes the staff user; the business remains).\n\n**Roles**\n\nA business owner sees the full admin area (Agenda, Clientes, POS, Ajustes). A staff\nmember (barber, stylist) sees a reduced area (Agenda, Clientes, Perfil). The demo\ncredentials below belong to a business owner account so every screen can be reviewed.\n\nIf any of this needs clarification, please reply here and we will respond the same day.\n"
+    }
+  }
+}

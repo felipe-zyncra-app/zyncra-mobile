@@ -3,11 +3,14 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, SpaceGrotesk_400Regular, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk";
 import { JetBrainsMono_500Medium, JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono";
+import { InstrumentSerif_400Regular, InstrumentSerif_400Regular_Italic } from "@expo-google-fonts/instrument-serif";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { View, ActivityIndicator } from "react-native";
 import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth";
+import { TenantProvider } from "@/lib/tenant";
+import { SubscriptionProvider } from "@/lib/subscription";
 import ZyncraIntro from "@/components/ZyncraIntro";
 import { registerForPushNotifications, scheduleDailyBriefing } from "@/lib/notifications";
 
@@ -40,6 +43,8 @@ export default function RootLayout() {
     SpaceGrotesk_700Bold,
     JetBrainsMono_500Medium,
     JetBrainsMono_700Bold,
+    InstrumentSerif_400Regular,
+    InstrumentSerif_400Regular_Italic,
   });
 
   if (!fontsLoaded) {
@@ -53,7 +58,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppContent />
+        <TenantProvider>
+          <SubscriptionProvider>
+            <AppContent />
+          </SubscriptionProvider>
+        </TenantProvider>
       </AuthProvider>
     </ThemeProvider>
   );

@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
+import { ScreenHeader } from "@/components/ui";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 
@@ -291,7 +292,7 @@ export default function CustomFieldsScreen() {
   // ── Render Values tab ─────────────────────────────────────────────────────
 
   const renderValues = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       <TouchableOpacity style={[s.clientSelector, Shadow.sm]} onPress={() => setClientPicker(true)}>
         <Ionicons name="person-outline" size={18} color={Colors.muted} />
         <Text style={[s.clientSelectorTxt, selectedClient && { color: Colors.text }]}>
@@ -327,7 +328,7 @@ export default function CustomFieldsScreen() {
                         thumbColor="white"
                       />
                     ) : f.field_type === "select" ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                      <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                         <View style={{ flexDirection: "row", gap: 8 }}>
                           {f.options.map(opt => (
                             <TouchableOpacity
@@ -372,19 +373,7 @@ export default function CustomFieldsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="white" />
-          </TouchableOpacity>
-          <View>
-            <Text style={s.headerTitle}>Campos Personalizados</Text>
-            <Text style={s.headerSub}>Datos adicionales para clientes y citas</Text>
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Negocio" title="Campos Personalizados" subtitle="Datos adicionales para clientes y citas" onBack={() => router.back()} />
 
       {/* Tab bar */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>
@@ -401,7 +390,7 @@ export default function CustomFieldsScreen() {
       {/* Create/Edit Modal */}
       <Modal visible={modal} animationType="slide" transparent>
         <View style={m.overlay}>
-          <ScrollView contentContainerStyle={m.sheetScroll} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={m.sheetScroll} keyboardShouldPersistTaps="handled">
             <View style={m.sheet}>
               <View style={m.handle} />
               <Text style={m.title}>{editing ? "Editar campo" : "Nuevo campo personalizado"}</Text>

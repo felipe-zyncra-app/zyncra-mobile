@@ -9,9 +9,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 import BottomSaveBar from "@/components/BottomSaveBar";
 import FormField from "@/components/FormField";
 
@@ -19,6 +20,7 @@ export default function BusinessInfoScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
+  const { tenant: tenantCtx, patch: patchTenant } = useTenant();
   const [name, setName]         = useState("");
   const [phone, setPhone]       = useState("");
   const [address, setAddress]   = useState("");
@@ -27,20 +29,12 @@ export default function BusinessInfoScreen() {
   const [saved, setSaved]       = useState(false);
 
   useEffect(() => {
-    if (!tenantId) return;
-    let cancelled = false;
-    supabase.from("tenants").select("name, phone, address").eq("id", tenantId).single()
-      .then(({ data }) => {
-        if (cancelled) return;
-        if (data) {
-          setName(data.name ?? "");
-          setPhone(data.phone ?? "");
-          setAddress(data.address ?? "");
-        }
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [tenantId]);
+    if (!tenantCtx) return;
+    setName(tenantCtx.name ?? "");
+    setPhone(tenantCtx.phone ?? "");
+    setAddress(tenantCtx.address ?? "");
+    setLoading(false);
+  }, [tenantCtx]);
 
   const canSave = name.trim().length >= 2;
 
@@ -52,6 +46,11 @@ export default function BusinessInfoScreen() {
       phone: phone.trim() || null,
       address: address.trim() || null,
     }).eq("id", tenantId);
+    patchTenant({
+      name: name.trim(),
+      phone: phone.trim(),
+      address: address.trim(),
+    });
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -59,15 +58,15 @@ export default function BusinessInfoScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader title="Info del negocio" subtitle="Nombre, teléfono y dirección" onBack={() => router.back()} />
+      <ScreenHeader crumb="Negocio" title="Info del negocio" subtitle="Nombre, teléfono y dirección" onBack={() => router.back()} />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Animated.View entering={FadeInDown.duration(350)}>
               <FormField label="Nombre del negocio *" value={name} onChangeText={setName} placeholder="Ej: Salón Bella" />
               <FormField label="Teléfono / WhatsApp" value={phone} onChangeText={setPhone} placeholder="Ej: 3001234567" keyboardType="phone-pad" />

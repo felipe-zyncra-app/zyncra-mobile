@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmtTime, fmtDateFull } from "@/lib/format";
 import { getActiveLocationId } from "@/lib/active-location";
@@ -197,21 +198,7 @@ export default function CajaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Sistema de Caja</Text>
-            <Text style={s.headerSub}>Control de ingresos y egresos</Text>
-          </View>
-          <View style={s.backBtn}>
-            <Ionicons name="cash-outline" size={20} color="white" />
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Ventas" title="Sistema de Caja" subtitle="Control de ingresos y egresos" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>
@@ -230,8 +217,8 @@ export default function CajaScreen() {
         <>
           {/* ── CAJA ── */}
           {tab === "caja" && !session && (
-            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+            <KeyboardAvoidingView style={{ flex: 1 }}>
+              <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
                 <Animated.View entering={FadeInDown.duration(350)}>
                   <View style={[s.closedCard, Shadow.sm, { backgroundColor: t.bgAlt }]}>
                     <View style={[s.closedIcon, { backgroundColor: t.bg }]}>
@@ -264,7 +251,7 @@ export default function CajaScreen() {
           )}
 
           {tab === "caja" && session && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
               {/* Status banner */}
               <View style={[s.statusBanner, Shadow.sm]}>
                 <View style={s.statusDot} />
@@ -350,7 +337,7 @@ export default function CajaScreen() {
 
           {/* ── HISTORIAL ── */}
           {tab === "historial" && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
               {loadingHist ? (
                 <ActivityIndicator color={Colors.red} style={{ marginTop: 40 }} />
               ) : history.length === 0 ? (
@@ -404,7 +391,7 @@ export default function CajaScreen() {
       {/* ── MOVEMENT MODAL ── */}
       <Modal visible={movModal} animationType="slide" presentationStyle="formSheet" onRequestClose={() => setMovModal(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
             <View style={[s.modalHeader, { borderBottomColor: t.border }]}>
               <Text style={[s.modalTitle, { color: t.text }]}>Registrar movimiento</Text>
               <TouchableOpacity onPress={() => setMovModal(false)}>
@@ -412,7 +399,7 @@ export default function CajaScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
               {/* Type toggle */}
               <View style={[s.typeToggle, { backgroundColor: t.bg }]}>
                 {(["ingreso", "egreso"] as MoveType[]).map(mt => (
@@ -439,7 +426,7 @@ export default function CajaScreen() {
                 placeholderTextColor={t.subtle} />
 
               <Text style={[s.label, { color: t.muted }]}>Categoría (opcional)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+              <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   {(movType === "ingreso" ? INGRESO_CATS : EGRESO_CATS).map(cat => (
                     <TouchableOpacity key={cat}
@@ -466,7 +453,7 @@ export default function CajaScreen() {
       {/* ── CLOSE MODAL ── */}
       <Modal visible={closeModal} animationType="slide" presentationStyle="formSheet" onRequestClose={() => setCloseModal(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
             <View style={[s.modalHeader, { borderBottomColor: t.border }]}>
               <Text style={[s.modalTitle, { color: t.text }]}>Cerrar caja</Text>
               <TouchableOpacity onPress={() => setCloseModal(false)}>
@@ -474,7 +461,7 @@ export default function CajaScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
               {/* Summary */}
               <View style={[s.summaryBox, Shadow.sm, { backgroundColor: t.bgAlt }]}>
                 {[

@@ -51,12 +51,12 @@ export default function LoginScreen() {
   };
 
   useEffect(() => {
-    if (role === "admin") router.replace("/(admin)");
+    if (role === "admin") router.replace("/(admin)/(tabs)");
     else if (role === "staff") router.replace("/(staff)/agenda");
   }, [role]);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1 }}>
       <StatusBar style="light" />
 
       <View style={s.bg}>
@@ -69,7 +69,7 @@ export default function LoginScreen() {
         <View style={[s.corner, s.cornerTL]} />
         <View style={[s.corner, s.cornerBR]} />
 
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
@@ -160,12 +160,22 @@ export default function LoginScreen() {
               <SolidButton label="Iniciar sesión" onPress={handleLogin} loading={loading} />
             </Animated.View>
 
-            {/* Aviso de acceso B2B (App Store 3.1.3(c)): la app es para negocios con
-                cuenta existente. Solo informativo — sin link, precio ni registro. */}
-            <Animated.View entering={FadeInDown.delay(520).duration(400)} style={s.accessNote}>
+            {/* Alta de negocio. Recoge datos y crea la cuenta: no muestra planes
+                ni precios, y no cobra nada dentro de la app. */}
+            <Animated.View entering={FadeInDown.delay(500).duration(400)}>
+              <Pressable style={s.registerLink} onPress={() => router.push("/(auth)/register")}>
+                <Text style={s.registerLinkText}>
+                  ¿No tienes cuenta? <Text style={s.registerLinkStrong}>Regístrate gratis</Text>
+                </Text>
+              </Pressable>
+            </Animated.View>
+
+            {/* Aviso para colaboradores: las cuentas de staff no se crean aquí,
+                las da de alta el dueño del negocio desde Ajustes → Equipo. */}
+            <Animated.View entering={FadeInDown.delay(560).duration(400)} style={s.accessNote}>
               <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.35)" style={{ marginTop: 1 }} />
               <Text style={s.accessNoteText}>
-                App para negocios con cuenta Zyncra activa. Si trabajas en un negocio que ya usa Zyncra, pide tu acceso al administrador.
+                ¿Trabajas en un negocio que ya usa Zyncra? No te registres aquí: pide tu acceso al administrador.
               </Text>
             </Animated.View>
 
@@ -330,6 +340,19 @@ const s = StyleSheet.create({
     color: "#ff6060",
     fontSize: 13,
     fontFamily: "SpaceGrotesk_600SemiBold",
+  },
+  registerLink: {
+    alignItems: "center",
+    marginTop: 18,
+  },
+  registerLinkText: {
+    fontSize: 13.5,
+    fontFamily: "SpaceGrotesk_400Regular",
+    color: "rgba(255,255,255,0.5)",
+  },
+  registerLinkStrong: {
+    fontFamily: "SpaceGrotesk_700Bold",
+    color: Colors.red,
   },
   accessNote: {
     flexDirection: "row",

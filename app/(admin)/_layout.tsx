@@ -1,19 +1,16 @@
-import { Tabs, Redirect } from "expo-router";
+import { Stack, Redirect } from "expo-router";
 import { View, ActivityIndicator } from "react-native";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/lib/auth";
-import FluidTabBar, { type TabItem } from "@/components/FluidTabBar";
+import { useSubscription } from "@/lib/subscription";
+import AccountBlocked from "@/components/AccountBlocked";
 
-const TABS: TabItem[] = [
-  { name: "index",    label: "Panel",    icon: "home-outline",     iconFocused: "home" },
-  { name: "agenda",   label: "Agenda",   icon: "calendar-outline", iconFocused: "calendar" },
-  { name: "clients",  label: "Clientes", icon: "people-outline",   iconFocused: "people" },
-  { name: "pos",      label: "Cobros",   icon: "card-outline",     iconFocused: "card" },
-  { name: "settings", label: "Ajustes",  icon: "settings-outline", iconFocused: "settings" },
-];
-
+// Stack de la sección admin: (tabs) son las 5 pestañas principales; el
+// resto de rutas se apilan encima como sub-pantallas, con el gesto de
+// deslizar-atrás nativo de iOS (gestureEnabled por defecto en el Stack).
 export default function AdminLayout() {
   const { role, loading } = useAuth();
+  const { blocked } = useSubscription();
 
   if (loading) {
     return (
@@ -25,31 +22,21 @@ export default function AdminLayout() {
 
   if (role !== "admin") return <Redirect href="/(auth)/login" />;
 
+  // Suscripción suspendida o cancelada: se reemplaza TODA el área admin, así
+  // que no queda ninguna pantalla accesible por deep link o por el historial
+  // del stack. `blocked` es false mientras carga, para no parpadear.
+  if (blocked) return <AccountBlocked />;
+
   return (
-    <Tabs
-      tabBar={(props) => <FluidTabBar {...props} tabs={TABS} />}
-      screenOptions={{ headerShown: false }}
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        gestureEnabled: true,
+        animation: "slide_from_right",
+        fullScreenGestureEnabled: true,
+      }}
     >
-      <Tabs.Screen name="index"         options={{ title: "Panel" }} />
-      <Tabs.Screen name="agenda"        options={{ title: "Agenda" }} />
-      <Tabs.Screen name="clients"       options={{ title: "Clientes" }} />
-      <Tabs.Screen name="pos"           options={{ title: "Cobros" }} />
-      <Tabs.Screen name="settings"      options={{ title: "Ajustes" }} />
-      <Tabs.Screen name="whatsapp"        options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="reviews-google"  options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="reviews-site"    options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="caja"            options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="commissions"     options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="invoices"        options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="custom-fields"   options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="reports"          options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="pos-history"     options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="finanzas"        options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="inventario"      options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="branding"        options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="upcoming"        options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="loyalty"         options={{ tabBarButton: () => null }} />
-      <Tabs.Screen name="inbox"           options={{ tabBarButton: () => null }} />
-    </Tabs>
+      <Stack.Screen name="(tabs)" options={{ animation: "fade", gestureEnabled: false }} />
+    </Stack>
   );
 }
