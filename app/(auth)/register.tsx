@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Pressable, KeyboardAvoidingView, Platform,
@@ -12,6 +12,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Config } from "@/lib/config";
+import { validarCorreo, validarTelefono } from "@/lib/contacto";
 import { Colors, Gradients, Radius } from "@/constants/theme";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -123,6 +124,51 @@ export default function RegisterScreen() {
   // Si el signUp funcionó pero falló crear el negocio, el reintento salta el signUp
   // (volver a llamarlo con el mismo correo devolvería "already registered" y dejaría al usuario atrapado)
   const createdUserId = useRef<string | null>(null);
+  // El correo se verifica con un código antes de crear el negocio. Sin esto
+  // entraban altas con correos que no existen (llegó un "@example.com") y el
+  // negocio quedaba sin forma de recibir cobros ni avisos.
+  const [verifyMode, setVerifyMode] = useState(false);
+  const [otpCode, setOtpCode]       = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  // Teléfono ya normalizado (dígitos con indicativo), listo para guardar.
+  const telNormalizado = useRef<string>("");
+  // Correo con el que se hizo el signUp. El de auth ya no se puede cambiar, así
+  // que el negocio tiene que guardar ese mismo y no lo que quede en el input.
+  const correoCuenta = useRef<string>("");
+  // El servidor solo deja un código por minuto y por correo. Se refleja aquí
+  // para que el botón se apague en vez de chocar contra un 429.
+  const otpEnviado = useRef(false);
+  const [reenvioEn, setReenvioEn] = useState(0);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (reenvioEn <= 0) return;
+    const id = setInterval(() => setReenvioEn(s => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [reenvioEn]);
+
+  /** Pide el código al portal. `nuevo: false` = el anterior todavía sirve. */
+  const enviarCodigo = async (correo: string):
+    Promise<{ ok: true; nuevo: boolean } | { ok: false; error: string }> => {
+    const res = await fetch(Config.api.sendOtp, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: correo }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      // Un 429 cuando ya mandamos uno significa que el anterior sigue vivo:
+      // no hay nada roto que contarle al usuario, solo que espere.
+      if (res.status === 429 && otpEnviado.current) {
+        setReenvioEn(60);
+        return { ok: true, nuevo: false };
+      }
+      return { ok: false, error: d.error || "No se pudo enviar el código de verificación." };
+    }
+    otpEnviado.current = true;
+    setReenvioEn(60);
+    return { ok: true, nuevo: true };
+  };
 
   const toggleGoal = (id: string) => {
     setGoals(prev =>
@@ -133,7 +179,8 @@ export default function RegisterScreen() {
   const can1 = bizType !== "" && businessName.trim() !== "";
   const can2 = collaborators !== "" && appointments !== "" && multiSede !== null;
   const can3 = goals.length > 0;
-  const can4 = email.trim() !== "" && password.trim() !== "";
+  // El WhatsApp dejó de ser opcional: sin él el negocio es inalcanzable.
+  const can4 = email.trim() !== "" && password.trim() !== "" && whatsapp.trim() !== "";
 
   const handleRegister = async () => {
     const re = /^(?=.*[A-Z])(?=.*\d).{6,}$/;
@@ -141,17 +188,75 @@ export default function RegisterScreen() {
       setError("Mín. 6 caracteres, 1 mayúscula y 1 número.");
       return;
     }
+    const correo = validarCorreo(email);
+    if (!correo.ok) { setError(correo.error!); return; }
+    // Si el signUp ya pasó, el correo de la cuenta quedó fijado en auth: dejar
+    // seguir con otro crearía un negocio con un correo que nadie verificó.
+    if (createdUserId.current && correoCuenta.current !== correo.valor) {
+      setError(`La cuenta ya se creó con ${correoCuenta.current}. Cierra el registro y empieza de nuevo para usar otro correo.`);
+      return;
+    }
+
+    const tel = validarTelefono(whatsapp);
+    if (!tel.ok) { setError(tel.error!); return; }
+    telNormalizado.current = tel.valor!;
+
     setLoading(true);
     setError(null);
+    setAviso(null);
     try {
       let userId = createdUserId.current;
       if (!userId) {
-        const { data: auth, error: ae } = await supabase.auth.signUp({ email, password });
+        const { data: auth, error: ae } = await supabase.auth.signUp({ email: correo.valor!, password });
         if (ae) throw new Error(translateAuthError(ae.message));
         userId = auth.user?.id ?? null;
         if (!userId) throw new Error("No se pudo crear la cuenta. Inténtalo de nuevo.");
         createdUserId.current = userId;
+        correoCuenta.current = correo.valor!;
       }
+      // Mismo endpoint que usa el registro del portal: un solo sitio decide
+      // cómo se ve el correo y cuánto dura el código.
+      const envio = await enviarCodigo(correo.valor!);
+      if (!envio.ok) throw new Error(envio.error);
+      setVerifyMode(true);
+    } catch (err: unknown) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReenviar = async () => {
+    setError(null);
+    setAviso(null);
+    try {
+      const envio = await enviarCodigo(correoCuenta.current);
+      if (!envio.ok) { setError(envio.error); return; }
+      setAviso(envio.nuevo
+        ? "Te enviamos un código nuevo."
+        : "El código anterior sigue vigente. Revisa tu correo y el spam.");
+    } catch {
+      setError("Sin conexión. Revisa tu internet e inténtalo de nuevo.");
+    }
+  };
+
+  /** Comprueba el código y, solo entonces, crea el negocio. */
+  const handleVerify = async () => {
+    setOtpLoading(true);
+    setError(null);
+    try {
+      const vr = await fetch(Config.api.verifyOtp, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: correoCuenta.current, code: otpCode.trim() }),
+      });
+      if (!vr.ok) {
+        const d = await vr.json().catch(() => ({}));
+        throw new Error(d.error || "Código incorrecto.");
+      }
+
+      const userId = createdUserId.current;
+      if (!userId) throw new Error("Se perdió la sesión del registro. Vuelve a empezar.");
       const slug = createSlug(businessName);
       // Todo el perfil del negocio va dentro de tenants.settings (jsonb). La
       // versión anterior insertaba en business_profiles, tabla que NO existe en
@@ -164,11 +269,14 @@ export default function RegisterScreen() {
       const { data: td, error: te } = await supabase.from("tenants")
         .insert([{
           owner_id: userId, name: businessName, slug,
-          phone: whatsapp || null,
+          phone: telNormalizado.current,
           settings: {
             logo: "", coverImage: "", primaryColor: "#2563EB",
             depositAmount: 0, requireDeposit: false,
             biz_type: bizType,
+            // El trigger tenants_exigir_contacto rechaza el insert si faltan.
+            owner_email: correoCuenta.current,
+            owner_phone: telNormalizado.current,
             onboarding: {
               collaborators,
               appointments_per_day: appointments,
@@ -209,11 +317,13 @@ export default function RegisterScreen() {
       // existía, así que quedó en null. Sin volver a resolverlo, el guard de
       // (admin) rebota al login al tocar "Ir a mi panel".
       await refreshRole();
+      setVerifyMode(false);
+      setAviso(null);
       setStep(5);
     } catch (err: unknown) {
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      setOtpLoading(false);
     }
   };
 
@@ -338,7 +448,7 @@ export default function RegisterScreen() {
         )}
 
         {/* STEP 4 */}
-        {step === 4 && (
+        {step === 4 && !verifyMode && (
           <Animated.View entering={FadeInRight.duration(300)}>
             {error && (
               <View style={c.errorBox}>
@@ -349,7 +459,7 @@ export default function RegisterScreen() {
             <TextInput style={c.input} placeholder="tu@correo.com"
               placeholderTextColor={Colors.subtle} keyboardType="email-address"
               autoCapitalize="none" value={email} onChangeText={setEmail} />
-            <Text style={c.stepLabel}>WhatsApp <Text style={{ color: Colors.subtle, fontFamily: "SpaceGrotesk_400Regular" }}>(opcional)</Text></Text>
+            <Text style={c.stepLabel}>WhatsApp</Text>
             <TextInput style={c.input} placeholder="+57 300 000 0000"
               placeholderTextColor={Colors.subtle} keyboardType="phone-pad"
               value={whatsapp} onChangeText={setWhatsapp} />
@@ -364,6 +474,60 @@ export default function RegisterScreen() {
                   onPress={handleRegister} disabled={!can4 || loading} />
               </View>
             </View>
+          </Animated.View>
+        )}
+
+        {/* STEP 4b — Verificación del correo. El negocio aún NO existe: se crea
+            al validar el código, para que ningún alta quede con un correo que
+            no puede recibir nada. */}
+        {step === 4 && verifyMode && (
+          <Animated.View entering={FadeInRight.duration(300)}>
+            {error && (
+              <View style={c.errorBox}>
+                <Text style={c.errorText}>⚠ {error}</Text>
+              </View>
+            )}
+            {aviso && (
+              <View style={c.avisoBox}>
+                <Text style={c.avisoText}>✓ {aviso}</Text>
+              </View>
+            )}
+            <Text style={c.stepLabel}>Revisa tu correo</Text>
+            <Text style={{ color: Colors.subtle, fontFamily: "SpaceGrotesk_400Regular", marginBottom: 14 }}>
+              Enviamos un código de 6 dígitos a {correoCuenta.current}. Si no lo ves, mira en spam.
+            </Text>
+            <TextInput
+              style={[c.input, { fontSize: 24, letterSpacing: 8, textAlign: "center" }]}
+              placeholder="000000"
+              placeholderTextColor={Colors.subtle}
+              keyboardType="number-pad"
+              maxLength={6}
+              value={otpCode}
+              onChangeText={t => { setOtpCode(t.replace(/\D/g, "")); setError(null); }}
+            />
+            <View style={c.btnRow}>
+              <BackBtn onPress={() => { setVerifyMode(false); setOtpCode(""); setError(null); setAviso(null); }} />
+              <View style={{ flex: 1 }}>
+                <GradientBtn
+                  label={otpLoading ? "Verificando..." : "Verificar y crear →"}
+                  onPress={handleVerify}
+                  disabled={otpCode.length !== 6 || otpLoading}
+                />
+              </View>
+            </View>
+            {/* El portal solo manda un código por minuto y por correo: mientras
+                corre la cuenta atrás el enlace se apaga en vez de dar un 429. */}
+            <TouchableOpacity
+              onPress={handleReenviar}
+              disabled={reenvioEn > 0 || otpLoading}
+              style={{ marginTop: 18, alignSelf: "center" }}>
+              <Text style={c.reenviarText}>
+                ¿No llegó el código?{" "}
+                <Text style={{ color: reenvioEn > 0 ? Colors.subtle : Colors.blue, fontFamily: "SpaceGrotesk_700Bold" }}>
+                  {reenvioEn > 0 ? `Reenviar en ${reenvioEn}s` : "Reenviar"}
+                </Text>
+              </Text>
+            </TouchableOpacity>
           </Animated.View>
         )}
 
@@ -440,4 +604,7 @@ const c = StyleSheet.create({
   goalCheck: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.red },
   errorBox: { backgroundColor: "#fff0f0", borderWidth: 1, borderColor: "rgba(251,15,5,.2)", borderRadius: Radius.md, padding: 12, marginBottom: 16 },
   errorText: { color: "#d90d04", fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold" },
+  avisoBox: { backgroundColor: "#effaf5", borderWidth: 1, borderColor: "rgba(16,185,129,.25)", borderRadius: Radius.md, padding: 12, marginBottom: 16 },
+  avisoText: { color: "#0b8a63", fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold" },
+  reenviarText: { color: Colors.subtle, fontSize: 13, fontFamily: "SpaceGrotesk_400Regular" },
 });

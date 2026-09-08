@@ -23,6 +23,11 @@ export const Config = {
      *  que usa el registro del portal, así que los días de prueba y el plan
      *  salen de una sola fuente. No pide auth: va con rate-limit por IP. */
     activateTrial: `${WEB_URL}/api/auth/activate-trial`,
+    /** Verificación del correo en el registro. Mismos endpoints que el portal,
+     *  así el diseño del correo y la duración del código salen de un solo sitio.
+     *  Públicos: no piden auth, van con rate-limit por IP. */
+    sendOtp: `${WEB_URL}/api/auth/send-otp`,
+    verifyOtp: `${WEB_URL}/api/auth/verify-otp`,
   },
   urls: {
     booking: `${WEB_URL}/book/`,
