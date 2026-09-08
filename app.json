@@ -18,8 +18,10 @@
     "android": {
       "package": "com.zyncra.app",
       "adaptiveIcon": {
-        "backgroundColor": "#07071a",
-        "foregroundImage": "./assets/icon.png"
+        "foregroundImage": "./assets/adaptive-foreground.png",
+        "backgroundImage": "./assets/adaptive-background.png",
+        "monochromeImage": "./assets/adaptive-monochrome.png",
+        "backgroundColor": "#07071a"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -33,7 +35,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/notification-icon.png",
           "color": "#fb0f05",
           "sounds": []
         }
