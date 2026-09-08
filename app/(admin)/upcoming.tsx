@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
+import { ScreenHeader } from "@/components/ui";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmt12 } from "@/lib/format";
@@ -92,7 +93,7 @@ function RescheduleModal({ appt, tenantId, onClose, onSaved }: {
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={rm.header}>
+        <View style={[rm.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={rm.headerRow}>
             <TouchableOpacity onPress={onClose} style={rm.closeBtn}>
@@ -105,9 +106,9 @@ function RescheduleModal({ appt, tenantId, onClose, onSaved }: {
             <Text style={rm.summaryClient}>{appt.clients?.name ?? "Sin cliente"}</Text>
             <Text style={rm.summaryService}>{appt.services?.name ?? "Sin servicio"}</Text>
           </View>
-        </LinearGradient>
+        </View>
 
-        <ScrollView contentContainerStyle={{ padding: 24, gap: 20 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 24, gap: 20 }}>
           <View>
             <Text style={[rm.fieldLabel, { color: t.muted }]}>Nueva fecha (YYYY-MM-DD)</Text>
             <TextInput
@@ -271,47 +272,26 @@ export default function UpcomingScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.iconBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Próximas Citas</Text>
-            <Text style={s.headerSub}>Próximos 14 días</Text>
-          </View>
-        </View>
-
-        {/* Stats pills */}
-        <View style={s.statsPills}>
-          <View style={s.statPill}>
-            <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,.9)" />
-            <Text style={s.statPillText}>{totalPending} citas pendientes</Text>
-          </View>
-          {pendingRevenue > 0 && (
-            <View style={s.statPill}>
-              <Ionicons name="cash-outline" size={13} color="rgba(255,255,255,.9)" />
-              <Text style={s.statPillText}>{fmtMoneyFull(pendingRevenue)} proyectados</Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Agenda"
+        title="Próximas Citas"
+        subtitle={`Próximos 14 días · ${totalPending} pendientes${pendingRevenue > 0 ? ` · ${fmtMoneyFull(pendingRevenue)} proyectados` : ""}`}
+        onBack={() => router.back()}
+      />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={{ paddingBottom: 40 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         >
           {/* Professional filter */}
           {professionals.length > 1 && (
             <Animated.View entering={FadeInDown.duration(300)}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.proFilter}>
+              <ScrollView automaticallyAdjustKeyboardInsets horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.proFilter}>
                 <TouchableOpacity
                   style={[s.proChip, { backgroundColor: t.bgAlt, borderColor: t.border }, selectedPro === "all" && s.proChipActive]}
                   onPress={() => setSelectedPro("all")}

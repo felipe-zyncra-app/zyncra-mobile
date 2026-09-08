@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, MonoLabel } from "@/constants/theme";
 import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { Config } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
 import Avatar from "@/components/Avatar";
@@ -21,7 +22,7 @@ import ErrorState from "@/components/ErrorState";
 
 type DayConfig = { enabled: boolean; start: string; end: string };
 type ProSchedule = { mon: DayConfig; tue: DayConfig; wed: DayConfig; thu: DayConfig; fri: DayConfig; sat: DayConfig; sun: DayConfig };
-type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; schedule?: any; permissions?: any };
+type Pro = { id: string; name: string; role: string; is_active: boolean; user_id: string | null; email: string | null; photo_url: string | null; avatar_url: string | null; schedule?: any; permissions?: any };
 
 const DAYS: { key: keyof ProSchedule; label: string }[] = [
   { key: "mon", label: "Lun" }, { key: "tue", label: "Mar" }, { key: "wed", label: "Mié" },
@@ -149,7 +150,8 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       if (isEdit) {
         if (photoUri) {
           const url = await uploadPhoto(pro!.id);
-          if (url) payload.photo_url = url;
+          // Escribe ambas columnas para que la foto se vea también en el portal web (avatar_url)
+          if (url) { payload.photo_url = url; payload.avatar_url = url; }
         }
         await supabase.from("professionals").update(payload).eq("id", pro!.id);
       } else {
@@ -157,7 +159,7 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
           .from("professionals").insert({ ...payload, tenant_id: tenantId }).select("id").single();
         if (inserted && photoUri) {
           const url = await uploadPhoto(inserted.id);
-          if (url) await supabase.from("professionals").update({ photo_url: url }).eq("id", inserted.id);
+          if (url) await supabase.from("professionals").update({ photo_url: url, avatar_url: url }).eq("id", inserted.id);
         }
       }
       onSaved(); onClose();
@@ -200,7 +202,8 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.mHeader}>
+        <View style={[s.mHeader, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={s.mHeaderRow}>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -213,14 +216,14 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
               : <View style={{ width: 40 }} />
             }
           </View>
-        </LinearGradient>
+        </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             {/* Photo picker */}
             <TouchableOpacity style={s.photoPicker} onPress={pickPhoto} activeOpacity={0.8}>
-              {(photoUri || pro?.photo_url) ? (
-                <Image source={{ uri: photoUri ?? pro?.photo_url! }} style={s.photoImg} />
+              {(photoUri || pro?.avatar_url || pro?.photo_url) ? (
+                <Image source={{ uri: photoUri ?? pro?.avatar_url ?? pro?.photo_url! }} style={s.photoImg} />
               ) : (
                 <View style={s.photoPlaceholder}>
                   <Text style={s.photoInitials}>
@@ -401,7 +404,7 @@ export default function TeamScreen() {
     setError(false);
     try {
       const { data } = await supabase.from("professionals")
-        .select("id, name, role, is_active, user_id, email, photo_url, schedule, permissions")
+        .select("id, name, role, is_active, user_id, email, photo_url, avatar_url, schedule, permissions")
         .eq("tenant_id", tenantId).order("name");
       setPros(data ?? []);
     } catch {
@@ -418,40 +421,22 @@ export default function TeamScreen() {
 
   if (error) return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Equipo</Text>
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Negocio" title="Equipo" onBack={() => router.back()} />
       <ErrorState onRetry={load} />
     </SafeAreaView>
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Equipo</Text>
-            <Text style={s.headerSub}>{pros.length} profesionale{pros.length !== 1 ? "s" : ""}</Text>
-          </View>
-          <TouchableOpacity style={s.addBtn} onPress={() => setModal({ visible: true, pro: null })} activeOpacity={0.8}>
-            <Ionicons name="add" size={22} color="white" />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Negocio"
+        title="Equipo"
+        subtitle={`${pros.length} profesionale${pros.length !== 1 ? "s" : ""}`}
+        onBack={() => router.back()}
+        rightAction={{ icon: "add", onPress: () => setModal({ visible: true, pro: null }) }}
+      />
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ padding: 20, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       >
@@ -469,7 +454,7 @@ export default function TeamScreen() {
                 onPress={() => setModal({ visible: true, pro: p })}
                 activeOpacity={0.75}
               >
-                <Avatar name={p.name} photoUrl={p.photo_url} size={52} color={Colors.red} />
+                <Avatar name={p.name} photoUrl={p.avatar_url ?? p.photo_url} size={52} color={Colors.red} />
                 <View style={{ flex: 1 }}>
                   <Text style={[s.name, { color: t.text }]}>{p.name}</Text>
                   <Text style={[s.role, { color: t.muted }]}>{p.role}</Text>

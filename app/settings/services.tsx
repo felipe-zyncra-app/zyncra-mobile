@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 
 type Service = {
@@ -111,7 +112,8 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.mHeader}>
+        <View style={[s.mHeader, { backgroundColor: "#0C0C14" }]}>
+          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={s.mHeaderRow}>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={20} color="white" />
@@ -124,9 +126,9 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
               : <View style={{ width: 40 }} />
             }
           </View>
-        </LinearGradient>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+        </View>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Field label="Nombre del servicio *" value={name} onChangeText={setName} placeholder="Ej: Corte de cabello" />
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
@@ -180,23 +182,15 @@ export default function ServicesScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Servicios</Text>
-            <Text style={s.headerSub}>{services.length} en tu catálogo</Text>
-          </View>
-          <TouchableOpacity style={s.addBtn} onPress={() => setModal({ visible: true, service: null })} activeOpacity={0.8}>
-            <Ionicons name="add" size={22} color="white" />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Negocio"
+        title="Servicios"
+        subtitle={`${services.length} en tu catálogo`}
+        onBack={() => router.back()}
+        rightAction={{ icon: "add", onPress: () => setModal({ visible: true, service: null }) }}
+      />
 
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ padding: 20, paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       >

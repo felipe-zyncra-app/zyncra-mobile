@@ -8,6 +8,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Config, authedFetch } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { fmtMoneyFull } from "@/lib/format";
@@ -44,6 +45,7 @@ export default function StaffProfileScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { t } = useTheme();
+  const { tenant: tenantCtx } = useTenant();
   const [info, setInfo]   = useState<StaffInfo | null>(null);
   const [commMonth, setCommMonth] = useState<CommissionData | null>(null);
   const [commWeek, setCommWeek]   = useState<CommissionData | null>(null);
@@ -64,7 +66,7 @@ export default function StaffProfileScreen() {
         name:       pro.name,
         role:       pro.role,
         email:      pro.email ?? user.email ?? null,
-        tenantName: (pro.tenants as any)?.name ?? "Tu negocio",
+        tenantName: tenantCtx?.name ?? (pro.tenants as any)?.name ?? "Tu negocio",
         tenantId:   (pro.tenants as any)?.id ?? "",
         color:      pro.color,
       };

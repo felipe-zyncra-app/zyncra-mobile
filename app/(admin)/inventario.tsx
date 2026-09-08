@@ -312,7 +312,7 @@ export default function InventarioScreen() {
 
       {/* Tab content */}
       {tab === "productos" ? (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           {filtered.length === 0 ? (
             <Animated.View entering={FadeInDown.delay(80).duration(300)}>
               <View style={[s.emptyState, { backgroundColor: t.bgAlt, borderColor: t.border }]}>
@@ -371,12 +371,12 @@ export default function InventarioScreen() {
           )}
         </ScrollView>
       ) : (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
-          <Animated.View entering={FadeInDown.delay(80).duration(300)}>
-            <View style={[s.card, { backgroundColor: t.bgAlt, borderColor: t.border }]}>
-              {movements.length === 0 ? (
-                <Text style={[s.emptySub, { color: t.muted, textAlign: "center", paddingVertical: 20 }]}>Sin movimientos registrados.</Text>
-              ) : movements.map((m, i) => {
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+          <View style={s.card}>
+            {movements.length === 0 ? (
+              <Text style={s.emptySub}>Sin movimientos registrados.</Text>
+            ) : (
+              movements.map((m, i) => {
                 const meta = MOVE_META[m.type] ?? MOVE_META.adjustment;
                 return (
                   <View key={m.id} style={[s.moveRow, i < movements.length - 1 && { borderBottomWidth: 1, borderColor: t.border }]}>
@@ -401,16 +401,17 @@ export default function InventarioScreen() {
                     </View>
                   </View>
                 );
-              })}
-            </View>
-          </Animated.View>
+              })
+            )}
+          </View>
         </ScrollView>
       )}
 
       {/* ── Modal: Create/Edit product ── */}
       <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
+            {/* Modal header */}
             <LinearGradient colors={Gradients.ink} style={s.mHeader}>
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mAccent} />
               <View style={[s.mIconBox, { backgroundColor: "rgba(251,15,5,0.18)" }]}>
@@ -422,7 +423,8 @@ export default function InventarioScreen() {
               </TouchableOpacity>
             </LinearGradient>
 
-            <ScrollView contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
+              {/* SKU + Name */}
               <View style={s.mRow}>
                 <View style={{ width: 120 }}>
                   <Text style={[s.fieldLabel, { color: t.subtle }]}>SKU / Código</Text>
@@ -497,8 +499,8 @@ export default function InventarioScreen() {
 
       {/* ── Modal: Adjust stock ── */}
       <Modal visible={showAdjust} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAdjust(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
+          <KeyboardAvoidingView style={{ flex: 1 }}>
             <LinearGradient colors={Gradients.ink} style={s.mHeader}>
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mAccent} />
               <View style={[s.mIconBox, { backgroundColor: "rgba(99,102,241,0.20)" }]}>
@@ -513,7 +515,7 @@ export default function InventarioScreen() {
               </TouchableOpacity>
             </LinearGradient>
 
-            <ScrollView contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.mScroll} keyboardShouldPersistTaps="handled">
               {adjustTarget && (
                 <View style={[s.currentStockBox, { backgroundColor: t.card, borderColor: t.border }]}>
                   <Text style={[s.fieldLabel, { color: t.subtle }]}>STOCK ACTUAL</Text>

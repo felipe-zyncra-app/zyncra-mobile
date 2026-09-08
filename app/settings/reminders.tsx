@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 
 const HOUR_OPTIONS = [
   { value: 1,  label: "1h" },
@@ -102,11 +102,11 @@ export default function RemindersScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader
+      <ScreenHeader
+        crumb="Panel"
         title="Recordatorios"
         subtitle="Avisos automáticos para tus clientes"
         onBack={() => router.back()}
-        rightAction={{ icon: "notifications-outline", onPress: () => {} }}
       />
 
       {loading ? (
@@ -114,8 +114,8 @@ export default function RemindersScreen() {
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets
             contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
             keyboardShouldPersistTaps="handled"
           >

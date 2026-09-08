@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { MonoTag } from "@/components/ui";
 import { STATUS_META } from "@/constants/status";
 import { fmtDateShort, fmtMoneyFull, localDateStr } from "@/lib/format";
 import { DEFAULT_PERMISSIONS, parsePermissions, type StaffPermissions } from "@/lib/permissions";
@@ -138,7 +139,7 @@ function ClientModal({ client, proId, perms, onClose }: {
   return (
     <Modal visible={!!client} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={cm.header}>
+        <View style={[cm.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={cm.headerRow}>
             <TouchableOpacity onPress={onClose} style={cm.iconBtn}>
@@ -171,9 +172,9 @@ function ClientModal({ client, proId, perms, onClose }: {
               </TouchableOpacity>
             )}
           </View>
-        </LinearGradient>
+        </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           {/* Stats */}
           <View style={[cm.statsRow, Shadow.sm]}>
             <View style={cm.statBox}>
@@ -429,12 +430,13 @@ export default function StaffClientsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       {/* Header */}
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <Text style={s.headerTitle}>Mis Clientes</Text>
-        <Text style={s.headerSub}>
+      <View style={s.header}>
+        <MonoTag>Clientes</MonoTag>
+        <Text style={[s.headerTitle, { color: t.ink }]}>Mis Clientes</Text>
+        <Text style={[s.headerSub, { color: t.muted }]}>
           {clients.length} cliente{clients.length !== 1 ? "s" : ""} atendido{clients.length !== 1 ? "s" : ""}
         </Text>
-      </LinearGradient>
+      </View>
 
       {/* Search */}
       <View style={s.searchWrap}>
@@ -487,9 +489,9 @@ export default function StaffClientsScreen() {
 }
 
 const s = StyleSheet.create({
-  header:      { paddingTop: 16, paddingHorizontal: 24, paddingBottom: 20 },
-  headerTitle: { fontSize: 24, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.5 },
-  headerSub:   { fontSize: 13, color: "rgba(255,255,255,.75)", fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
+  header:      { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 10 },
+  headerTitle: { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, marginTop: 3 },
+  headerSub:   { fontSize: 12.5, fontFamily: "SpaceGrotesk_400Regular", marginTop: 3 },
 
   searchWrap:  { padding: 16, paddingBottom: 8 },
   searchBox:   { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.white, borderRadius: Radius.full, paddingHorizontal: 16, paddingVertical: 12 },
