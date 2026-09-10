@@ -179,7 +179,7 @@ export default function RegisterScreen() {
   const can1 = bizType !== "" && businessName.trim() !== "";
   const can2 = collaborators !== "" && appointments !== "" && multiSede !== null;
   const can3 = goals.length > 0;
-  // El WhatsApp dejó de ser opcional: sin él el negocio es inalcanzable.
+  // El teléfono dejó de ser opcional: sin él el negocio es inalcanzable.
   const can4 = email.trim() !== "" && password.trim() !== "" && whatsapp.trim() !== "";
 
   const handleRegister = async () => {
@@ -459,10 +459,15 @@ export default function RegisterScreen() {
             <TextInput style={c.input} placeholder="tu@correo.com"
               placeholderTextColor={Colors.subtle} keyboardType="email-address"
               autoCapitalize="none" value={email} onChangeText={setEmail} />
-            <Text style={c.stepLabel}>WhatsApp</Text>
-            <TextInput style={c.input} placeholder="+57 300 000 0000"
+            <Text style={c.stepLabel}>WhatsApp o teléfono</Text>
+            <TextInput style={c.input} placeholder="+57 300 123 4567"
               placeholderTextColor={Colors.subtle} keyboardType="phone-pad"
               value={whatsapp} onChangeText={setWhatsapp} />
+            {/* La app se publicó en todo el mundo: sin el indicativo, un número
+                de fuera de Colombia se lee como colombiano y se rechaza. */}
+            <Text style={c.ayudaCampo}>
+              Fuera de Colombia, escríbelo con indicativo (ej: +52 55 1234 5678).
+            </Text>
             <Text style={c.stepLabel}>Contraseña</Text>
             <TextInput style={c.input} placeholder="Mín. 6 car., 1 mayúscula, 1 número"
               placeholderTextColor={Colors.subtle} secureTextEntry
@@ -607,4 +612,5 @@ const c = StyleSheet.create({
   avisoBox: { backgroundColor: "#effaf5", borderWidth: 1, borderColor: "rgba(16,185,129,.25)", borderRadius: Radius.md, padding: 12, marginBottom: 16 },
   avisoText: { color: "#0b8a63", fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold" },
   reenviarText: { color: Colors.subtle, fontSize: 13, fontFamily: "SpaceGrotesk_400Regular" },
+  ayudaCampo: { color: Colors.subtle, fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", marginTop: -8, marginBottom: 14 },
 });

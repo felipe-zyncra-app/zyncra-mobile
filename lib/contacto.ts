@@ -10,7 +10,16 @@
  * Es el gemelo de src/lib/contacto.ts en el repo web. Si cambias las reglas
  * aquí, cámbialas allá — y recuerda que el candado real está en la base
  * (trigger tenants_exigir_contacto), que rechaza el insert de cualquier forma.
+ *
+ * El teléfono ya no es solo colombiano. La app se publicó en todo el mundo y la
+ * regla anterior ("10 dígitos que empiecen por 3") rechazaba a cualquiera fuera
+ * de Colombia: un +52 55 1234 5678 se leía como celular colombiano inválido.
+ * Ahora valida libphonenumber-js, que conoce el formato real de cada país; se
+ * escribe el número con indicativo (+52...) o, si no lo lleva, se asume el país
+ * por defecto para no romper a quien siempre escribió sus 10 dígitos.
  */
+
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
 
 const DOMINIOS_FALSOS = new Set([
   "example.com", "example.org", "example.net", "example.edu",
@@ -48,45 +57,45 @@ export function validarCorreo(entrada: unknown): Resultado {
   return { ok: true, valor: correo };
 }
 
-/** Deja solo dígitos y antepone el indicativo si el usuario no lo escribió. */
-export function normalizarTelefono(entrada: unknown, indicativo = "57"): string | null {
-  if (typeof entrada !== "string") return null;
-  const bruto = entrada.trim();
+/**
+ * Devuelve el número en E.164 sin el "+" (573001234567), listo para guardar en
+ * tenants.phone, o null si no es un número real en ningún formato conocido.
+ */
+export function normalizarTelefono(entrada: unknown, paisPorDefecto: CountryCode = "CO"): string | null {
+  const bruto = typeof entrada === "string" ? entrada.trim() : "";
   if (!bruto) return null;
 
-  const traiaIndicativo = bruto.startsWith("+");
-  const digitos = bruto.replace(/\D/g, "");
-  if (!digitos) return null;
-  if (traiaIndicativo) return digitos;
+  // Con "+" se respeta el país que escribió el usuario; sin él se asume el de
+  // por defecto, que es lo que hace la mayoría escribiendo su número local.
+  const numero = bruto.startsWith("+")
+    ? parsePhoneNumberFromString(bruto)
+    : parsePhoneNumberFromString(bruto, paisPorDefecto);
 
-  // Si ya viene con el indicativo delante y es largo, se respeta:
-  // evita convertir 573001112233 en 57573001112233.
-  if (digitos.startsWith(indicativo) && digitos.length > 10) return digitos;
-  return indicativo + digitos;
+  if (!numero || !numero.isValid()) return null;
+  return numero.number.slice(1); // quita el "+"
 }
 
-export function validarTelefono(entrada: unknown, indicativo = "57"): Resultado {
+export function validarTelefono(entrada: unknown, paisPorDefecto: CountryCode = "CO"): Resultado {
   const bruto = typeof entrada === "string" ? entrada.trim() : "";
   if (!bruto) return { ok: false, error: "El WhatsApp es obligatorio: por ahí te contactamos." };
 
-  const numero = normalizarTelefono(bruto, indicativo);
-  if (!numero) return { ok: false, error: "Escribe un número de WhatsApp válido." };
-
-  // E.164: 15 dígitos como máximo, 8 como mínimo razonable con indicativo.
-  if (numero.length < 8 || numero.length > 15) {
-    return { ok: false, error: "El número no parece válido. Incluye el indicativo (ej: +57 300 123 4567)." };
+  const numero = normalizarTelefono(bruto, paisPorDefecto);
+  if (!numero) {
+    return {
+      ok: false,
+      error: "Ese número no existe. Si estás fuera de Colombia, escríbelo con indicativo (ej: +52 55 1234 5678).",
+    };
   }
 
-  const nacional = numero.slice(indicativo.length);
-
-  // Rellenos evidentes: 3000000000, 3333333333, 1234567...
+  // libphonenumber acepta patrones que existen aunque nadie los tenga: 3000000000
+  // es un celular colombiano "válido" y entró más de una vez como relleno. El
+  // número nacional lo da la propia librería, que sabe dónde termina el
+  // indicativo de cada país (España son 9 dígitos, México 10, Chile 9...).
+  const nacional = (bruto.startsWith("+")
+    ? parsePhoneNumberFromString(bruto)
+    : parsePhoneNumberFromString(bruto, paisPorDefecto))!.nationalNumber;
   if (/^(\d)\1+$/.test(nacional) || /^\d{2,3}0{6,}$/.test(nacional) || /^1?234567/.test(nacional)) {
     return { ok: false, error: "Ese número no es real. Escribe tu WhatsApp para poder contactarte." };
-  }
-
-  // Colombia: celulares de 10 dígitos que empiezan por 3.
-  if (indicativo === "57" && (nacional.length !== 10 || !nacional.startsWith("3"))) {
-    return { ok: false, error: "En Colombia el celular tiene 10 dígitos y empieza por 3 (ej: 300 123 4567)." };
   }
 
   return { ok: true, valor: numero };
