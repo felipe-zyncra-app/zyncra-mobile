@@ -13,7 +13,7 @@ import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmt12Hour, localDateStr } from "@/lib/format";
-import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, effectiveDayHours } from "@/lib/scheduling";
+import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, effectiveDayHours, normalizeSlotInterval, DEFAULT_SLOT_INTERVAL } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
@@ -22,7 +22,7 @@ import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/no
 // ─── Scheduling helpers ─────────────────────────────────────────────────────
 
 type ExistingBlock = { appointment_time: string; duration: number };
-type DaySchedule   = { open: boolean; start: string; end: string };
+type DaySchedule   = { open: boolean; start: string; end: string; break_start?: string | null; break_end?: string | null };
 
 function computeAvailable(slots: string[], existing: ExistingBlock[], duration: number): string[] {
   return slots.filter(slot => {
@@ -171,6 +171,8 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
   const [clients, setClients]                 = useState<EditClient[]>([]);
   const [services, setServices]               = useState<EditService[]>([]);
   const [schedule, setSchedule]               = useState<Record<string, DaySchedule> | null>(null);
+  /** Cada cuánto abre cupo el negocio (tenants.settings.slot_interval_min). */
+  const [slotInterval, setSlotInterval]       = useState<number>(DEFAULT_SLOT_INTERVAL);
 
   const [selectedPro, setSelectedPro]         = useState<Professional | null>(null);
   const [selectedClient, setSelectedClient]   = useState<EditClient | null>(null);
@@ -209,6 +211,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
       setClients(clientList);
       setServices(serviceList);
       setSchedule((tenant?.settings as any)?.schedule ?? {});
+      setSlotInterval(normalizeSlotInterval((tenant?.settings as any)?.slot_interval_min));
       // Pre-select current client and service
       setSelectedClient(clientList.find(c => c.id === appt.client_id) ?? null);
       const svc = serviceList.find(s => s.id === appt.service_id);
@@ -236,7 +239,7 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
       setDayClosed(true); setAvailableSlots([]); setLoadingSlots(false); return;
     }
 
-    const slots   = generateSlotsForDay(dayConfig.start, dayConfig.end, duration);
+    const slots   = generateSlotsForDay(dayConfig, duration, slotInterval);
     const dateStr = localDateStr(selectedDate);
     const proId   = selectedPro!.id;
 

@@ -9,13 +9,62 @@ export function minsToTime(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
-export function generateSlotsForDay(start: string, end: string, duration: number): string[] {
-  const startMins = timeToMins(start);
-  const endMins = timeToMins(end);
+export const DEFAULT_SLOT_INTERVAL = 30;
+
+/** Igual que el web (src/lib/datetime.ts): fuera de 5–480 min se usa el default. */
+export function normalizeSlotInterval(v: any): number {
+  const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) && n >= 5 && n <= 480 ? n : DEFAULT_SLOT_INTERVAL;
+}
+
+/**
+ * Horas de inicio válidas de un día.
+ *
+ * Antes avanzaba de 60 en 60 min fijos e ignoraba el descanso: un negocio que
+ * atiende cada 90 min veía cupos cada hora, y uno que almuerza de 12:30 a 1:00
+ * veía ofrecidas las 12:00 y la 1:00 con el servicio encima del almuerzo. El
+ * paso ahora sale de `tenants.settings.slot_interval_min` y el descanso corta
+ * la grilla, igual que en la web y que en la reserva pública.
+ *
+ * La grilla VUELVE A ANCLAR al terminar el descanso: con 90 min desde las
+ * 09:00 y almuerzo 12:30–13:00 da 09:00, 10:30, 12:00 · 13:00, 14:30, 16:00,
+ * 17:30. Sin re-anclar saldría 13:30 y el negocio perdería la primera hora de
+ * la tarde.
+ */
+export function generateSlotsForDay(
+  day: DayHours,
+  duration: number,
+  intervalMin: number = DEFAULT_SLOT_INTERVAL,
+): string[] {
+  const step     = normalizeSlotInterval(intervalMin);
+  const startMins = timeToMins(day.start);
+  const endMins   = timeToMins(day.end);
+  const bs = day.break_start ? timeToMins(day.break_start) : null;
+  const be = day.break_end   ? timeToMins(day.break_end)   : null;
+  const hasBreak = bs != null && be != null && bs > startMins && be < endMins && be > bs;
+
+  const segments: [number, number][] = hasBreak
+    ? [[startMins, bs!], [be!, endMins]]
+    : [[startMins, endMins]];
+
   const slots: string[] = [];
-  for (let m = startMins; m + duration <= endMins; m += 60)
-    slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:00`);
+  for (const [from, to] of segments) {
+    for (let m = from; m < to && slots.length < 200; m += step) {
+      // El servicio completo tiene que caber antes del cierre…
+      if (m + duration > endMins) break;
+      // …y no puede quedar montado sobre el descanso.
+      if (hasBreak && m < be! && bs! < m + duration) continue;
+      slots.push(minsToTime(m));
+    }
+  }
   return slots;
+}
+
+/** ¿El servicio [m, m+dur) pisa el descanso del día? */
+export function overlapsDayBreak(m: number, duration: number, day: DayHours | null | undefined): boolean {
+  if (!day?.break_start || !day?.break_end) return false;
+  const bs = timeToMins(day.break_start), be = timeToMins(day.break_end);
+  return m < be && bs < m + duration;
 }
 
 export function buildWeek(base: Date): Date[] {
@@ -34,7 +83,14 @@ export function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-export type DayHours = { open: boolean; start: string; end: string };
+export type DayHours = {
+  open: boolean;
+  start: string;
+  end: string;
+  /** Descanso del día (almuerzo). Null o ausente = sin descanso. */
+  break_start?: string | null;
+  break_end?: string | null;
+};
 
 // Horario efectivo de un día: el propio del profesional (si tiene) tiene prioridad sobre el
 // del negocio — mismo criterio que la reserva online del web (getEffectiveHours).
@@ -44,12 +100,29 @@ const LEGACY_DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 export function effectiveDayHours(date: Date, businessSchedule: any, proSchedule: any): DayHours | null {
   const dow = date.getDay();
+  const bd = businessSchedule?.[String(dow)];
   const pd = proSchedule?.[String(dow)] ?? proSchedule?.[LEGACY_DAY_KEYS[dow]];
   if (pd != null) {
-    return { open: !!(pd.open ?? pd.enabled), start: pd.start ?? "09:00", end: pd.end ?? "18:00" };
+    return {
+      open:  !!(pd.open ?? pd.enabled),
+      start: pd.start ?? "09:00",
+      end:   pd.end ?? "18:00",
+      // El descanso propio del profesional manda; si no tiene, hereda el del
+      // negocio — mismo criterio que /api/ai/availability en la web. Sin este
+      // respaldo, un profesional con horario propio se quedaba sin almuerzo.
+      break_start: pd.break_start ?? bd?.break_start ?? null,
+      break_end:   pd.break_end   ?? bd?.break_end   ?? null,
+    };
   }
-  const bd = businessSchedule?.[String(dow)];
-  return bd ? { open: !!bd.open, start: bd.start ?? "09:00", end: bd.end ?? "18:00" } : null;
+  return bd
+    ? {
+        open:  !!bd.open,
+        start: bd.start ?? "09:00",
+        end:   bd.end ?? "18:00",
+        break_start: bd.break_start ?? null,
+        break_end:   bd.break_end ?? null,
+      }
+    : null;
 }
 
 // Re-verifica en el servidor que el horario siga libre justo antes de guardar:
