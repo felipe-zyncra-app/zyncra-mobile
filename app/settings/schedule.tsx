@@ -122,7 +122,7 @@ export default function ScheduleScreen() {
   const { t } = useTheme();
   const [schedule, setSchedule] = useState<Schedule>(buildDefault());
   /** Cada cuánto se abre un cupo (tenants.settings.slot_interval_min). */
-  const [interval, setInterval] = useState<number>(30);
+  const [slotInterval, setSlotInterval] = useState<number>(30);
   const [intervalOpen, setIntervalOpen] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -138,7 +138,7 @@ export default function ScheduleScreen() {
           const stored = (data.settings as any)?.schedule;
           if (stored) setSchedule({ ...buildDefault(), ...stored });
           const iv = Number((data.settings as any)?.slot_interval_min);
-          if (Number.isFinite(iv) && iv >= 5 && iv <= 480) setInterval(Math.round(iv));
+          if (Number.isFinite(iv) && iv >= 5 && iv <= 480) setSlotInterval(Math.round(iv));
         }
         setLoading(false);
       });
@@ -153,7 +153,7 @@ export default function ScheduleScreen() {
     if (!tenantId) return;
     setSaving(true);
     const { data: current } = await supabase.from("tenants").select("settings").eq("id", tenantId).single();
-    const settings = { ...(current?.settings ?? {}), schedule, slot_interval_min: interval };
+    const settings = { ...(current?.settings ?? {}), schedule, slot_interval_min: slotInterval };
     await supabase.from("tenants").update({ settings }).eq("id", tenantId);
     setSaving(false);
     setSaved(true);
@@ -186,7 +186,7 @@ export default function ScheduleScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={sc.dayName}>Intervalo entre turnos</Text>
                     <Text style={sc.intervalSub}>
-                      {INTERVAL_OPTIONS.find(o => o.value === interval)?.label ?? `Cada ${interval} minutos`}
+                      {INTERVAL_OPTIONS.find(o => o.value === slotInterval)?.label ?? `Cada ${slotInterval} minutos`}
                     </Text>
                   </View>
                   <Ionicons name="chevron-down" size={15} color={Colors.subtle} />
@@ -206,10 +206,10 @@ export default function ScheduleScreen() {
                     keyExtractor={o => String(o.value)}
                     renderItem={({ item }) => (
                       <TouchableOpacity
-                        style={[tp.option, item.value === interval && tp.optionActive]}
-                        onPress={() => { setInterval(item.value); setIntervalOpen(false); }}>
-                        <Text style={[tp.optionText, item.value === interval && tp.optionTextActive]}>{item.label}</Text>
-                        {item.value === interval && <Ionicons name="checkmark" size={17} color={Colors.red} />}
+                        style={[tp.option, item.value === slotInterval && tp.optionActive]}
+                        onPress={() => { setSlotInterval(item.value); setIntervalOpen(false); }}>
+                        <Text style={[tp.optionText, item.value === slotInterval && tp.optionTextActive]}>{item.label}</Text>
+                        {item.value === slotInterval && <Ionicons name="checkmark" size={17} color={Colors.red} />}
                       </TouchableOpacity>
                     )}
                   />
