@@ -10,7 +10,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { scheduleAppointmentReminder } from "@/lib/notifications";
-import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, effectiveDayHours } from "@/lib/scheduling";
+import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, effectiveDayHours, normalizeSlotInterval, DEFAULT_SLOT_INTERVAL } from "@/lib/scheduling";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { fmt12Hour, localDateStr } from "@/lib/format";
 import { getActiveLocationId } from "@/lib/active-location";
@@ -68,7 +68,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const [selectedTime, setSelectedTime]       = useState<string | null>(null);
   const [availableSlots, setAvailableSlots]   = useState<string[]>([]);
   const [dayClosed, setDayClosed]             = useState(false);
-  const [schedule, setSchedule]               = useState<Record<string, { open: boolean; start: string; end: string }> | null>(null);
+  const [schedule, setSchedule]               = useState<Record<string, { open: boolean; start: string; end: string; break_start?: string | null; break_end?: string | null }> | null>(null);
+  /** Cada cuánto abre cupo el negocio (tenants.settings.slot_interval_min). */
+  const [slotInterval, setSlotInterval]       = useState<number>(DEFAULT_SLOT_INTERVAL);
 
   useEffect(() => {
     if (!visible) return;
@@ -125,6 +127,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setPros(pros ?? []);
     setClients((clis ?? []).map(c => ({ ...c, phone: c.phone ?? "" })));
     setSchedule((tenant?.settings as any)?.schedule ?? null);
+    setSlotInterval(normalizeSlotInterval((tenant?.settings as any)?.slot_interval_min));
     setLoading(false);
   };
 
@@ -148,8 +151,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       return;
     }
 
-    // Generate hourly slots that fit within business hours
-    const slots = generateSlotsForDay(dayConfig.start, dayConfig.end, newDuration);
+    // Cupos del día: paso del negocio, sin pisar el descanso ni el cierre.
+    const slots = generateSlotsForDay(dayConfig, newDuration, slotInterval);
 
     const dateStr = localDateStr(date);
     const { data: appts } = await supabase

@@ -19,7 +19,36 @@ import { fmtPhone, fmtDateFull } from "@/lib/format";
 
 type Tab = "config" | "solicitar" | "historial";
 type Client = { id: string; name: string; phone: string | null };
-type Request = { id: string; client_name: string; client_phone: string | null; sent_via: string; created_at: string };
+type Request = { id: string; client_name: string; client_phone: string | null; sent_via: string; created_at: string; reviewed?: boolean };
+type HistFilter = "todas" | "pendientes" | "resenaron";
+
+/** Cada cuánto tiene sentido volver a pedirle reseña a la misma persona. */
+const REASK_DAYS = 90;
+
+const daysSince = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
+/** appointment_date es "YYYY-MM-DD": sin la hora se leería como medianoche UTC
+ *  y en Colombia (UTC-5) eso corre el día uno atrás. */
+const daysSinceDay = (day: string) => Math.floor((Date.now() - new Date(day + "T00:00:00").getTime()) / 86_400_000);
+
+function visitAgo(day: string): string {
+  const d = daysSinceDay(day);
+  if (d <= 0) return "Atendido hoy";
+  if (d === 1) return "Atendido ayer";
+  if (d < 7)   return `Atendido hace ${d} días`;
+  if (d < 30)  return `Atendido hace ${Math.floor(d / 7)} sem.`;
+  const m = Math.floor(d / 30);
+  return `Atendido hace ${m} mes${m > 1 ? "es" : ""}`;
+}
+
+function sentAgo(iso: string): string {
+  const d = daysSince(iso);
+  if (d === 0) return "hoy";
+  if (d === 1) return "ayer";
+  if (d < 7)   return `hace ${d} días`;
+  if (d < 30)  return `hace ${Math.floor(d / 7)} sem.`;
+  return `hace ${Math.floor(d / 30)} mes${Math.floor(d / 30) > 1 ? "es" : ""}`;
+}
 
 const DEFAULT_TEMPLATE =
   "Hola {{nombre}} 👋\n\nGracias por visitarnos. Tu opinión nos ayuda a mejorar y a que más personas nos encuentren.\n\n⭐ ¿Nos dejas una reseña en Google? Solo toma 1 minuto:\n{{link}}\n\n¡Gracias de corazón!";
@@ -45,10 +74,13 @@ export default function GoogleReviewsScreen() {
   const [sentOk, setSentOk]           = useState(false);
   const [msgCopied, setMsgCopied]     = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
+  const [lastSent, setLastSent]       = useState<Record<string, string>>({});
+  const [lastVisit, setLastVisit]     = useState<Record<string, string>>({});
 
   // Historial
   const [requests, setRequests]       = useState<Request[]>([]);
   const [loadingHist, setLoadingHist] = useState(false);
+  const [histFilter, setHistFilter]   = useState<HistFilter>("todas");
 
   useEffect(() => {
     if (!tenantId) return;
@@ -62,6 +94,9 @@ export default function GoogleReviewsScreen() {
           setGoogleUrl(cfg.google_maps_url ?? "");
           setTemplate(cfg.message_template ?? DEFAULT_TEMPLATE);
         }
+        // Poner el link es de una sola vez; pedir reseñas es lo de todos los
+        // días. Quien ya lo tiene entra directo a pedir.
+        setTab(cfg?.google_maps_url ? "solicitar" : "config");
       });
     return () => { cancelled = true; };
   }, [tenantId]);
@@ -69,9 +104,24 @@ export default function GoogleReviewsScreen() {
   const loadClients = useCallback(async () => {
     if (!tenantId) return;
     setLoadingClients(true);
-    const { data } = await supabase.from("clients")
-      .select("id, name, phone").eq("tenant_id", tenantId).order("name");
+    // Las citas atendidas son lo que convierte esta pantalla en útil: sin
+    // ellas la lista mostraba los primeros 8 clientes por orden alfabético,
+    // que parecen una recomendación y no lo son.
+    const [{ data }, { data: reqs }, { data: appts }] = await Promise.all([
+      supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name"),
+      supabase.from("review_requests").select("client_id, created_at")
+        .eq("tenant_id", tenantId).order("created_at", { ascending: false }),
+      supabase.from("appointments").select("client_id, appointment_date")
+        .eq("tenant_id", tenantId).eq("status", "completed")
+        .order("appointment_date", { ascending: false }).limit(1000),
+    ]);
     setClients((data ?? []) as Client[]);
+    const sent: Record<string, string> = {};
+    for (const r of reqs ?? []) if (r.client_id && !sent[r.client_id]) sent[r.client_id] = r.created_at;
+    setLastSent(sent);
+    const visits: Record<string, string> = {};
+    for (const a of appts ?? []) if (a.client_id && !visits[a.client_id]) visits[a.client_id] = a.appointment_date;
+    setLastVisit(visits);
     setLoadingClients(false);
   }, [tenantId]);
 
@@ -79,7 +129,7 @@ export default function GoogleReviewsScreen() {
     if (!tenantId) return;
     setLoadingHist(true);
     const { data } = await supabase.from("review_requests")
-      .select("id, client_name, client_phone, sent_via, created_at")
+      .select("id, client_name, client_phone, sent_via, created_at, reviewed")
       .eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(100);
     setRequests((data ?? []) as Request[]);
     setLoadingHist(false);
@@ -141,15 +191,38 @@ export default function GoogleReviewsScreen() {
     await logRequest(client, "whatsapp");
   };
 
-  const filtered = clients.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone ?? "").includes(search)
-  ).slice(0, 8);
+  const searching = search.trim().length > 0;
+
+  /**
+   * Con el buscador vacío la lista propone a quién pedirle en vez de mostrar
+   * los primeros 8 por orden alfabético. Entra quien tiene una cita ATENDIDA
+   * y además (a) nunca se le ha pedido, (b) volvió después de la última vez
+   * que se le pidió, o (c) ya pasaron REASK_DAYS. Del más reciente al más
+   * antiguo: pedir la reseña recién salido del local es cuando más gente la
+   * deja.
+   */
+  const filtered = searching
+    ? clients.filter(c =>
+        c.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+        (c.phone ?? "").includes(search.trim())
+      ).slice(0, 8)
+    : clients
+        .filter(c => !!lastVisit[c.id])
+        .filter(c => {
+          const sent = lastSent[c.id];
+          return !sent || sent < lastVisit[c.id] || daysSince(sent) > REASK_DAYS;
+        })
+        .sort((a, b) => (lastVisit[a.id] < lastVisit[b.id] ? 1 : -1))
+        .slice(0, 8);
+
+  const visibleRequests = requests.filter(r =>
+    histFilter === "todas" ? true : histFilter === "resenaron" ? !!r.reviewed : !r.reviewed);
+  const reviewedCount = requests.filter(r => r.reviewed).length;
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: "config",    label: "Configuración" },
-    { key: "solicitar", label: "Solicitar" },
+    { key: "solicitar", label: "Pedir reseña" },
     { key: "historial", label: "Historial" },
+    { key: "config",    label: "Configuración" },
   ];
 
   return (
@@ -233,26 +306,55 @@ export default function GoogleReviewsScreen() {
               </View>
             )}
 
-            <Text style={s.label}>Buscar cliente</Text>
+            <Text style={s.label}>{searching ? "Resultados" : "A quién pedirle"}</Text>
             <TextInput style={s.input} value={search} onChangeText={t => { setSearch(t); setSelected(null); setSentOk(false); }}
-              placeholder="Nombre o teléfono..." placeholderTextColor={t.subtle} />
+              placeholder="Buscar por nombre o teléfono..." placeholderTextColor={t.subtle} />
+            {!searching && (
+              <Text style={s.listHint}>
+                Clientes que ya atendiste y a los que aún no les has pedido reseña, del más reciente al más antiguo.
+              </Text>
+            )}
 
             {loadingClients && <ActivityIndicator color={Colors.red} style={{ marginTop: 20 }} />}
 
-            {filtered.map(c => (
-              <TouchableOpacity key={c.id}
-                style={[s.clientCard, selected?.id === c.id && s.clientCardActive]}
-                onPress={() => setSelected(c)} activeOpacity={0.75}>
-                <View style={s.clientAvatar}>
-                  <Text style={s.clientAvatarText}>{c.name[0].toUpperCase()}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.clientName}>{c.name}</Text>
-                  {c.phone && <Text style={s.clientPhone}>{c.phone}</Text>}
-                </View>
-                {selected?.id === c.id && <Ionicons name="checkmark-circle" size={18} color={Colors.red} />}
-              </TouchableOpacity>
-            ))}
+            {!loadingClients && filtered.length === 0 && (
+              <View style={s.listEmpty}>
+                <Text style={s.listEmptyText}>
+                  {searching
+                    ? "Sin resultados. Puedes buscar a cualquier cliente por nombre o teléfono."
+                    : "Nadie pendiente por ahora: ya les pediste reseña a todos los que atendiste. Busca arriba si quieres pedirle a alguien más."}
+                </Text>
+              </View>
+            )}
+
+            {filtered.map(c => {
+              const visit = lastVisit[c.id];
+              const sent  = lastSent[c.id];
+              // "Ya se le pidió" solo avisa si sigue vigente: si volvió
+              // después, pedirle de nuevo es justamente lo que toca.
+              const yaPedido = !!sent && daysSince(sent) <= REASK_DAYS && !(visit && sent < visit);
+              return (
+                <TouchableOpacity key={c.id}
+                  style={[s.clientCard, selected?.id === c.id && s.clientCardActive]}
+                  onPress={() => setSelected(c)} activeOpacity={0.75}>
+                  <View style={s.clientAvatar}>
+                    <Text style={s.clientAvatarText}>{c.name[0].toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.clientName}>{c.name}</Text>
+                    {visit
+                      ? <Text style={s.clientVisit}>{visitAgo(visit)}</Text>
+                      : c.phone ? <Text style={s.clientPhone}>{c.phone}</Text> : null}
+                    {yaPedido && (
+                      <View style={s.askedChip}>
+                        <Text style={s.askedChipText}>ya se le pidió {sentAgo(sent!)}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {selected?.id === c.id && <Ionicons name="checkmark-circle" size={18} color={Colors.red} />}
+                </TouchableOpacity>
+              );
+            })}
 
             {selected && (
               <Animated.View entering={FadeInDown.duration(300)}>
@@ -297,8 +399,38 @@ export default function GoogleReviewsScreen() {
               <View style={[s.summaryCard, Shadow.sm]}>
                 <Text style={s.summaryCount}>{requests.length}</Text>
                 <Text style={s.summaryLabel}>Total solicitudes enviadas</Text>
+                {/* Google no avisa quién reseñó: el conteo sale de lo que el
+                    negocio marca a mano. Decirlo evita que un 0 se lea como
+                    que la herramienta no funciona. */}
+                <Text style={s.summaryHint}>
+                  {reviewedCount} marcada{reviewedCount === 1 ? "" : "s"} como reseñada{reviewedCount === 1 ? "" : "s"} a mano
+                </Text>
               </View>
-              {requests.map((r, i) => (
+
+              <View style={s.filterRow}>
+                {([
+                  ["todas",      "Todas",      requests.length],
+                  ["pendientes", "Pendientes", requests.length - reviewedCount],
+                  ["resenaron",  "Reseñaron",  reviewedCount],
+                ] as [HistFilter, string, number][]).map(([key, label, n]) => (
+                  <TouchableOpacity key={key} onPress={() => setHistFilter(key)} activeOpacity={0.75}
+                    style={[s.filterChip, histFilter === key && s.filterChipActive]}>
+                    <Text style={[s.filterChipText, histFilter === key && s.filterChipTextActive]}>{label} {n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {visibleRequests.length === 0 && (
+                <View style={s.listEmpty}>
+                  <Text style={s.listEmptyText}>
+                    {histFilter === "resenaron"
+                      ? "Todavía no has marcado ninguna como reseñada."
+                      : "No queda ninguna pendiente."}
+                  </Text>
+                </View>
+              )}
+
+              {visibleRequests.map((r, i) => (
                 <Animated.View key={r.id} entering={i < 10 ? FadeInDown.delay(i * 40).duration(280) : undefined}>
                   <View style={[s.histRow, Shadow.sm]}>
                     <View style={{ flex: 1 }}>
@@ -368,6 +500,19 @@ const s = StyleSheet.create({
   clientAvatarText:{ fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: Colors.red },
   clientName:   { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
   clientPhone:  { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 2 },
+  clientVisit:  { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted, marginTop: 2 },
+  askedChip:    { alignSelf: "flex-start", marginTop: 5, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99, backgroundColor: "#d977061a" },
+  askedChipText:{ fontSize: 10.5, fontFamily: "SpaceGrotesk_700Bold", color: "#b45309" },
+
+  listHint:     { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 8, lineHeight: 18 },
+  listEmpty:    { marginTop: 14, padding: 18, borderRadius: Radius.md, backgroundColor: Colors.border + "40" },
+  listEmptyText:{ fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, lineHeight: 20, textAlign: "center" },
+
+  filterRow:    { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 4 },
+  filterChip:   { flex: 1, paddingVertical: 9, borderRadius: 99, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white, alignItems: "center" },
+  filterChipActive: { backgroundColor: Colors.text, borderColor: Colors.text },
+  filterChipText:   { fontSize: 12, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted },
+  filterChipTextActive: { color: "white" },
 
   preview:      { backgroundColor: "#f0fdf4", borderRadius: Radius.md, padding: 16, borderWidth: 1, borderColor: "#bbf7d0" },
   previewText:  { fontSize: 14, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text, lineHeight: 22 },
@@ -382,6 +527,7 @@ const s = StyleSheet.create({
   summaryCard:  { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 20, alignItems: "center", marginBottom: 16 },
   summaryCount: { fontSize: 36, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
   summaryLabel: { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 4 },
+  summaryHint:  { fontSize: 11.5, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 6, opacity: 0.85 },
 
   histRow:      { flexDirection: "row", alignItems: "center", backgroundColor: Colors.white, borderRadius: Radius.md, padding: 14, marginBottom: 8 },
   histName:     { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
