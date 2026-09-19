@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
+import { ScreenHeader } from "@/components/ui";
 import { Config } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyFull, fmtDateFull } from "@/lib/format";
@@ -269,7 +270,7 @@ export default function InvoicesScreen() {
   // ── Settings tab ──────────────────────────────────────────────────────────
 
   const renderSettings = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
       <Text style={[s.sectionTitle, { color: t.subtle }]}>Credenciales Factus</Text>
       <View style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
         <Text style={[s.hint, { color: t.muted }]}>
@@ -368,7 +369,7 @@ export default function InvoicesScreen() {
   // ── Nueva factura tab ─────────────────────────────────────────────────────
 
   const renderNueva = () => (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
       <Text style={[s.sectionTitle, { color: t.subtle }]}>Datos del Cliente</Text>
       <View style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
         <Text style={[s.fieldLabel, { color: t.subtle }]}>Tipo de documento</Text>
@@ -579,18 +580,7 @@ export default function InvoicesScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="white" />
-          </TouchableOpacity>
-          <View>
-            <Text style={s.headerTitle}>Factura Electrónica</Text>
-            <Text style={s.headerSub}>Emite facturas DIAN vía Factus</Text>
-          </View>
-        </View>
-      </LinearGradient>
+      <ScreenHeader crumb="Ventas" title="Factura Electrónica" subtitle="Emite facturas DIAN vía Factus" onBack={() => router.back()} />
 
       {/* Tab bar */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

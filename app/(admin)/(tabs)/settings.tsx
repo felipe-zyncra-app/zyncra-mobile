@@ -1,0 +1,240 @@
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { supabase } from "@/lib/supabase";
+import { Config, authedFetch } from "@/lib/config";
+import Constants from "expo-constants";
+import { Colors, Fonts } from "@/constants/theme";
+import { useTheme } from "@/lib/theme";
+import { useTenant } from "@/lib/tenant";
+import { Card, MonoTag, SectionLabel, ListRow, TenantBadge, SegmentedControl } from "@/components/ui";
+
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+
+// Grupos espejando NAV_GROUPS del portal web (admin/layout.tsx):
+// Panel · Marketing · Ventas · Negocio · Cuenta
+const SECTIONS: {
+  title: string;
+  items: { icon: IoniconName; color: string; label: string; sub: string; route: string }[];
+}[] = [
+  {
+    title: "Soporte",
+    items: [
+      { icon: "help-buoy-outline", color: Colors.blue, label: "Centro de ayuda", sub: "Guías paso a paso para usar Zyncra", route: "/(admin)/help" },
+    ],
+  },
+  {
+    title: "Panel",
+    items: [
+      { icon: "notifications-outline", color: Colors.success, label: "Recordatorios", sub: "Alertas automáticas a clientes",         route: "/settings/reminders" },
+      { icon: "bar-chart-outline",     color: Colors.red,     label: "Reportes",      sub: "Ingresos, servicios y rendimiento",      route: "/(admin)/reports" },
+    ],
+  },
+  {
+    title: "Marketing",
+    items: [
+      { icon: "sparkles-outline",     color: "#a855f7",     label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp",   route: "/(admin)/hanna" },
+      { icon: "logo-whatsapp",        color: "#25D366",     label: "Marketing WhatsApp",  sub: "Campañas y mensajes masivos",          route: "/(admin)/whatsapp" },
+      { icon: "chatbox-ellipses-outline", color: "#25D366", label: "Bandeja de WhatsApp", sub: "Conversaciones con tus clientes",      route: "/(admin)/inbox" },
+      { icon: "star-outline",         color: "#f59e0b",     label: "Reseñas Google",      sub: "Solicita reseñas a tus clientes",      route: "/(admin)/reviews-google" },
+      { icon: "chatbubbles-outline",  color: Colors.blue,   label: "Reseñas del negocio", sub: "Modera las opiniones de tu negocio",   route: "/(admin)/reviews-site" },
+    ],
+  },
+  {
+    title: "Ventas",
+    items: [
+      { icon: "stats-chart-outline",   color: Colors.red,     label: "Módulo Financiero",   sub: "Ingresos, egresos y balance",    route: "/(admin)/finanzas" },
+      { icon: "cube-outline",          color: "#8b5cf6",      label: "Inventario",          sub: "Productos, stock y valor",       route: "/(admin)/inventario" },
+      { icon: "wallet-outline",        color: Colors.success, label: "Sistema de Caja",     sub: "Control de ingresos y egresos",  route: "/(admin)/caja" },
+      { icon: "ribbon-outline",        color: "#f59e0b",      label: "Comisiones",          sub: "Paga a tu equipo de trabajo",    route: "/(admin)/commissions" },
+      { icon: "document-text-outline", color: Colors.blue,    label: "Factura Electrónica", sub: "Emite facturas DIAN vía Factus", route: "/(admin)/invoices" },
+    ],
+  },
+  {
+    title: "Compras",
+    items: [
+      { icon: "cart-outline", color: "#0ea5e9", label: "Proveedores", sub: "Catálogo mayorista y pedidos", route: "/(admin)/proveedores" },
+    ],
+  },
+  {
+    title: "Clientes",
+    items: [
+      { icon: "pulse-outline", color: "#0ea5e9", label: "Historias Clínicas", sub: "Fichas y evoluciones de pacientes", route: "/(admin)/clinical" },
+      { icon: "gift-outline",  color: "#ec4899", label: "Fidelización",       sub: "Premios y recompensas por visitas", route: "/(admin)/loyalty" },
+    ],
+  },
+  {
+    title: "Negocio",
+    items: [
+      { icon: "storefront-outline", color: Colors.red,   label: "Mi Tienda",             sub: "Personalización y link de reservas",  route: "/settings/store" },
+      { icon: "time-outline",       color: "#f59e0b",    label: "Horario de atención",   sub: "Días y horas disponibles",            route: "/settings/schedule" },
+      { icon: "cut-outline",        color: "#8b5cf6",    label: "Servicios",             sub: "Gestiona tu catálogo de precios",     route: "/settings/services" },
+      { icon: "people-outline",     color: Colors.blue,  label: "Equipo",                sub: "Profesionales y permisos",            route: "/settings/team" },
+      { icon: "location-outline",   color: "#10b981",    label: "Sedes",                 sub: "Ubicaciones de tu negocio",           route: "/settings/locations" },
+      { icon: "options-outline",    color: "#8b5cf6",    label: "Campos Personalizados", sub: "Datos extra para clientes y citas",   route: "/(admin)/custom-fields" },
+    ],
+  },
+  {
+    title: "Cuenta",
+    items: [
+      { icon: "person-outline", color: "#6366f1",   label: "Mi perfil",          sub: "Datos personales y contraseña", route: "/settings/profile" },
+    ],
+  },
+];
+
+export default function SettingsScreen() {
+  const router = useRouter();
+  const { mode, preference, t, setPreference } = useTheme();
+  const { tenant: tenantData } = useTenant();
+
+  const handleLogout = () => {
+    Alert.alert("Cerrar sesión", "¿Seguro que quieres salir?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Salir", style: "destructive",
+        onPress: async () => {
+          await supabase.auth.signOut();
+          router.replace("/(auth)/login");
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Eliminar cuenta",
+      "Se eliminará tu cuenta y todos los datos de tu negocio (clientes, citas, ventas, reportes). Esta acción no se puede deshacer.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Continuar", style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "¿Confirmas la eliminación?",
+              "Esta es tu última oportunidad para cancelar.",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Eliminar cuenta", style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
+                      if (!res.ok) {
+                        const body = await res.json().catch(() => ({}));
+                        throw new Error(body.error || "No se pudo eliminar la cuenta.");
+                      }
+                      await supabase.auth.signOut();
+                      router.replace("/(auth)/login");
+                    } catch (e: any) {
+                      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        {/* ── Header compacto ── */}
+        <Animated.View entering={FadeInDown.duration(350)} style={s.headerRow}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <MonoTag>Ajustes</MonoTag>
+            <Text style={[s.headerTitle, { color: t.ink }]}>Configura tu negocio</Text>
+          </View>
+          {tenantData && <TenantBadge name={tenantData.name} />}
+        </Animated.View>
+
+        {/* ── Apariencia ── */}
+        <Animated.View entering={FadeInDown.delay(60).duration(400)}>
+          <SectionLabel>Apariencia</SectionLabel>
+          <Card>
+            <ListRow
+              icon={preference === "system" ? "phone-portrait" : mode === "dark" ? "moon" : "sunny"}
+              color={preference === "system" ? Colors.blue : mode === "dark" ? "#6366f1" : "#f59e0b"}
+              label="Tema"
+              sub={
+                preference === "system"
+                  ? `Igual que tu dispositivo · ahora ${mode === "dark" ? "oscuro" : "claro"}`
+                  : preference === "dark" ? "Siempre oscuro" : "Siempre claro"
+              }
+              last
+            />
+            <View style={s.themePicker}>
+              <SegmentedControl
+                value={preference}
+                onChange={setPreference}
+                options={[
+                  { value: "system", label: "Automático" },
+                  { value: "light",  label: "Claro" },
+                  { value: "dark",   label: "Oscuro" },
+                ]}
+              />
+            </View>
+          </Card>
+        </Animated.View>
+
+        {SECTIONS.map((sec, si) => (
+          <Animated.View key={sec.title} entering={FadeInDown.delay((si + 2) * 60).duration(400)} style={{ marginTop: 18 }}>
+            <SectionLabel>{sec.title}</SectionLabel>
+            <Card>
+              {sec.items.map((item, ii) => (
+                <ListRow
+                  key={item.route}
+                  icon={item.icon}
+                  color={item.color}
+                  label={item.label}
+                  sub={item.sub}
+                  last={ii === sec.items.length - 1}
+                  onPress={() => router.push(item.route as any)}
+                />
+              ))}
+            </Card>
+          </Animated.View>
+        ))}
+
+        {/* ── Cerrar sesión ── */}
+        <Animated.View entering={FadeInDown.delay(520).duration(400)} style={{ marginTop: 18 }}>
+          <Card>
+            <TouchableOpacity style={s.logoutRow} onPress={handleLogout} activeOpacity={0.6}>
+              <View style={[s.logoutIcon, { backgroundColor: Colors.red + "12" }]}>
+                <Ionicons name="log-out-outline" size={17} color={Colors.red} />
+              </View>
+              <Text style={s.logoutText}>Cerrar sesión</Text>
+            </TouchableOpacity>
+          </Card>
+        </Animated.View>
+
+        {/* ── Eliminar cuenta ── */}
+        <Animated.View entering={FadeInDown.delay(540).duration(400)} style={{ marginTop: 10 }}>
+          <TouchableOpacity style={s.deleteRow} onPress={handleDeleteAccount} activeOpacity={0.6}>
+            <Text style={[s.deleteText, { color: t.subtle }]}>Eliminar cuenta</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(580).duration(400)} style={{ alignItems: "center", marginTop: 24 }}>
+          <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v{Constants.expoConfig?.version ?? "1.0.0"} · Hecho en Colombia 🇨🇴</Text>
+        </Animated.View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const s = StyleSheet.create({
+  headerRow:   { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  themePicker: { paddingHorizontal: 16, paddingBottom: 14, marginTop: -4 },
+  headerTitle: { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
+  logoutRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
+  logoutIcon:  { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  logoutText:  { fontSize: 13.5, fontFamily: Fonts.semibold, color: Colors.red },
+  deleteRow:   { alignItems: "center", paddingVertical: 10 },
+  deleteText:  { fontSize: 12.5, fontFamily: Fonts.regular, textDecorationLine: "underline" },
+  footer:      { fontSize: 12, fontFamily: Fonts.regular },
+});

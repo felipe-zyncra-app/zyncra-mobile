@@ -1,8 +1,10 @@
-import { Tabs, Redirect } from "expo-router";
+﻿import { Tabs, Redirect } from "expo-router";
 import { View, ActivityIndicator } from "react-native";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/lib/auth";
 import { useStaffPermissions } from "@/lib/permissions";
+import { useSubscription } from "@/lib/subscription";
+import AccountBlocked from "@/components/AccountBlocked";
 import FluidTabBar, { type TabItem } from "@/components/FluidTabBar";
 
 const TABS: TabItem[] = [
@@ -14,6 +16,7 @@ const TABS: TabItem[] = [
 export default function StaffLayout() {
   const { role, loading } = useAuth();
   const perms = useStaffPermissions();
+  const { blocked } = useSubscription();
   const visibleTabs = perms.clients_tab ? TABS : TABS.filter(t => t.name !== "clients");
 
   if (loading) {
@@ -25,6 +28,10 @@ export default function StaffLayout() {
   }
 
   if (role !== "staff") return <Redirect href="/(auth)/login" />;
+
+  // El negocio sin pago al día bloquea también al equipo: si no, el dueño
+  // queda fuera pero sus colaboradores siguen agendando y cobrando.
+  if (blocked) return <AccountBlocked />;
 
   return (
     <Tabs tabBar={(props) => <FluidTabBar {...props} tabs={visibleTabs} />} screenOptions={{ headerShown: false }}>

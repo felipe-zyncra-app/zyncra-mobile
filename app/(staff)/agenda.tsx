@@ -8,10 +8,12 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { MonoTag } from "@/components/ui";
 import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
 import { buildWeek } from "@/lib/scheduling";
 import { localDateStr } from "@/lib/format";
 import ErrorState from "@/components/ErrorState";
+import SubscriptionBanner from "@/components/SubscriptionBanner";
 import { useStaffPermissions } from "@/lib/permissions";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
@@ -38,7 +40,7 @@ function ApptDetailModal({ appt, onClose, onStatusChange }: {
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: t.bg }}>
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.header}>
+        <View style={[dm.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={dm.headerRow}>
             <TouchableOpacity onPress={onClose} style={dm.closeBtn}>
@@ -55,7 +57,7 @@ function ApptDetailModal({ appt, onClose, onStatusChange }: {
               <Text style={dm.timeText}>{time}</Text>
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
           <Text style={dm.sectionLabel}>Estado de la cita</Text>
@@ -157,13 +159,15 @@ export default function StaffAgendaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerBlob} />
-        <Animated.View entering={FadeInDown.duration(400)} style={{ position: "relative", zIndex: 1 }}>
-          <Text style={s.headerTitle}>Mi Agenda</Text>
-          <Text style={s.headerSub} numberOfLines={1}>{dateStr}</Text>
+      <View style={s.header}>
+        <Animated.View entering={FadeInDown.duration(400)}>
+          <MonoTag>Mi Agenda</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>{dateStr}</Text>
         </Animated.View>
-      </LinearGradient>
+      </View>
+
+      {/* El equipo también se entera: si el negocio no paga, se les bloquea */}
+      <SubscriptionBanner style={{ marginHorizontal: 20, marginBottom: 12 }} />
 
       {/* Week strip */}
       <View style={[s.weekStrip, Shadow.sm, { backgroundColor: t.bgAlt }]}>
@@ -238,10 +242,8 @@ export default function StaffAgendaScreen() {
 }
 
 const s = StyleSheet.create({
-  header:       { paddingTop: 20, paddingHorizontal: 24, paddingBottom: 32, overflow: "hidden" },
-  headerBlob:   { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(255,255,255,.08)", top: -50, right: -30 },
-  headerTitle:  { fontSize: 24, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.5 },
-  headerSub:    { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,.75)", marginTop: 4, textTransform: "capitalize" },
+  header:       { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
+  headerTitle:  { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, marginTop: 3, textTransform: "capitalize" },
   weekStrip:    { flexDirection: "row", alignItems: "center", backgroundColor: Colors.white, paddingHorizontal: 4, paddingVertical: 10 },
   weekArrow:    { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   dayBtn:       { flex: 1, alignItems: "center", gap: 4 },
