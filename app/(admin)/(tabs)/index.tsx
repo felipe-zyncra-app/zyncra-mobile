@@ -208,6 +208,12 @@ type DashData = {
   apptCount: number;
   confirmed: number;
   pending: number;
+  /** Agendado que todavía no se ha cobrado (citas de hoy en adelante). */
+  pendingRevenue: number;
+  /** Plata que no entró: canceladas + inasistencias. */
+  lostRevenue: number;
+  cancelledCount: number;
+  noShowCount: number;
   avgTicket: number;
   clients: number;
   revenueSeries: { label: string; value: number }[];
@@ -219,6 +225,7 @@ type DashData = {
 
 const EMPTY_DATA: DashData = {
   revenue: 0, prevRevenue: 0, apptCount: 0, confirmed: 0, pending: 0,
+  pendingRevenue: 0, lostRevenue: 0, cancelledCount: 0, noShowCount: 0,
   avgTicket: 0, clients: 0, revenueSeries: [], hourly: [], topServices: [],
   payments: [], todayAppts: [],
 };
@@ -245,7 +252,7 @@ export default function DashboardScreen() {
     // Para "hoy" se trae también ayer, para la tendencia vs ayer
     const fetchStartISO = p === "hoy" ? toISO(addDays(now, -1)) : startISO;
 
-    const [{ data: apptsRaw }, { data: posRaw }, { count: clientCount }] = await Promise.all([
+    const [{ data: apptsRaw }, { data: posRaw }, { count: clientCount }, { data: upcomingRaw }] = await Promise.all([
       supabase.from("appointments")
         .select("id, appointment_date, appointment_time, status, clients(name), services(name, price)")
         .eq("tenant_id", tenantId)
@@ -259,6 +266,15 @@ export default function DashboardScreen() {
         .gte("created_at", `${fetchStartISO}T00:00:00`)
         .lte("created_at", `${todayISO}T23:59:59`),
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
+      // "Por cobrar" mira HACIA ADELANTE (hoy y lo que viene), no al período
+      // elegido: es plata comprometida que todavía no entra. Va en consulta
+      // aparte porque la del panel se corta en hoy y no vería lo futuro.
+      supabase.from("appointments")
+        .select("appointment_date, status, services(price)")
+        .eq("tenant_id", tenantId)
+        .gte("appointment_date", todayISO)
+        .in("status", ["pending", "confirmed"])
+        .limit(2000),
     ]);
 
     const allAppts = (apptsRaw as unknown as Appt[]) ?? [];
@@ -311,6 +327,26 @@ export default function DashboardScreen() {
     const confirmed = appts.filter(a => a.status === "confirmed").length;
     const pending   = appts.filter(a => a.status === "pending").length;
     const paidCount = appts.filter(a => isPaidStatus(a.status)).length + standaloneOf(pos).length;
+
+    // Una cita ya pasada que nadie cerró (quedó en pending/confirmed con fecha
+    // anterior a hoy) es una inasistencia de hecho, aunque nadie la marcara.
+    // Mismo criterio que isNoShow() en admin/page.tsx del portal web.
+    const isNoShow = (a: Appt) =>
+      a.status === "no_show" ||
+      (a.appointment_date < todayISO && (a.status === "pending" || a.status === "confirmed"));
+
+    // Por cobrar: todo lo agendado de hoy en adelante sin cobrar. Es plata
+    // comprometida, no ingreso — por eso vive en su propia métrica y no entra
+    // nunca en "Ingresos". No depende del período: siempre mira al futuro.
+    const pendingRevenue = ((upcomingRaw as unknown as Appt[]) ?? [])
+      .reduce((sum, a) => sum + getPrice(a), 0);
+
+    // Pérdidas: lo que se cayó, valorado al precio del servicio.
+    const cancelledCount = appts.filter(a => a.status === "cancelled").length;
+    const noShowCount    = appts.filter(isNoShow).length;
+    const lostRevenue    = appts
+      .filter(a => a.status === "cancelled" || isNoShow(a))
+      .reduce((sum, a) => sum + getPrice(a), 0);
     const avgTicket = paidCount > 0 ? revenue / paidCount : 0;
 
     // ── Serie de ingresos alineada al período (patrón del web) ──
@@ -381,6 +417,7 @@ export default function DashboardScreen() {
 
     setData({
       revenue, prevRevenue, apptCount: active.length, confirmed, pending,
+      pendingRevenue, lostRevenue, cancelledCount, noShowCount,
       avgTicket, clients: clientCount ?? 0, revenueSeries, hourly, topServices,
       payments, todayAppts,
     });
@@ -481,18 +518,33 @@ export default function DashboardScreen() {
             delay={110}
           />
           <MetricCard
+            icon="wallet-outline"
+            label="Por cobrar"
+            raw={data.pendingRevenue} fmt={v => fmtMoney(v)}
+            sub="citas agendadas"
+            delay={160}
+          />
+          <MetricCard
+            icon="close-circle-outline"
+            label="Pérdidas"
+            raw={data.lostRevenue} fmt={v => fmtMoney(v)}
+            sub={`${data.cancelledCount} cancel. · ${data.noShowCount} inasist.`}
+            alert={data.lostRevenue > 0}
+            delay={210}
+          />
+          <MetricCard
             icon="card-outline"
             label="Ticket promedio"
             raw={data.avgTicket} fmt={v => fmtMoney(v)}
-            sub="por servicio"
-            delay={160}
+            sub="por cobro"
+            delay={260}
           />
           <MetricCard
             icon="people-outline"
             label="Clientes"
             raw={data.clients} fmt={v => String(Math.round(v))}
             sub="en tu base"
-            delay={210}
+            delay={310}
           />
         </View>
 
