@@ -186,9 +186,9 @@ export default function ReportsScreen() {
         .eq("tenant_id", tenantId)
         .gte("appointment_date", ps)
         .lte("appointment_date", pe),
-      supabase.from("pos_sales").select("total, created_at").eq("tenant_id", tenantId)
+      supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId)
         .gte("created_at", start).lte("created_at", end + "T23:59:59").limit(5000),
-      supabase.from("pos_sales").select("total").eq("tenant_id", tenantId)
+      supabase.from("pos_sales").select("total, appointment_id").eq("tenant_id", tenantId)
         .gte("created_at", ps).lte("created_at", pe + "T23:59:59").limit(5000),
     ]);
 
@@ -197,23 +197,47 @@ export default function ReportsScreen() {
     const posData: any[] = posRes.data ?? [];
     const prevPosData: any[] = prevPosRes.data ?? [];
 
+    // El total realmente cobrado vive en pos_sales; se adjunta a la cita para
+    // que priceOf() lo prefiera sobre el precio de lista del servicio.
+    const completedIds = [...cur, ...prev].filter(a => a.status === "completed").map((a: any) => a.id).filter(Boolean);
+    const paidMap: Record<string, number> = {};
+    if (completedIds.length > 0) {
+      const { data: paidRows } = await supabase
+        .from("pos_sales").select("appointment_id, total").in("appointment_id", completedIds);
+      (paidRows ?? []).forEach((r: any) => { if (r.appointment_id) paidMap[r.appointment_id] = Number(r.total); });
+    }
+    const priceOf = (a: any): number =>
+      paidMap[a.id] !== undefined ? paidMap[a.id] : Number(a.services?.price ?? 0);
+
     // KPIs
-    const done  = cur.filter(a => a.status === "completed" || a.status === "confirmed");
-    const apptRev  = done.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
-    const posRev   = posData.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
+    // Ingreso = solo lo cobrado. "confirmed" es una cita agendada sin cobrar
+    // (el POS la pasa a "completed" al cobrarla), asi que no es ingreso.
+    const paid = cur.filter(a => a.status === "completed");
+    const prevPaid = prev.filter(a => a.status === "completed");
+    // Solo ventas de mostrador: el cobro de una cita ya va contado via priceOf.
+    const standalone     = posData.filter((p: any) => !p.appointment_id);
+    const prevStandalone = prevPosData.filter((p: any) => !p.appointment_id);
+
+    const apptRev  = paid.reduce((s: number, a: any) => s + priceOf(a), 0);
+    const posRev   = standalone.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
     const rev      = apptRev + posRev;
-    const prevDone = prev.filter(a => a.status === "completed" || a.status === "confirmed");
-    const prevApptRev = prevDone.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
-    const prevPosRev  = prevPosData.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
+    const prevApptRev = prevPaid.reduce((s: number, a: any) => s + priceOf(a), 0);
+    const prevPosRev  = prevStandalone.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
     const prevRev  = prevApptRev + prevPosRev;
     const noShows  = cur.filter(a => a.status === "no_show").length;
+    // Denominador de inasistencia: citas que ya tuvieron desenlace. Se mantiene
+    // el criterio anterior (completed + confirmed) a proposito — cambiarlo aqui
+    // moveria una metrica que no es de dinero.
+    const done  = cur.filter(a => a.status === "completed" || a.status === "confirmed");
     const totalFinished = done.length + noShows;
+    // Ticket promedio = ingreso / cobros reales, no / citas agendadas.
+    const paidCount = paid.length + standalone.length;
 
     setRevenue(rev);
     setPrevRevenue(prevRev);
     setApptCount(cur.filter(a => a.status !== "cancelled").length);
     setPrevCount(prev.filter(a => a.status !== "cancelled").length);
-    setAvgTicket(done.length > 0 ? rev / done.length : 0);
+    setAvgTicket(paidCount > 0 ? rev / paidCount : 0);
     setNoShowRate(totalFinished > 0 ? (noShows / totalFinished) * 100 : 0);
 
     // New clients (created within the range)
@@ -226,15 +250,15 @@ export default function ReportsScreen() {
     const dates = buildSlotDates(period);
     const labels = buildSlots(period);
     const slotRev = dates.map(slotKey => {
-      const apptMatches = done.filter((a: any) => {
+      const apptMatches = paid.filter((a: any) => {
         if (period === "year") return a.appointment_date?.startsWith(slotKey);
         return a.appointment_date === slotKey;
       });
-      const posMatches = posData.filter((p: any) => {
+      const posMatches = standalone.filter((p: any) => {
         const d = (p.created_at ?? "").slice(0, period === "year" ? 7 : 10);
         return d === slotKey;
       });
-      return apptMatches.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0)
+      return apptMatches.reduce((s: number, a: any) => s + priceOf(a), 0)
            + posMatches.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
     });
     setRevenueSlots(slotRev);
@@ -253,10 +277,10 @@ export default function ReportsScreen() {
 
     // Staff performance
     const staffMap = new Map<string, { count: number; revenue: number }>();
-    done.forEach((a: any) => {
+    paid.forEach((a: any) => {
       const sn = (a.professionals as any)?.name ?? "Sin profesional";
       const prev2 = staffMap.get(sn) ?? { count: 0, revenue: 0 };
-      staffMap.set(sn, { count: prev2.count + 1, revenue: prev2.revenue + (a.services?.price ?? 0) });
+      staffMap.set(sn, { count: prev2.count + 1, revenue: prev2.revenue + priceOf(a) });
     });
     const sp = Array.from(staffMap.entries())
       .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)

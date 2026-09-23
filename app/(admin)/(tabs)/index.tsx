@@ -34,6 +34,8 @@ type Appt = {
   status: string;
   clients: { name: string } | null;
   services: { name: string; price?: number | string } | null;
+  /** Total real cobrado en el POS, si la cita ya se cobró. Ver getPrice(). */
+  _paidTotal?: number;
 };
 
 type Period = "hoy" | "semana" | "mes";
@@ -43,6 +45,10 @@ const toISO = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
 const getPrice = (a: Appt): number => {
+  // Si la cita ya se cobró, el total real del POS (con servicios adicionales,
+  // productos o descuentos) manda sobre el precio de lista del servicio —
+  // mismo criterio que getPrice() en admin/page.tsx del portal web.
+  if (a._paidTotal !== undefined) return a._paidTotal;
   const n = parseFloat(String(a.services?.price ?? 0));
   return Number.isFinite(n) ? n : 0;
 };
@@ -248,7 +254,7 @@ export default function DashboardScreen() {
         .order("appointment_date").order("appointment_time")
         .limit(2000),
       supabase.from("pos_sales")
-        .select("total, created_at, payment_method")
+        .select("total, created_at, payment_method, appointment_id")
         .eq("tenant_id", tenantId)
         .gte("created_at", `${fetchStartISO}T00:00:00`)
         .lte("created_at", `${todayISO}T23:59:59`),
@@ -257,14 +263,39 @@ export default function DashboardScreen() {
 
     const allAppts = (apptsRaw as unknown as Appt[]) ?? [];
     const allPos   = posRaw ?? [];
+
+    // El total realmente cobrado vive en pos_sales y puede diferir del precio
+    // de lista. Se adjunta a la cita para que getPrice() lo prefiera. Va en
+    // consulta aparte (por id, no por fecha) porque una cita puede cobrarse un
+    // día distinto al de la cita — igual que fetchAll() del portal web.
+    const completedIds = allAppts.filter(a => a.status === "completed").map(a => a.id);
+    if (completedIds.length > 0) {
+      const { data: paidRows } = await supabase
+        .from("pos_sales").select("appointment_id, total").in("appointment_id", completedIds);
+      const paidMap: Record<string, number> = {};
+      (paidRows ?? []).forEach((r: { appointment_id: string | null; total: number }) => {
+        if (r.appointment_id) paidMap[r.appointment_id] = Number(r.total);
+      });
+      allAppts.forEach(a => { if (paidMap[a.id] !== undefined) a._paidTotal = paidMap[a.id]; });
+    }
     const inPeriod = (dateISO: string) => dateISO >= startISO && dateISO <= todayISO;
 
     const appts = allAppts.filter(a => inPeriod(a.appointment_date));
     const pos   = allPos.filter(sale => inPeriod((sale.created_at ?? "").slice(0, 10)));
 
-    const isPaidStatus = (st: string) => st === "completed" || st === "confirmed";
+    // Ingreso = plata efectivamente cobrada. El POS marca la cita "completed"
+    // al cobrarla (lib/record-sale.ts) y la devuelve a "confirmed" si se
+    // deshace, asi que "confirmed" es una cita agendada SIN cobrar: no es
+    // ingreso. Contarla inflaba el panel y no cuadraba con el portal web.
+    const isPaidStatus = (st: string) => st === "completed";
     const apptRevenue = (list: Appt[]) => list.filter(a => isPaidStatus(a.status)).reduce((sum, a) => sum + getPrice(a), 0);
-    const posRevenue  = (list: typeof allPos) => list.reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
+    // Solo ventas de mostrador: el cobro de una cita ya viene contado en
+    // apptRevenue via _paidTotal, sumarlo aqui lo contaria dos veces.
+    const standaloneOf = (list: typeof allPos) => list.filter(sale => !sale.appointment_id);
+    const posRevenue  = (list: typeof allPos) => standaloneOf(list).reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
+    const sumTotals   = (list: typeof allPos) => list.reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
+    const localDateOf = (sale: { created_at?: string | null }) => toISO(new Date(sale.created_at ?? ""));
+    const localHourOf = (sale: { created_at?: string | null }) => String(new Date(sale.created_at ?? "").getHours()).padStart(2, "0");
 
     const revenue = apptRevenue(appts) + posRevenue(pos);
 
@@ -279,22 +310,29 @@ export default function DashboardScreen() {
     const active    = appts.filter(a => a.status !== "cancelled");
     const confirmed = appts.filter(a => a.status === "confirmed").length;
     const pending   = appts.filter(a => a.status === "pending").length;
-    const paidCount = appts.filter(a => isPaidStatus(a.status)).length + pos.length;
+    const paidCount = appts.filter(a => isPaidStatus(a.status)).length + standaloneOf(pos).length;
     const avgTicket = paidCount > 0 ? revenue / paidCount : 0;
 
     // ── Serie de ingresos alineada al período (patrón del web) ──
+    // Mismo criterio que el número grande: citas cobradas + ventas de
+    // mostrador. Antes sumaba toda cita no cancelada, así que la gráfica
+    // contaba lo agendado mientras el hero contaba otra cosa.
+    const standalone = standaloneOf(pos);
     let revenueSeries: { label: string; value: number }[];
     if (p === "hoy") {
       revenueSeries = HOURS.map(h => ({
         label: `${h}h`,
-        value: active.filter(a => a.appointment_time?.startsWith(h)).reduce((sum, a) => sum + getPrice(a), 0),
+        value: appts.filter(a => isPaidStatus(a.status) && a.appointment_time?.startsWith(h))
+                 .reduce((sum, a) => sum + getPrice(a), 0)
+             + sumTotals(standalone.filter(sale => localHourOf(sale) === h)),
       }));
     } else if (p === "semana") {
       revenueSeries = Array.from({ length: 7 }, (_, i) => {
         const d = addDays(startD, i);
         const dISO = toISO(d);
-        const rev = allAppts.filter(a => a.appointment_date === dISO && a.status !== "cancelled")
-          .reduce((sum, a) => sum + getPrice(a), 0);
+        const rev = allAppts.filter(a => a.appointment_date === dISO && isPaidStatus(a.status))
+          .reduce((sum, a) => sum + getPrice(a), 0)
+          + sumTotals(standalone.filter(sale => localDateOf(sale) === dISO));
         return { label: `${DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]} ${d.getDate()}`, value: rev };
       });
     } else {
@@ -302,8 +340,9 @@ export default function DashboardScreen() {
         const wS = addDays(startD, wi * 7);
         const wE = addDays(wS, 6);
         const wsISO = toISO(wS), weISO = toISO(wE);
-        const rev = allAppts.filter(a => a.appointment_date >= wsISO && a.appointment_date <= weISO && a.status !== "cancelled")
-          .reduce((sum, a) => sum + getPrice(a), 0);
+        const rev = allAppts.filter(a => a.appointment_date >= wsISO && a.appointment_date <= weISO && isPaidStatus(a.status))
+          .reduce((sum, a) => sum + getPrice(a), 0)
+          + sumTotals(standalone.filter(sale => { const ds = localDateOf(sale); return ds >= wsISO && ds <= weISO; }));
         return { label: `${String(wS.getDate()).padStart(2, "0")} ${MONTHS_S[wS.getMonth()]}`, value: rev };
       });
     }
