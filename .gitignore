@@ -53,3 +53,12 @@ store/
 # que el archivo NO se versiona. Se regenera con "eas metadata:pull" y se
 # sincroniza con "eas metadata:push".
 store.config.json
+
+# Claves de cuenta de servicio de Google (eas submit -p android). Son
+# credenciales con permiso de publicar en Play; este repo es publico, asi
+# que NO se versionan. Lo ideal es que ni vivan aqui: la clave se sube a
+# los servidores de EAS con "eas credentials" y el archivo local se borra.
+*service-account*.json
+*play-store*.json
+google-services.json
+*-key.json
