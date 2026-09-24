@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { getActiveLocationId } from "@/lib/active-location";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -141,21 +142,26 @@ export default function DashboardScreen() {
     const dayStartMs     = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const dayEndMs       = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
 
+    // Misma sede que el Resumen del panel web (filtra citas y ventas por
+    // location_id). Los clientes son del negocio entero en ambos lados.
+    const loc = await getActiveLocationId(tenantId);
+    let todayQ = supabase.from("appointments")
+      .select("id, appointment_date, appointment_time, status, clients(name), services(name, price)")
+      .eq("tenant_id", tenantId)
+      .eq("appointment_date", dateStr);
+    let salesQ = supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId).gte("created_at", monthStartIso);
+    let monthQ = supabase.from("appointments")
+      .select("id, status, services(price)")
+      .eq("tenant_id", tenantId)
+      .gte("appointment_date", monthStart.slice(0, 10))
+      .lt("appointment_date", nextMonthStart)
+      .eq("status", "completed");
+    if (loc) { todayQ = todayQ.eq("location_id", loc); salesQ = salesQ.eq("location_id", loc); monthQ = monthQ.eq("location_id", loc); }
     const [{ data: todayAppts }, { count: clientCount }, { data: sales }, { data: monthAppts }] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, clients(name), services(name, price)")
-        .eq("tenant_id", tenantId)
-        .eq("appointment_date", dateStr)
-        .order("appointment_time"),
+      todayQ.order("appointment_time"),
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
-      supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId).gte("created_at", monthStartIso),
-      supabase.from("appointments")
-        .select("id, status, services(price)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", monthStart.slice(0, 10))
-        .lt("appointment_date", nextMonthStart)
-        .eq("status", "completed")
-        .limit(2000),
+      salesQ,
+      monthQ.limit(2000),
     ]);
 
     const all      = (todayAppts as unknown as Appt[]) ?? [];

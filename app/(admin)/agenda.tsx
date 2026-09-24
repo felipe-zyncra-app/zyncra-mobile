@@ -17,6 +17,7 @@ import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, eff
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
+import { getActiveLocationId } from "@/lib/active-location";
 import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
 import { OtherTimeField } from "@/components/OtherTimeField";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
@@ -905,12 +906,17 @@ export default function AgendaScreen() {
   const loadAppts = useCallback(async (date: Date) => {
     if (!tenantId) return;
     const dateStr = localDateStr(date);
+    // Misma sede que el panel web: allí la agenda se filtra por la sede
+    // seleccionada. Sin esto, con varias sedes el móvil mostraba todas las
+    // citas y la web solo las de una, y los dos "no cuadraban".
+    const loc = await getActiveLocationId(tenantId);
+    let apptQ = supabase.from("appointments")
+      .select("id, appointment_date, appointment_time, status, service_id, client_id, location_id, clients(name, phone), services(name, price, duration_minutes), professionals(id, name)")
+      .eq("tenant_id", tenantId)
+      .eq("appointment_date", dateStr);
+    if (loc) apptQ = apptQ.eq("location_id", loc);
     const [{ data: apptData }, { data: proData }] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, location_id, clients(name, phone), services(name, price, duration_minutes), professionals(id, name)")
-        .eq("tenant_id", tenantId)
-        .eq("appointment_date", dateStr)
-        .order("appointment_time"),
+      apptQ.order("appointment_time"),
       supabase.from("professionals")
         .select("id, name, schedule")
         .eq("tenant_id", tenantId)
