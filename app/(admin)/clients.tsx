@@ -24,6 +24,7 @@ import { COUNTRIES, DEFAULT_COUNTRY_DIAL, flagEmoji, combinePhone, splitPhone } 
 type Client = {
   id: string; name: string; phone?: string; phone_country_code?: string | null; email?: string | null; no_shows?: number;
   created_at?: string; notes?: string | null; birthday?: string | null;
+  address?: string | null; document?: string | null;
 };
 type Appt = {
   id: string; appointment_date: string; appointment_time: string; status: string; notes?: string;
@@ -60,6 +61,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
   const [countryPicker, setCountryPicker] = useState(false);
   const [email, setEmail] = useState("");
   const [birthday, setBirthday] = useState("");
+  const [address, setAddress] = useState("");
+  const [document, setDocument] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -70,6 +73,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
         : { countryCode: DEFAULT_COUNTRY_DIAL, phone: "" };
       setName(client?.name ?? ""); setPhone(national); setCountryCode(cc); setEmail(client?.email ?? "");
       setBirthday(client?.birthday ?? ""); setNotes(client?.notes ?? "");
+      setAddress(client?.address ?? ""); setDocument(client?.document ?? "");
     }
   }, [visible, client]);
 
@@ -86,6 +90,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
     const payload = {
       name: name.trim(), phone: combinePhone(countryCode, phone.trim()), phone_country_code: countryCode,
       email: email.trim() || null, birthday: bday || null, notes: notes.trim() || null,
+      address: address.trim() || null, document: document.trim() || null,
     };
     if (isNew) {
       const { data } = await supabase.from("clients").insert({ ...payload, tenant_id: tenantId }).select().single();
@@ -149,6 +154,16 @@ function EditModal({ visible, client, tenantId, onClose, onSaved }: {
               <Text style={em.fieldLabel}>Correo electrónico</Text>
               <TextInput style={em.input} value={email} onChangeText={setEmail} placeholder="juan@email.com"
                 placeholderTextColor={Colors.subtle} keyboardType="email-address" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Documento (cédula, opcional)</Text>
+              <TextInput style={em.input} value={document} onChangeText={setDocument} placeholder="1016953423"
+                placeholderTextColor={Colors.subtle} keyboardType="numbers-and-punctuation" />
+            </View>
+            <View style={em.field}>
+              <Text style={em.fieldLabel}>Dirección</Text>
+              <TextInput style={em.input} value={address} onChangeText={setAddress} placeholder="Calle 10 # 5-20"
+                placeholderTextColor={Colors.subtle} />
             </View>
             <View style={em.field}>
               <Text style={em.fieldLabel}>Cumpleaños (AAAA-MM-DD)</Text>
@@ -420,7 +435,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
           ) : null}
 
           {/* Contact */}
-          {(client.phone || client.email) && (
+          {(client.phone || client.email || client.document || client.address) && (
             <Animated.View entering={FadeInDown.delay(60).duration(300)}>
               <Text style={p.sectionLabel}>Contacto</Text>
               <View style={[p.card, Shadow.sm]}>
@@ -440,6 +455,28 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
                     </View>
                     <Text style={p.infoText}>{client.email}</Text>
                   </View>
+                )}
+                {client.document && (
+                  <>
+                    {(client.phone || client.email) && <View style={p.infoDivider} />}
+                    <View style={p.infoRow}>
+                      <View style={[p.infoIcon, { backgroundColor: Colors.purple + "15" }]}>
+                        <Ionicons name="card-outline" size={15} color={Colors.purple} />
+                      </View>
+                      <Text style={p.infoText}>Documento {client.document}</Text>
+                    </View>
+                  </>
+                )}
+                {client.address && (
+                  <>
+                    <View style={p.infoDivider} />
+                    <View style={p.infoRow}>
+                      <View style={[p.infoIcon, { backgroundColor: Colors.red + "12" }]}>
+                        <Ionicons name="location-outline" size={15} color={Colors.red} />
+                      </View>
+                      <Text style={p.infoText}>{client.address}</Text>
+                    </View>
+                  </>
                 )}
                 {client.birthday && (
                   <>
@@ -546,7 +583,7 @@ export default function ClientsScreen() {
   const loadClients = async () => {
     if (!tenantId) return;
     const { data } = await supabase.from("clients")
-      .select("id, name, phone, phone_country_code, email, no_shows, created_at, notes, birthday")
+      .select("id, name, phone, phone_country_code, email, no_shows, created_at, notes, birthday, address, document")
       .eq("tenant_id", tenantId).order("name");
     const c = data ?? [];
     setClients(c);

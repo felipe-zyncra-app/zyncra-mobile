@@ -14,6 +14,7 @@ import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, eff
 import { useClientSearch } from "@/lib/useClientSearch";
 import { fmt12Hour, localDateStr } from "@/lib/format";
 import { getActiveLocationId } from "@/lib/active-location";
+import { OtherTimeField } from "@/components/OtherTimeField";
 
 type Service      = { id: string; name: string; duration_minutes: number; price: number };
 type Client       = { id: string; name: string; phone: string };
@@ -571,7 +572,15 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     </View>
                   )}
 
-                  {apptFields.length > 0 && !dayClosed && availableSlots.length > 0 && (
+                  {!loadingSlots && !dayClosed && (
+                    <OtherTimeField
+                      value={selectedTime}
+                      inGrid={selectedTime !== null && availableSlots.includes(selectedTime)}
+                      onChange={setSelectedTime}
+                    />
+                  )}
+
+                  {apptFields.length > 0 && !dayClosed && (availableSlots.length > 0 || selectedTime !== null) && (
                     <View style={[s.card, Shadow.sm, { marginTop: 18 }]}>
                       <Text style={s.fieldLabel}>Datos de la cita</Text>
                       {apptFields.map(f => (

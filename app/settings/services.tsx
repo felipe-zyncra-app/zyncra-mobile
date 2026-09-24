@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth";
 type Service = {
   id: string;
   name: string;
+  code?: string | null;
   price: number;
   duration_min: number;
   description?: string;
@@ -59,6 +60,7 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
   const { t } = useTheme();
   const isEdit = service !== null;
   const [name, setName]         = useState("");
+  const [code, setCode]         = useState("");
   const [price, setPrice]       = useState("");
   const [duration, setDuration] = useState("");
   const [desc, setDesc]         = useState("");
@@ -68,6 +70,7 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
   useEffect(() => {
     if (visible) {
       setName(service?.name ?? "");
+      setCode(service?.code ?? "");
       setPrice(service?.price != null ? String(service.price) : "");
       setDuration(service?.duration_min != null ? String(service.duration_min) : "");
       setDesc(service?.description ?? "");
@@ -84,15 +87,21 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
       const parsedTags = tagInput.split(",").map(t => t.trim()).filter(Boolean);
       const payload = {
         name: name.trim(),
+        // Código corto (p. ej. "101") para llamarlo por número; único por negocio.
+        code: code.trim() || null,
         price: Number(price),
         duration_min: Number(duration) || 30,
         description: desc.trim() || null,
         tags: parsedTags.length > 0 ? parsedTags : null,
       };
-      if (isEdit) {
-        await supabase.from("services").update(payload).eq("id", service!.id);
-      } else {
-        await supabase.from("services").insert({ ...payload, tenant_id: tenantId, duration_minutes: Number(duration) || 30 });
+      const { error } = isEdit
+        ? await supabase.from("services").update(payload).eq("id", service!.id)
+        : await supabase.from("services").insert({ ...payload, tenant_id: tenantId, duration_minutes: Number(duration) || 30 });
+      if (error) {
+        Alert.alert("No se pudo guardar", error.code === "23505"
+          ? `Ya hay otro servicio con el código "${code.trim()}". Usa uno distinto.`
+          : error.message);
+        return;
       }
       onSaved(); onClose();
     } finally { setSaving(false); }
@@ -128,6 +137,7 @@ function ServiceModal({ visible, service, tenantId, onClose, onSaved }: {
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
             <Field label="Nombre del servicio *" value={name} onChangeText={setName} placeholder="Ej: Corte de cabello" />
+            <Field label="Código (opcional)" value={code} onChangeText={setCode} placeholder="Ej: 101 — para llamarlo por número en el POS y la agenda" />
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
                 <Field label="Precio *" value={price} onChangeText={setPrice} placeholder="0" keyboardType="numeric" />
@@ -163,7 +173,7 @@ export default function ServicesScreen() {
   const load = async () => {
     if (!tenantId) return;
     const [{ data: svcs }, { data: appts }] = await Promise.all([
-      supabase.from("services").select("id, name, price, duration_min, description, tags").eq("tenant_id", tenantId).order("name"),
+      supabase.from("services").select("id, name, code, price, duration_min, description, tags").eq("tenant_id", tenantId).order("name"),
       supabase.from("appointments").select("service_id").eq("tenant_id", tenantId).in("status", ["completed", "confirmed"]).limit(5000),
     ]);
     const countMap: Record<string, number> = {};
@@ -218,7 +228,14 @@ export default function ServicesScreen() {
                   <Ionicons name="pricetags-outline" size={18} color={Colors.purple} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[s.name, { color: t.text }]} numberOfLines={1}>{svc.name}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    {svc.code && (
+                      <View style={{ backgroundColor: t.subtle + "22", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: t.muted }}>{svc.code}</Text>
+                      </View>
+                    )}
+                    <Text style={[s.name, { color: t.text, flex: 1 }]} numberOfLines={1}>{svc.name}</Text>
+                  </View>
                   <Text style={[s.info, { color: t.muted }]}>{svc.duration_min} min{svc.apptCount ? ` · ${svc.apptCount} citas` : ""}</Text>
                   {svc.tags && svc.tags.length > 0 && (
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
