@@ -17,6 +17,7 @@ import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, eff
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
+import { OtherTimeField } from "@/components/OtherTimeField";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
 
 // ─── Scheduling helpers ─────────────────────────────────────────────────────
@@ -539,6 +540,14 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
                       ))}
                     </View>
                   )}
+
+                  {!loadingSlots && !dayClosed && (
+                    <OtherTimeField
+                      value={selectedTime}
+                      inGrid={selectedTime !== null && availableSlots.includes(selectedTime)}
+                      onChange={setSelectedTime}
+                    />
+                  )}
                 </View>
               </ScrollView>
             )}
@@ -658,6 +667,46 @@ const SLOT_MINS  = 30;
 const ROW_H      = 60;
 const TIME_COL_W = 56;
 
+/**
+ * Reparte las citas que se solapan en "carriles" (como Google Calendar y el
+ * calendario de la web): se agrupan en racimos de citas encadenadas y cada
+ * racimo se divide en tantas columnas como haga falta. Antes cada bloque
+ * ocupaba todo el ancho y, con dos citas a la misma hora en el filtro "Todos",
+ * la de arriba tapaba a la otra: parecía que solo había una.
+ */
+function layoutLanes(appts: Appt[]): { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] {
+  const items = appts
+    .map(a => {
+      const start = timeToMins(a.appointment_time.slice(0, 5));
+      const dur   = Math.max(a.services?.duration_minutes ?? 60, 10);
+      return { appt: a, start, end: start + dur, dur };
+    })
+    .sort((x, y) => x.start - y.start || x.end - y.end);
+
+  const out: { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] = [];
+  let cluster: typeof items = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    if (cluster.length === 0) return;
+    const laneEnds: number[] = [];
+    const assigned = cluster.map(it => {
+      let lane = laneEnds.findIndex(e => e <= it.start);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
+      else laneEnds[lane] = it.end;
+      return { ...it, lane };
+    });
+    for (const a of assigned) out.push({ appt: a.appt, start: a.start, dur: a.dur, lane: a.lane, lanes: laneEnds.length });
+    cluster = []; clusterEnd = -1;
+  };
+  for (const it of items) {
+    if (cluster.length > 0 && it.start >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  flush();
+  return out;
+}
+
 // ─── Day Calendar ─────────────────────────────────────────────────────────────
 
 function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, refreshing, onRefresh }: {
@@ -666,9 +715,11 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
 }) {
   const { t } = useTheme();
   const scrollRef = useRef<ScrollView>(null);
+  const [gridW, setGridW] = useState(0);
   const now       = new Date();
   const nowMins   = now.getHours() * 60 + now.getMinutes();
   const nowY      = ((nowMins - START_MINS) / SLOT_MINS) * ROW_H;
+  const placed    = layoutLanes(appts);
 
   const slots: string[] = [];
   for (let m = START_MINS; m < END_MINS; m += SLOT_MINS) {
@@ -690,7 +741,7 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       contentContainerStyle={{ paddingBottom: 110 }}
     >
-      <View style={{ height: totalH, position: "relative" }}>
+      <View style={{ height: totalH, position: "relative" }} onLayout={e => setGridW(e.nativeEvent.layout.width)}>
 
         {/* Grid lines */}
         {slots.map((time, i) => {
@@ -723,37 +774,43 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
           </View>
         )}
 
-        {/* Appointment blocks */}
-        {appts.map(appt => {
-          const startMins = timeToMins(appt.appointment_time.slice(0, 5));
+        {/* Appointment blocks — en carriles cuando se solapan */}
+        {placed.map(({ appt, start: startMins, dur: duration, lane, lanes }) => {
           if (startMins < START_MINS || startMins >= END_MINS) return null;
-          const duration = appt.services?.duration_minutes ?? 60;
           const top      = ((startMins - START_MINS) / SLOT_MINS) * ROW_H + 2;
           const height   = Math.max((duration / SLOT_MINS) * ROW_H - 4, ROW_H - 6);
           const color    = STATUS_META[appt.status]?.color ?? Colors.subtle;
           const label    = STATUS_META[appt.status]?.label ?? appt.status;
           const pColor   = appt.professionals ? proColor(appt.professionals.id, professionals) : Colors.subtle;
+          const areaW    = Math.max(0, gridW - TIME_COL_W - 4 - 8);
+          const laneGap  = 4;
+          const laneW    = lanes > 1 ? (areaW - laneGap * (lanes - 1)) / lanes : areaW;
+          const left     = TIME_COL_W + 4 + lane * (laneW + laneGap);
+          const narrow   = lanes > 1;
           return (
             <TouchableOpacity
               key={appt.id}
-              style={[dg.block, Shadow.sm, { top, left: TIME_COL_W + 4, right: 8, height, backgroundColor: t.card, borderColor: color + "50" }]}
+              style={[dg.block, Shadow.sm, { top, left, width: gridW ? laneW : undefined, right: gridW ? undefined : 8, height, backgroundColor: t.card, borderColor: color + "50" }]}
               onPress={() => onPressAppt(appt)}
               activeOpacity={0.85}
             >
               <View style={[dg.blockAccent, { backgroundColor: color }]} />
-              <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 5, gap: 1 }}>
+              <View style={{ flex: 1, paddingHorizontal: narrow ? 6 : 8, paddingVertical: 5, gap: 1 }}>
                 <Text style={[dg.blockClient, { color: t.text }]} numberOfLines={1}>{appt.clients?.name ?? "Sin cliente"}</Text>
                 {height >= 40 && <Text style={[dg.blockService, { color: t.muted }]} numberOfLines={1}>{appt.services?.name ?? ""}</Text>}
                 {height >= 60 && showPro && appt.professionals && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
                     <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pColor }} />
-                    <Text style={[dg.blockPro, { color: pColor }]}>{appt.professionals.name.split(" ")[0]}</Text>
+                    <Text style={[dg.blockPro, { color: pColor }]} numberOfLines={1}>{appt.professionals.name.split(" ")[0]}</Text>
                   </View>
                 )}
               </View>
-              <View style={[dg.blockBadge, { backgroundColor: color + "20" }]}>
-                <Text style={[dg.blockBadgeText, { color }]}>{label}</Text>
-              </View>
+              {/* Con varios carriles no cabe la etiqueta de estado: el color del borde y la franja ya lo dicen */}
+              {!narrow && (
+                <View style={[dg.blockBadge, { backgroundColor: color + "20" }]}>
+                  <Text style={[dg.blockBadgeText, { color }]}>{label}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
