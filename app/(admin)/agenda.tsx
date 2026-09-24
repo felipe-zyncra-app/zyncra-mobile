@@ -17,6 +17,7 @@ import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, eff
 import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
+import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
 import { OtherTimeField } from "@/components/OtherTimeField";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
 
@@ -57,7 +58,8 @@ type Appt = {
   status: string;
   service_id: string;
   client_id: string | null;
-  clients: { name: string } | null;
+  location_id?: string | null;
+  clients: { name: string; phone?: string | null } | null;
   services: { name: string; price?: number; duration_minutes?: number } | null;
   professionals: { id: string; name: string } | null;
 };
@@ -75,10 +77,11 @@ function proInitials(name: string) {
 
 // ─── Appointment detail modal ─────────────────────────────────────────────────
 
-function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
+function ApptDetailModal({ appt, onClose, onStatusChange, onEdit, onCobrar }: {
   appt: Appt | null; onClose: () => void;
   onStatusChange: (id: string, status: string) => void;
   onEdit: () => void;
+  onCobrar: () => void;
 }) {
   const { t } = useTheme();
   if (!appt) return null;
@@ -112,6 +115,30 @@ function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
         </LinearGradient>
 
         <ScrollView contentContainerStyle={{ padding: 20 }}>
+          {/* Cobrar: la acción principal de una cita pendiente o confirmada.
+              Antes solo se podía desde la pestaña POS, y desde aquí lo único
+              que había era marcarla "Completada" a mano, sin registrar el pago. */}
+          {(appt.status === "pending" || appt.status === "confirmed") && (
+            <TouchableOpacity onPress={onCobrar} activeOpacity={0.85} style={{ marginBottom: 22, borderRadius: Radius.lg, overflow: "hidden" }}>
+              <LinearGradient colors={["#10b981", "#0ea5e9"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.cobrarCard}>
+                <View style={dm.cobrarIcon}><Ionicons name="card-outline" size={20} color="white" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={dm.cobrarTitle}>
+                    Cobrar esta cita{appt.services?.price ? ` · $${Math.round(appt.services.price).toLocaleString("es-CO")}` : ""}
+                  </Text>
+                  <Text style={dm.cobrarSub}>Con el servicio y el cliente ya cargados. Al cobrar queda Completada.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.85)" />
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          {appt.status === "completed" && (
+            <View style={dm.cobradaRow}>
+              <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+              <Text style={dm.cobradaText}>Cita cobrada. Quedó en el POS y en la caja.</Text>
+            </View>
+          )}
+
           <Text style={dm.sectionLabel}>Estado de la cita</Text>
           <View style={{ gap: 10 }}>
             {STATUS_OPTIONS.map(opt => {
@@ -155,6 +182,12 @@ const dm = StyleSheet.create({
   statusBtn:   { flexDirection: "row", alignItems: "center", gap: 12, ...Glass.cardStrong, borderRadius: Radius.md, padding: 14, overflow: "hidden" },
   statusIcon:  { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   statusLabel: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
+  cobrarCard:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  cobrarIcon:  { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  cobrarTitle: { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.2 },
+  cobrarSub:   { fontSize: 11.5, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,0.9)", marginTop: 3, lineHeight: 16 },
+  cobradaRow:  { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.08)", borderWidth: 1, borderColor: "rgba(16,185,129,0.3)", marginBottom: 22 },
+  cobradaText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "#065f46" },
 });
 
 // ─── Edit appointment modal ───────────────────────────────────────────────────
@@ -867,13 +900,14 @@ export default function AgendaScreen() {
   const [refreshKey, setRefreshKey]   = useState(0);
   const [detailAppt, setDetailAppt]   = useState<Appt | null>(null);
   const [editAppt, setEditAppt]       = useState<Appt | null>(null);
+  const [chargeAppt, setChargeAppt]   = useState<LinkedAppt | null>(null);
 
   const loadAppts = useCallback(async (date: Date) => {
     if (!tenantId) return;
     const dateStr = localDateStr(date);
     const [{ data: apptData }, { data: proData }] = await Promise.all([
       supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, clients(name), services(name, price, duration_minutes), professionals(id, name)")
+        .select("id, appointment_date, appointment_time, status, service_id, client_id, location_id, clients(name, phone), services(name, price, duration_minutes), professionals(id, name)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
@@ -1044,7 +1078,26 @@ export default function AgendaScreen() {
         onClose={() => setDetailAppt(null)}
         onStatusChange={handleStatusChange}
         onEdit={() => { setEditAppt(detailAppt); setDetailAppt(null); }}
+        onCobrar={() => {
+          const a = detailAppt!;
+          setChargeAppt({
+            id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
+            serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
+            locationId: a.location_id ?? null, time: a.appointment_time,
+          });
+          setDetailAppt(null);
+        }}
       />
+
+      {tenantId && (
+        <ChargeSheet
+          visible={!!chargeAppt}
+          tenantId={tenantId}
+          target={chargeAppt ? { kind: "appointment", appt: chargeAppt } : null}
+          onClose={() => setChargeAppt(null)}
+          onSaved={() => setRefreshKey(k => k + 1)}
+        />
+      )}
 
       {tenantId && (
         <EditApptModal

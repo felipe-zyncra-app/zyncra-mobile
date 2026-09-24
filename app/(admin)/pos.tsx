@@ -26,7 +26,7 @@ type Appt = {
   client_id: string | null;
   service_id: string | null;
   location_id: string | null;
-  clients: { name: string } | null;
+  clients: { name: string; phone?: string | null } | null;
   services: { name: string; price: number } | null;
 };
 
@@ -51,6 +51,7 @@ function toLinkedAppt(a: Appt): LinkedAppt {
     id: a.id,
     clientId: a.client_id,
     clientName: a.clients?.name ?? null,
+    clientPhone: a.clients?.phone ?? null,
     serviceId: a.service_id,
     serviceName: a.services?.name ?? null,
     servicePrice: Number(a.services?.price ?? 0),
@@ -189,7 +190,7 @@ export default function PosScreen() {
     const dayEnd   = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
     const [{ data: apptData }, { data: salesData }] = await Promise.all([
       supabase.from("appointments")
-        .select("id, appointment_time, status, client_id, service_id, location_id, clients(name), services(name, price)")
+        .select("id, appointment_time, status, client_id, service_id, location_id, clients(name, phone), services(name, price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dateStr)
         .order("appointment_time"),
