@@ -52,8 +52,8 @@ export function generateSlotsForDay(
     for (let m = from; m < to && slots.length < 200; m += step) {
       // El servicio completo tiene que caber antes del cierre…
       if (m + duration > endMins) break;
-      // …y no puede quedar montado sobre el descanso.
-      if (hasBreak && m < be! && bs! < m + duration) continue;
+      // …y no puede quedar montado sobre el descanso (salvo descanso "suave").
+      if (hasBreak && !day.break_soft && m < be! && bs! < m + duration) continue;
       slots.push(minsToTime(m));
     }
   }
@@ -63,6 +63,7 @@ export function generateSlotsForDay(
 /** ¿El servicio [m, m+dur) pisa el descanso del día? */
 export function overlapsDayBreak(m: number, duration: number, day: DayHours | null | undefined): boolean {
   if (!day?.break_start || !day?.break_end) return false;
+  if (day.break_soft) return false;
   const bs = timeToMins(day.break_start), be = timeToMins(day.break_end);
   return m < be && bs < m + duration;
 }
@@ -90,6 +91,8 @@ export type DayHours = {
   /** Descanso del día (almuerzo). Null o ausente = sin descanso. */
   break_start?: string | null;
   break_end?: string | null;
+  /** true = el descanso solo corta la grilla; no rechaza servicios que lo pisen (espejo de la web). */
+  break_soft?: boolean | null;
 };
 
 // Horario efectivo de un día: el propio del profesional (si tiene) tiene prioridad sobre el
@@ -112,6 +115,7 @@ export function effectiveDayHours(date: Date, businessSchedule: any, proSchedule
       // respaldo, un profesional con horario propio se quedaba sin almuerzo.
       break_start: pd.break_start ?? bd?.break_start ?? null,
       break_end:   pd.break_end   ?? bd?.break_end   ?? null,
+      break_soft:  pd.break_soft  ?? bd?.break_soft  ?? null,
     };
   }
   return bd
@@ -121,6 +125,7 @@ export function effectiveDayHours(date: Date, businessSchedule: any, proSchedule
         end:   bd.end ?? "18:00",
         break_start: bd.break_start ?? null,
         break_end:   bd.break_end ?? null,
+        break_soft:  bd.break_soft ?? null,
       }
     : null;
 }
