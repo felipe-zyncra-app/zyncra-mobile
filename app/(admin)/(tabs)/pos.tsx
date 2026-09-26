@@ -9,6 +9,7 @@ import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { getActiveLocationId } from "@/lib/active-location";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -26,7 +27,7 @@ type Appt = {
   client_id: string | null;
   service_id: string | null;
   location_id: string | null;
-  clients: { name: string } | null;
+  clients: { name: string; phone?: string | null } | null;
   services: { name: string; price: number } | null;
 };
 
@@ -51,6 +52,7 @@ function toLinkedAppt(a: Appt): LinkedAppt {
     id: a.id,
     clientId: a.client_id,
     clientName: a.clients?.name ?? null,
+    clientPhone: a.clients?.phone ?? null,
     serviceId: a.service_id,
     serviceName: a.services?.name ?? null,
     servicePrice: Number(a.services?.price ?? 0),
@@ -187,18 +189,21 @@ export default function PosScreen() {
     // created_at es UTC: el día local se acota con instantes reales, no con la fecha recortada
     const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const dayEnd   = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    // Misma sede que el POS web (historial y citas del día por location_id).
+    const loc = await getActiveLocationId(tenantId);
+    let apptQ = supabase.from("appointments")
+      .select("id, appointment_time, status, client_id, service_id, location_id, clients(name, phone), services(name, price)")
+      .eq("tenant_id", tenantId)
+      .eq("appointment_date", dateStr);
+    let salesQ = supabase.from("pos_sales")
+      .select("id, created_at, total, payment_method, payments, note, appointment_id, clients(name), pos_sale_items(name, price, quantity)")
+      .eq("tenant_id", tenantId)
+      .gte("created_at", dayStart.toISOString())
+      .lt("created_at", dayEnd.toISOString());
+    if (loc) { apptQ = apptQ.eq("location_id", loc); salesQ = salesQ.eq("location_id", loc); }
     const [{ data: apptData }, { data: salesData }] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_time, status, client_id, service_id, location_id, clients(name), services(name, price)")
-        .eq("tenant_id", tenantId)
-        .eq("appointment_date", dateStr)
-        .order("appointment_time"),
-      supabase.from("pos_sales")
-        .select("id, created_at, total, payment_method, payments, note, appointment_id, clients(name), pos_sale_items(name, price, quantity)")
-        .eq("tenant_id", tenantId)
-        .gte("created_at", dayStart.toISOString())
-        .lt("created_at", dayEnd.toISOString())
-        .order("created_at", { ascending: false }),
+      apptQ.order("appointment_time"),
+      salesQ.order("created_at", { ascending: false }),
     ]);
     setAppts((apptData as unknown as Appt[]) ?? []);
     setSales((salesData as unknown as PosSale[]) ?? []);

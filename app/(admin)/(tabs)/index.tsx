@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { getActiveLocationId } from "@/lib/active-location";
 import { Colors, Fonts, Gradients, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -255,30 +256,41 @@ export default function DashboardScreen() {
     // Para "hoy" se trae también ayer, para la tendencia vs ayer
     const fetchStartISO = p === "hoy" ? toISO(addDays(now, -1)) : startISO;
 
+    // Misma sede que el Resumen del panel web: las citas y las ventas se
+    // filtran por location_id. Los clientes NO — son del negocio entero en
+    // ambos lados. (Portado de origin/master, donde este filtro se agregó
+    // sobre la versión anterior del panel.)
+    const loc = await getActiveLocationId(tenantId);
+
+    let apptQ = supabase.from("appointments")
+      .select("id, appointment_date, appointment_time, status, clients(name), services(name, price)")
+      .eq("tenant_id", tenantId)
+      .gte("appointment_date", fetchStartISO)
+      .lte("appointment_date", todayISO);
+    let posQ = supabase.from("pos_sales")
+      .select("total, created_at, payment_method, appointment_id")
+      .eq("tenant_id", tenantId)
+      .gte("created_at", `${fetchStartISO}T00:00:00`)
+      .lte("created_at", `${todayISO}T23:59:59`);
+    // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha:
+    // una cita agendada vive aquí hasta que alguien la resuelve (la cobra o
+    // la marca cancelada / no asistió). No depende del período elegido, por
+    // eso va en consulta aparte. El tope de 2000 es el mismo del panel.
+    let upcomingQ = supabase.from("appointments")
+      .select("appointment_date, status, services(price)")
+      .eq("tenant_id", tenantId)
+      .in("status", ["pending", "confirmed"]);
+    if (loc) {
+      apptQ     = apptQ.eq("location_id", loc);
+      posQ      = posQ.eq("location_id", loc);
+      upcomingQ = upcomingQ.eq("location_id", loc);
+    }
+
     const [{ data: apptsRaw }, { data: posRaw }, { count: clientCount }, { data: upcomingRaw }] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, clients(name), services(name, price)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", fetchStartISO)
-        .lte("appointment_date", todayISO)
-        .order("appointment_date").order("appointment_time")
-        .limit(2000),
-      supabase.from("pos_sales")
-        .select("total, created_at, payment_method, appointment_id")
-        .eq("tenant_id", tenantId)
-        .gte("created_at", `${fetchStartISO}T00:00:00`)
-        .lte("created_at", `${todayISO}T23:59:59`),
+      apptQ.order("appointment_date").order("appointment_time").limit(2000),
+      posQ,
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
-      // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha:
-      // una cita agendada vive aquí hasta que alguien la resuelve (la cobra o
-      // la marca cancelada / no asistió). No depende del período elegido, por
-      // eso va en consulta aparte. El tope de 2000 es el mismo del panel.
-      supabase.from("appointments")
-        .select("appointment_date, status, services(price)")
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "confirmed"])
-        .order("appointment_date")
-        .limit(2000),
+      upcomingQ.order("appointment_date").limit(2000),
     ]);
 
     const allAppts = (apptsRaw as unknown as Appt[]) ?? [];

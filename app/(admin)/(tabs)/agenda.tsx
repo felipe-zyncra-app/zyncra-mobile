@@ -18,6 +18,9 @@ import { useClientSearch } from "@/lib/useClientSearch";
 import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
 import NewApptModal from "@/components/NewApptModal";
 import { MonoTag } from "@/components/ui";
+import { getActiveLocationId } from "@/lib/active-location";
+import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
+import { OtherTimeField } from "@/components/OtherTimeField";
 import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
 
 // ─── Scheduling helpers ─────────────────────────────────────────────────────
@@ -57,7 +60,8 @@ type Appt = {
   status: string;
   service_id: string;
   client_id: string | null;
-  clients: { name: string } | null;
+  location_id?: string | null;
+  clients: { name: string; phone?: string | null } | null;
   services: { name: string; price?: number; duration_minutes?: number } | null;
   professionals: { id: string; name: string } | null;
 };
@@ -75,10 +79,11 @@ function proInitials(name: string) {
 
 // ─── Appointment detail modal ─────────────────────────────────────────────────
 
-function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
+function ApptDetailModal({ appt, onClose, onStatusChange, onEdit, onCobrar }: {
   appt: Appt | null; onClose: () => void;
   onStatusChange: (id: string, status: string) => void;
   onEdit: () => void;
+  onCobrar: () => void;
 }) {
   const { t } = useTheme();
   if (!appt) return null;
@@ -112,6 +117,30 @@ function ApptDetailModal({ appt, onClose, onStatusChange, onEdit }: {
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 20 }}>
+          {/* Cobrar: la acción principal de una cita pendiente o confirmada.
+              Antes solo se podía desde la pestaña POS, y desde aquí lo único
+              que había era marcarla "Completada" a mano, sin registrar el pago. */}
+          {(appt.status === "pending" || appt.status === "confirmed") && (
+            <TouchableOpacity onPress={onCobrar} activeOpacity={0.85} style={{ marginBottom: 22, borderRadius: Radius.lg, overflow: "hidden" }}>
+              <LinearGradient colors={["#10b981", "#0ea5e9"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.cobrarCard}>
+                <View style={dm.cobrarIcon}><Ionicons name="card-outline" size={20} color="white" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={dm.cobrarTitle}>
+                    Cobrar esta cita{appt.services?.price ? ` · $${Math.round(appt.services.price).toLocaleString("es-CO")}` : ""}
+                  </Text>
+                  <Text style={dm.cobrarSub}>Con el servicio y el cliente ya cargados. Al cobrar queda Completada.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.85)" />
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          {appt.status === "completed" && (
+            <View style={dm.cobradaRow}>
+              <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+              <Text style={dm.cobradaText}>Cita cobrada. Quedó en el POS y en la caja.</Text>
+            </View>
+          )}
+
           <Text style={dm.sectionLabel}>Estado de la cita</Text>
           <View style={{ gap: 10 }}>
             {STATUS_OPTIONS.map(opt => {
@@ -155,6 +184,12 @@ const dm = StyleSheet.create({
   statusBtn:   { flexDirection: "row", alignItems: "center", gap: 12, ...Glass.cardStrong, borderRadius: Radius.md, padding: 14, overflow: "hidden" },
   statusIcon:  { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   statusLabel: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
+  cobrarCard:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  cobrarIcon:  { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  cobrarTitle: { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.2 },
+  cobrarSub:   { fontSize: 11.5, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,0.9)", marginTop: 3, lineHeight: 16 },
+  cobradaRow:  { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.08)", borderWidth: 1, borderColor: "rgba(16,185,129,0.3)", marginBottom: 22 },
+  cobradaText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "#065f46" },
 });
 
 // ─── Edit appointment modal ───────────────────────────────────────────────────
@@ -540,6 +575,14 @@ function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
                       ))}
                     </View>
                   )}
+
+                  {!loadingSlots && !dayClosed && (
+                    <OtherTimeField
+                      value={selectedTime}
+                      inGrid={selectedTime !== null && availableSlots.includes(selectedTime)}
+                      onChange={setSelectedTime}
+                    />
+                  )}
                 </View>
               </ScrollView>
             )}
@@ -659,6 +702,46 @@ const SLOT_MINS  = 30;
 const ROW_H      = 60;
 const TIME_COL_W = 56;
 
+/**
+ * Reparte las citas que se solapan en "carriles" (como Google Calendar y el
+ * calendario de la web): se agrupan en racimos de citas encadenadas y cada
+ * racimo se divide en tantas columnas como haga falta. Antes cada bloque
+ * ocupaba todo el ancho y, con dos citas a la misma hora en el filtro "Todos",
+ * la de arriba tapaba a la otra: parecía que solo había una.
+ */
+function layoutLanes(appts: Appt[]): { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] {
+  const items = appts
+    .map(a => {
+      const start = timeToMins(a.appointment_time.slice(0, 5));
+      const dur   = Math.max(a.services?.duration_minutes ?? 60, 10);
+      return { appt: a, start, end: start + dur, dur };
+    })
+    .sort((x, y) => x.start - y.start || x.end - y.end);
+
+  const out: { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] = [];
+  let cluster: typeof items = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    if (cluster.length === 0) return;
+    const laneEnds: number[] = [];
+    const assigned = cluster.map(it => {
+      let lane = laneEnds.findIndex(e => e <= it.start);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
+      else laneEnds[lane] = it.end;
+      return { ...it, lane };
+    });
+    for (const a of assigned) out.push({ appt: a.appt, start: a.start, dur: a.dur, lane: a.lane, lanes: laneEnds.length });
+    cluster = []; clusterEnd = -1;
+  };
+  for (const it of items) {
+    if (cluster.length > 0 && it.start >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  flush();
+  return out;
+}
+
 // ─── Day Calendar ─────────────────────────────────────────────────────────────
 
 function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, refreshing, onRefresh }: {
@@ -667,9 +750,11 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
 }) {
   const { t } = useTheme();
   const scrollRef = useRef<ScrollView>(null);
+  const [gridW, setGridW] = useState(0);
   const now       = new Date();
   const nowMins   = now.getHours() * 60 + now.getMinutes();
   const nowY      = ((nowMins - START_MINS) / SLOT_MINS) * ROW_H;
+  const placed    = layoutLanes(appts);
 
   const slots: string[] = [];
   for (let m = START_MINS; m < END_MINS; m += SLOT_MINS) {
@@ -691,7 +776,7 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       contentContainerStyle={{ paddingBottom: 110 }}
     >
-      <View style={{ height: totalH, position: "relative" }}>
+      <View style={{ height: totalH, position: "relative" }} onLayout={e => setGridW(e.nativeEvent.layout.width)}>
 
         {/* Grid lines */}
         {slots.map((time, i) => {
@@ -724,37 +809,43 @@ function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, r
           </View>
         )}
 
-        {/* Appointment blocks */}
-        {appts.map(appt => {
-          const startMins = timeToMins(appt.appointment_time.slice(0, 5));
+        {/* Appointment blocks — en carriles cuando se solapan */}
+        {placed.map(({ appt, start: startMins, dur: duration, lane, lanes }) => {
           if (startMins < START_MINS || startMins >= END_MINS) return null;
-          const duration = appt.services?.duration_minutes ?? 60;
           const top      = ((startMins - START_MINS) / SLOT_MINS) * ROW_H + 2;
           const height   = Math.max((duration / SLOT_MINS) * ROW_H - 4, ROW_H - 6);
           const color    = STATUS_META[appt.status]?.color ?? Colors.subtle;
           const label    = STATUS_META[appt.status]?.label ?? appt.status;
           const pColor   = appt.professionals ? proColor(appt.professionals.id, professionals) : Colors.subtle;
+          const areaW    = Math.max(0, gridW - TIME_COL_W - 4 - 8);
+          const laneGap  = 4;
+          const laneW    = lanes > 1 ? (areaW - laneGap * (lanes - 1)) / lanes : areaW;
+          const left     = TIME_COL_W + 4 + lane * (laneW + laneGap);
+          const narrow   = lanes > 1;
           return (
             <TouchableOpacity
               key={appt.id}
-              style={[dg.block, Shadow.sm, { top, left: TIME_COL_W + 4, right: 8, height, backgroundColor: t.card, borderColor: color + "50" }]}
+              style={[dg.block, Shadow.sm, { top, left, width: gridW ? laneW : undefined, right: gridW ? undefined : 8, height, backgroundColor: t.card, borderColor: color + "50" }]}
               onPress={() => onPressAppt(appt)}
               activeOpacity={0.85}
             >
               <View style={[dg.blockAccent, { backgroundColor: color }]} />
-              <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 5, gap: 1 }}>
+              <View style={{ flex: 1, paddingHorizontal: narrow ? 6 : 8, paddingVertical: 5, gap: 1 }}>
                 <Text style={[dg.blockClient, { color: t.text }]} numberOfLines={1}>{appt.clients?.name ?? "Sin cliente"}</Text>
                 {height >= 40 && <Text style={[dg.blockService, { color: t.muted }]} numberOfLines={1}>{appt.services?.name ?? ""}</Text>}
                 {height >= 60 && showPro && appt.professionals && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
                     <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pColor }} />
-                    <Text style={[dg.blockPro, { color: pColor }]}>{appt.professionals.name.split(" ")[0]}</Text>
+                    <Text style={[dg.blockPro, { color: pColor }]} numberOfLines={1}>{appt.professionals.name.split(" ")[0]}</Text>
                   </View>
                 )}
               </View>
-              <View style={[dg.blockBadge, { backgroundColor: color + "20" }]}>
-                <Text style={[dg.blockBadgeText, { color }]}>{label}</Text>
-              </View>
+              {/* Con varios carriles no cabe la etiqueta de estado: el color del borde y la franja ya lo dicen */}
+              {!narrow && (
+                <View style={[dg.blockBadge, { backgroundColor: color + "20" }]}>
+                  <Text style={[dg.blockBadgeText, { color }]}>{label}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -811,16 +902,22 @@ export default function AgendaScreen() {
   const [refreshKey, setRefreshKey]   = useState(0);
   const [detailAppt, setDetailAppt]   = useState<Appt | null>(null);
   const [editAppt, setEditAppt]       = useState<Appt | null>(null);
+  const [chargeAppt, setChargeAppt]   = useState<LinkedAppt | null>(null);
 
   const loadAppts = useCallback(async (date: Date) => {
     if (!tenantId) return;
     const dateStr = localDateStr(date);
+    // Misma sede que el panel web: allí la agenda se filtra por la sede
+    // seleccionada. Sin esto, con varias sedes el móvil mostraba todas las
+    // citas y la web solo las de una, y los dos "no cuadraban".
+    const loc = await getActiveLocationId(tenantId);
+    let apptQ = supabase.from("appointments")
+      .select("id, appointment_date, appointment_time, status, service_id, client_id, location_id, clients(name, phone), services(name, price, duration_minutes), professionals(id, name)")
+      .eq("tenant_id", tenantId)
+      .eq("appointment_date", dateStr);
+    if (loc) apptQ = apptQ.eq("location_id", loc);
     const [{ data: apptData }, { data: proData }] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, clients(name), services(name, price, duration_minutes), professionals(id, name)")
-        .eq("tenant_id", tenantId)
-        .eq("appointment_date", dateStr)
-        .order("appointment_time"),
+      apptQ.order("appointment_time"),
       supabase.from("professionals")
         .select("id, name, schedule")
         .eq("tenant_id", tenantId)
@@ -965,7 +1062,26 @@ export default function AgendaScreen() {
         onClose={() => setDetailAppt(null)}
         onStatusChange={handleStatusChange}
         onEdit={() => { setEditAppt(detailAppt); setDetailAppt(null); }}
+        onCobrar={() => {
+          const a = detailAppt!;
+          setChargeAppt({
+            id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
+            serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
+            locationId: a.location_id ?? null, time: a.appointment_time,
+          });
+          setDetailAppt(null);
+        }}
       />
+
+      {tenantId && (
+        <ChargeSheet
+          visible={!!chargeAppt}
+          tenantId={tenantId}
+          target={chargeAppt ? { kind: "appointment", appt: chargeAppt } : null}
+          onClose={() => setChargeAppt(null)}
+          onSaved={() => setRefreshKey(k => k + 1)}
+        />
+      )}
 
       {tenantId && (
         <EditApptModal

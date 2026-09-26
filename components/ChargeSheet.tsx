@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   View, Text, Modal, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Switch,
+  KeyboardAvoidingView, Platform, Alert, Switch, Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -48,12 +48,40 @@ export type LinkedAppt = {
   id: string;
   clientId: string | null;
   clientName: string | null;
+  /** Para el recibo por WhatsApp tras el cobro. */
+  clientPhone?: string | null;
   serviceId: string | null;
   serviceName: string | null;
   servicePrice: number;
   locationId: string | null;
   time: string;
 };
+
+/** Resumen del cobro ya registrado, para la pantalla de éxito. */
+type DoneSale = {
+  total: number;
+  methodLabel: string;
+  change: number | null;
+  clientName: string | null;
+  clientPhone: string | null;
+  apptCompleted: boolean;
+  items: { name: string; qty: number; price: number }[];
+};
+
+/** Texto del recibo para WhatsApp (wa.me) — mismo formato que el POS web. */
+function receiptText(businessName: string, d: DoneSale): string {
+  const lines: string[] = [];
+  lines.push(`*${businessName}* · Recibo de pago`);
+  lines.push("");
+  lines.push(`Hola${d.clientName ? ` ${d.clientName.split(" ")[0]}` : ""} 👋 gracias por tu visita.`);
+  lines.push("");
+  for (const it of d.items) lines.push(`• ${it.name}${it.qty > 1 ? ` × ${it.qty}` : ""} — ${fmtMoneyFull(it.price * it.qty)}`);
+  lines.push("");
+  lines.push(`*Total: ${fmtMoneyFull(d.total)}* (${d.methodLabel})`);
+  lines.push("");
+  lines.push("¡Te esperamos pronto!");
+  return lines.join("\n");
+}
 
 export type ChargeTarget =
   | { kind: "appointment"; appt: LinkedAppt }
@@ -94,9 +122,11 @@ interface Props {
   target: ChargeTarget | null;
   onClose: () => void;
   onSaved: () => void;
+  /** Nombre del negocio para el recibo por WhatsApp. */
+  businessName?: string | null;
 }
 
-export default function ChargeSheet({ visible, tenantId, target, onClose, onSaved }: Props) {
+export default function ChargeSheet({ visible, tenantId, target, onClose, onSaved, businessName }: Props) {
   const router = useRouter();
   const { t } = useTheme();
 
@@ -120,6 +150,21 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const [splitLines, setSplitLines] = useState<SplitLine[]>([{ method: "efectivo", amount: "" }, { method: "nequi", amount: "" }]);
   const [note, setNote]       = useState("");
   const [saving, setSaving]   = useState(false);
+  // Efectivo: cuánto entrega el cliente, para mostrar el cambio.
+  const [cashReceived, setCashReceived] = useState("");
+  // Al cobrar una cita, lo raro (agregar más, descuento, nota) va plegado para
+  // que el camino corto —ítems, método, cobrar— se lea de un vistazo.
+  const [showMore, setShowMore] = useState(false);
+  // Cobro registrado: se muestra la pantalla de éxito en vez de cerrar en seco.
+  const [done, setDone] = useState<DoneSale | null>(null);
+
+  // Nombre del negocio para el recibo (si no lo pasan por props).
+  const [tenantName, setTenantName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!visible || !tenantId || businessName) return;
+    supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle()
+      .then(({ data }) => setTenantName((data as any)?.name ?? null));
+  }, [visible, tenantId, businessName]);
 
   // Catálogo del negocio (mismos campos que el POS web)
   useEffect(() => {
@@ -146,9 +191,11 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     setMethod("efectivo"); setSplit(false);
     setSplitLines([{ method: "efectivo", amount: "" }, { method: "nequi", amount: "" }]);
     setNote(""); setSearch(""); setTab("servicios"); setFreeName(""); setFreePrice("");
+    setCashReceived(""); setDone(null);
+    setShowMore(target?.kind !== "appointment");
     if (target?.kind !== "appointment") return;
     const a = target.appt;
-    if (a.clientId) setClient({ id: a.clientId, name: a.clientName ?? "Cliente", phone: "" });
+    if (a.clientId) setClient({ id: a.clientId, name: a.clientName ?? "Cliente", phone: a.clientPhone ?? "" });
     if (a.serviceId || a.serviceName) {
       setCart([{ key: a.serviceId ?? "main", serviceId: a.serviceId, productId: null, itemType: "service", name: a.serviceName ?? "Servicio", price: a.servicePrice, qty: 1 }]);
     }
@@ -264,13 +311,76 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         return;
       }
       onSaved();
-      onClose();
+      const received = parseAmount(cashReceived);
+      const change = (!split && method === "efectivo" && cashReceived && received >= total) ? received - total : null;
+      const methodLabel = split
+        ? splitLines.map(l => methodCfg(l.method)?.label ?? l.method).join(" + ")
+        : (methodCfg(method)?.label ?? method);
+      setDone({
+        total, methodLabel, change,
+        clientName: client?.name ?? null,
+        clientPhone: client?.phone || (target.kind === "appointment" ? target.appt.clientPhone ?? null : null),
+        apptCompleted: target.kind === "appointment",
+        items: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
+      });
     } finally {
       setSaving(false);
     }
   };
 
   const appt = target?.kind === "appointment" ? target.appt : null;
+
+  const cashReceivedNum = parseAmount(cashReceived);
+  const cashOk    = !!cashReceived && cashReceivedNum >= total;
+  const cashChange = cashOk ? cashReceivedNum - total : null;
+  const methodLabelNow = split ? "pago dividido" : (methodCfg(method)?.label ?? method);
+
+  // ── Pantalla de éxito ──
+  if (done) {
+    const wa = done.clientPhone ? `https://wa.me/${done.clientPhone.replace(/\D/g, "")}?text=${encodeURIComponent(receiptText(businessName ?? tenantName ?? "Tu negocio", done))}` : null;
+    return (
+      <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+        <View style={{ flex: 1, backgroundColor: t.bg }}>
+          <ModalHeader title="Cobro registrado" onClose={onClose} />
+          <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40, alignItems: "center", gap: 14 }}>
+            <View style={s.doneIcon}><Ionicons name="checkmark" size={34} color="white" /></View>
+            <Text style={[s.doneTotal, { color: t.text }]}>{fmtMoneyFull(done.total)}</Text>
+            <Text style={[s.doneMeta, { color: t.muted }]}>{done.methodLabel}{done.clientName ? ` · ${done.clientName}` : ""}</Text>
+            {done.change !== null && done.change > 0 && (
+              <View style={s.doneChange}>
+                <Text style={s.doneChangeLabel}>Entrega de cambio</Text>
+                <Text style={s.doneChangeVal}>{fmtMoneyFull(done.change)}</Text>
+              </View>
+            )}
+            {done.apptCompleted && (
+              <View style={s.doneApptRow}>
+                <Ionicons name="checkmark-circle" size={15} color={Colors.success} />
+                <Text style={s.doneApptText}>La cita quedó Completada en la agenda.</Text>
+              </View>
+            )}
+            <View style={[s.receipt, { backgroundColor: t.card, borderColor: t.border, alignSelf: "stretch", marginTop: 6 }]}>
+              {done.items.map((it, i) => (
+                <View key={i}>
+                  {i > 0 && <View style={[s.divider, { backgroundColor: t.border }]} />}
+                  <View style={s.receiptRow}>
+                    <Text style={[s.receiptLabel, { color: t.text, flex: 1 }]} numberOfLines={1}>{it.name}{it.qty > 1 ? ` × ${it.qty}` : ""}</Text>
+                    <Text style={[s.receiptVal, { color: t.text }]}>{fmtMoneyFull(it.price * it.qty)}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+            {wa && (
+              <TouchableOpacity onPress={() => Linking.openURL(wa)} style={s.waBtn} activeOpacity={0.85}>
+                <Ionicons name="logo-whatsapp" size={18} color="#128C7E" />
+                <Text style={s.waBtnText}>Enviar recibo por WhatsApp</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+          <BottomSaveBar label={appt ? "Volver a la agenda" : "Listo"} saving={false} onPress={onClose} />
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -280,17 +390,15 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 18 }} keyboardShouldPersistTaps="handled">
 
-            {/* Cita enlazada */}
+            {/* Cita enlazada: quién, qué y a qué hora, y qué pasa al cobrar */}
             {appt && (
-              <View style={[s.receipt, { backgroundColor: t.card, borderColor: t.border }]}>
-                <View style={s.receiptRow}>
-                  <Text style={[s.receiptLabel, { color: t.muted }]}>Cliente</Text>
-                  <Text style={[s.receiptVal, { color: t.text }]}>{appt.clientName ?? "Sin cliente"}</Text>
-                </View>
-                <View style={[s.divider, { backgroundColor: t.border }]} />
-                <View style={s.receiptRow}>
-                  <Text style={[s.receiptLabel, { color: t.muted }]}>Hora</Text>
-                  <Text style={[s.receiptVal, { color: t.text }]}>{fmt12(appt.time.slice(0, 5))}</Text>
+              <View style={s.apptBanner}>
+                <View style={s.apptBannerIcon}><Ionicons name="card-outline" size={18} color={Colors.success} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.apptBannerKicker}>Cobrando una cita</Text>
+                  <Text style={[s.apptBannerTitle, { color: t.text }]} numberOfLines={1}>{appt.clientName ?? "Sin cliente"}</Text>
+                  <Text style={[s.apptBannerMeta, { color: t.muted }]} numberOfLines={1}>{appt.serviceName ?? "Servicio"} · {fmt12(appt.time.slice(0, 5))}</Text>
+                  <Text style={s.apptBannerHint}>El servicio ya está en el cobro. Elige cómo pagó y cobra: la cita quedará Completada.</Text>
                 </View>
               </View>
             )}
@@ -327,7 +435,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
 
             {/* Carrito */}
             <View>
-              <Text style={[s.label, { color: t.muted }]}>Carrito</Text>
+              <Text style={[s.label, { color: t.muted }]}>{appt ? "Se cobra" : "Carrito"}</Text>
               {cart.length === 0 ? (
                 <View style={[s.emptyCart, { borderColor: t.border }]}>
                   <Text style={{ fontFamily: Fonts.regular, fontSize: 13, color: t.subtle }}>Agrega servicios, productos o un ítem libre</Text>
@@ -355,8 +463,95 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
               ))}
             </View>
 
-            {/* Agregar al carrito */}
+            {/* Pago — antes de las opciones raras, porque es lo que siempre se hace */}
             <View>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <Text style={[s.label, { color: t.muted, marginBottom: 0 }]}>¿Cómo pagó el cliente?</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={{ fontFamily: Fonts.semibold, fontSize: 12, color: t.muted }}>Dividir pago</Text>
+                  <Switch value={split} onValueChange={setSplit} trackColor={{ false: "rgba(20,15,30,0.12)", true: Colors.red + "60" }} thumbColor={split ? Colors.red : "#f4f3f4"} />
+                </View>
+              </View>
+              {!split ? (
+                <>
+                <View style={s.methodGrid}>
+                  {PAY_METHODS.map(m => {
+                    const active = method === m.key;
+                    return (
+                      <TouchableOpacity key={m.key} onPress={() => setMethod(m.key)} activeOpacity={0.8}
+                        style={[s.methodChip, { backgroundColor: t.card, borderColor: t.border }, active && { backgroundColor: Colors.red, borderColor: Colors.red }]}>
+                        <Ionicons name={m.icon} size={15} color={active ? "white" : m.color} />
+                        <Text style={[s.methodText, { color: t.text }, active && { color: "white" }]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {method === "efectivo" && cart.length > 0 && (
+                  <View style={s.cashBox}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.cashLabel}>Recibe</Text>
+                      <TextInput style={[s.cashInput, { color: t.text }]} value={cashReceived} onChangeText={setCashReceived}
+                        placeholder={String(total)} placeholderTextColor={t.subtle} keyboardType="numeric" />
+                    </View>
+                    <View style={{ flex: 1, alignItems: "flex-end" }}>
+                      <Text style={s.cashLabel}>Cambio</Text>
+                      <Text style={[s.cashChange, { color: cashChange === null ? t.subtle : cashChange > 0 ? t.text : Colors.success }]}>
+                        {cashChange === null ? (cashReceived ? `Faltan ${fmtMoneyFull(total - cashReceivedNum)}` : "—") : cashChange === 0 ? "Exacto" : fmtMoneyFull(cashChange)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                </>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {splitLines.map((l, idx) => (
+                    <View key={idx} style={[s.splitRow, { backgroundColor: t.card, borderColor: t.border }]}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} style={{ flex: 1 }}>
+                        {PAY_METHODS.map(m => {
+                          const active = l.method === m.key;
+                          return (
+                            <TouchableOpacity key={m.key} onPress={() => setSplitLines(prev => prev.map((x, i) => i === idx ? { ...x, method: m.key } : x))}
+                              style={[s.miniChip, { borderColor: t.border }, active && { backgroundColor: m.color, borderColor: m.color }]}>
+                              <Text style={[s.miniChipText, { color: t.muted }, active && { color: "white" }]}>{m.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                      <TextInput style={[s.splitInput, { borderColor: t.border, color: t.text }]} value={l.amount}
+                        onChangeText={v => setSplitLines(prev => prev.map((x, i) => i === idx ? { ...x, amount: v } : x))}
+                        placeholder="$ 0" placeholderTextColor={t.subtle} keyboardType="numeric" />
+                      {splitLines.length > 2 && (
+                        <TouchableOpacity onPress={() => setSplitLines(prev => prev.filter((_, i) => i !== idx))} hitSlop={6}>
+                          <Ionicons name="close-circle" size={18} color={t.subtle} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <TouchableOpacity onPress={() => setSplitLines(prev => [...prev, { method: "tarjeta", amount: "" }])} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons name="add-circle-outline" size={16} color={Colors.red} />
+                      <Text style={{ fontFamily: Fonts.semibold, fontSize: 12, color: Colors.red }}>Otro método</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontFamily: Fonts.bold, fontSize: 12, color: Math.abs(splitRemaining) < 1 ? Colors.success : Colors.red }}>
+                      {Math.abs(splitRemaining) < 1 ? "Cuadra ✓" : splitRemaining > 0 ? `Faltan ${fmtMoneyFull(splitRemaining)}` : `Sobran ${fmtMoneyFull(-splitRemaining)}`}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Más opciones (plegadas al cobrar una cita) */}
+            {appt && (
+              <TouchableOpacity onPress={() => setShowMore(v => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} activeOpacity={0.7}>
+                <Ionicons name={showMore ? "remove-circle-outline" : "add-circle-outline"} size={16} color={Colors.blue} />
+                <Text style={{ fontFamily: Fonts.bold, fontSize: 13, color: Colors.blue }}>
+                  {showMore ? "Menos opciones" : "Agregar otro servicio, producto, descuento o nota"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Agregar al carrito */}
+            {(showMore || !appt) && <View>
               <Text style={[s.label, { color: t.muted }]}>Agregar</Text>
               <View style={s.tabs}>
                 {([["servicios", "Servicios"], ["productos", "Productos"], ["libre", "Ítem libre"]] as const).map(([key, lbl]) => (
@@ -410,10 +605,10 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                   </View>
                 </View>
               )}
-            </View>
+            </View>}
 
             {/* Descuento */}
-            <View>
+            {(showMore || discountAmt > 0) && <View>
               <Text style={[s.label, { color: t.muted }]}>Descuento (opcional)</Text>
               <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
                 <View style={[s.segment, { borderColor: t.border, backgroundColor: t.card }]}>
@@ -428,74 +623,14 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                   placeholderTextColor={t.subtle} keyboardType="numeric" />
                 {discountAmt > 0 && <Text style={{ fontFamily: Fonts.bold, fontSize: 13, color: Colors.success }}>−{fmtMoneyFull(discountAmt)}</Text>}
               </View>
-            </View>
-
-            {/* Pago */}
-            <View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <Text style={[s.label, { color: t.muted, marginBottom: 0 }]}>¿Cómo pagó el cliente?</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={{ fontFamily: Fonts.semibold, fontSize: 12, color: t.muted }}>Dividir pago</Text>
-                  <Switch value={split} onValueChange={setSplit} trackColor={{ false: "rgba(20,15,30,0.12)", true: Colors.red + "60" }} thumbColor={split ? Colors.red : "#f4f3f4"} />
-                </View>
-              </View>
-              {!split ? (
-                <View style={s.methodGrid}>
-                  {PAY_METHODS.map(m => {
-                    const active = method === m.key;
-                    return (
-                      <TouchableOpacity key={m.key} onPress={() => setMethod(m.key)} activeOpacity={0.8}
-                        style={[s.methodChip, { backgroundColor: t.card, borderColor: t.border }, active && { backgroundColor: Colors.red, borderColor: Colors.red }]}>
-                        <Ionicons name={m.icon} size={15} color={active ? "white" : m.color} />
-                        <Text style={[s.methodText, { color: t.text }, active && { color: "white" }]}>{m.label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ) : (
-                <View style={{ gap: 10 }}>
-                  {splitLines.map((l, idx) => (
-                    <View key={idx} style={[s.splitRow, { backgroundColor: t.card, borderColor: t.border }]}>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} style={{ flex: 1 }}>
-                        {PAY_METHODS.map(m => {
-                          const active = l.method === m.key;
-                          return (
-                            <TouchableOpacity key={m.key} onPress={() => setSplitLines(prev => prev.map((x, i) => i === idx ? { ...x, method: m.key } : x))}
-                              style={[s.miniChip, { borderColor: t.border }, active && { backgroundColor: m.color, borderColor: m.color }]}>
-                              <Text style={[s.miniChipText, { color: t.muted }, active && { color: "white" }]}>{m.label}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                      <TextInput style={[s.splitInput, { borderColor: t.border, color: t.text }]} value={l.amount}
-                        onChangeText={v => setSplitLines(prev => prev.map((x, i) => i === idx ? { ...x, amount: v } : x))}
-                        placeholder="$ 0" placeholderTextColor={t.subtle} keyboardType="numeric" />
-                      {splitLines.length > 2 && (
-                        <TouchableOpacity onPress={() => setSplitLines(prev => prev.filter((_, i) => i !== idx))} hitSlop={6}>
-                          <Ionicons name="close-circle" size={18} color={t.subtle} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ))}
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                    <TouchableOpacity onPress={() => setSplitLines(prev => [...prev, { method: "tarjeta", amount: "" }])} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons name="add-circle-outline" size={16} color={Colors.red} />
-                      <Text style={{ fontFamily: Fonts.semibold, fontSize: 12, color: Colors.red }}>Otro método</Text>
-                    </TouchableOpacity>
-                    <Text style={{ fontFamily: Fonts.bold, fontSize: 12, color: Math.abs(splitRemaining) < 1 ? Colors.success : Colors.red }}>
-                      {Math.abs(splitRemaining) < 1 ? "Cuadra ✓" : splitRemaining > 0 ? `Faltan ${fmtMoneyFull(splitRemaining)}` : `Sobran ${fmtMoneyFull(-splitRemaining)}`}
-                    </Text>
-                  </View>
-                </View>
-              )}
-            </View>
+            </View>}
 
             {/* Nota */}
-            <View>
+            {(showMore || !!note) && <View>
               <Text style={[s.label, { color: t.muted }]}>Nota (opcional)</Text>
               <TextInput style={[s.input, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
                 value={note} onChangeText={setNote} placeholder="Ej: pagó con billete de 100" placeholderTextColor={t.subtle} />
-            </View>
+            </View>}
 
             {/* Totales */}
             <View style={[s.totals, { backgroundColor: t.card, borderColor: t.border }]}>
@@ -508,7 +643,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         </KeyboardAvoidingView>
 
         <BottomSaveBar
-          label={total > 0 ? `Cobrar ${fmtMoneyFull(total)}` : "Registrar cobro"}
+          label={total > 0 ? `Cobrar ${fmtMoneyFull(total)} · ${methodLabelNow}` : "Registrar cobro"}
           saving={saving}
           disabled={!canCharge}
           onPress={handleCharge}
@@ -562,4 +697,24 @@ const s = StyleSheet.create({
   totalLabel:    { fontSize: 13, fontFamily: Fonts.regular },
   totalVal:      { fontSize: 13, fontFamily: Fonts.semibold },
   grandTotal:    { fontSize: 22, fontFamily: Fonts.bold, letterSpacing: -0.5 },
+  apptBanner:    { flexDirection: "row", gap: 12, padding: 14, borderRadius: Radius.lg, backgroundColor: "rgba(16,185,129,0.08)", borderWidth: 1, borderColor: "rgba(16,185,129,0.3)" },
+  apptBannerIcon:{ width: 38, height: 38, borderRadius: 11, backgroundColor: "rgba(16,185,129,0.15)", alignItems: "center", justifyContent: "center" },
+  apptBannerKicker:{ fontSize: 10, fontFamily: Fonts.bold, color: Colors.success, textTransform: "uppercase", letterSpacing: 0.8 },
+  apptBannerTitle:{ fontSize: 15, fontFamily: Fonts.bold, marginTop: 2 },
+  apptBannerMeta:{ fontSize: 12.5, fontFamily: Fonts.regular, marginTop: 1 },
+  apptBannerHint:{ fontSize: 11.5, fontFamily: Fonts.regular, color: "#047857", marginTop: 6, lineHeight: 16 },
+  cashBox:       { flexDirection: "row", gap: 12, marginTop: 10, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.06)", borderWidth: 1, borderColor: "rgba(16,185,129,0.2)" },
+  cashLabel:     { fontSize: 10, fontFamily: Fonts.bold, color: Colors.success, textTransform: "uppercase", letterSpacing: 0.7, marginBottom: 4 },
+  cashInput:     { fontSize: 18, fontFamily: Fonts.monoBold, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: "rgba(16,185,129,0.35)" },
+  cashChange:    { fontSize: 20, fontFamily: Fonts.monoBold, letterSpacing: -0.3, paddingVertical: 4 },
+  doneIcon:      { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.success, alignItems: "center", justifyContent: "center", marginTop: 12, marginBottom: 4 },
+  doneTotal:     { fontSize: 34, fontFamily: Fonts.bold, letterSpacing: -1 },
+  doneMeta:      { fontSize: 14, fontFamily: Fonts.regular, marginTop: -8 },
+  doneChange:    { alignItems: "center", paddingVertical: 10, paddingHorizontal: 18, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.08)" },
+  doneChangeLabel:{ fontSize: 10, fontFamily: Fonts.bold, color: Colors.success, textTransform: "uppercase", letterSpacing: 0.7 },
+  doneChangeVal: { fontSize: 22, fontFamily: Fonts.monoBold, color: "#065f46", marginTop: 2 },
+  doneApptRow:   { flexDirection: "row", alignItems: "center", gap: 6 },
+  doneApptText:  { fontSize: 12.5, fontFamily: Fonts.semibold, color: Colors.success },
+  waBtn:         { alignSelf: "stretch", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: Radius.full, borderWidth: 1, borderColor: "rgba(37,211,102,0.5)", backgroundColor: "rgba(37,211,102,0.08)", marginTop: 4 },
+  waBtnText:     { fontSize: 14, fontFamily: Fonts.bold, color: "#128C7E" },
 });
