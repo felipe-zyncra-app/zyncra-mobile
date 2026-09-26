@@ -210,7 +210,10 @@ type DashData = {
   pending: number;
   /** Agendado que todavía no se ha cobrado (citas de hoy en adelante). */
   pendingRevenue: number;
-  /** Plata que no entró: canceladas + inasistencias. */
+  /** Parte de pendingRevenue cuya cita ya pasó y sigue sin resolver. */
+  overdueRevenue: number;
+  overdueCount: number;
+  /** Plata que no entró: canceladas + inasistencias ya marcadas. */
   lostRevenue: number;
   cancelledCount: number;
   noShowCount: number;
@@ -225,7 +228,7 @@ type DashData = {
 
 const EMPTY_DATA: DashData = {
   revenue: 0, prevRevenue: 0, apptCount: 0, confirmed: 0, pending: 0,
-  pendingRevenue: 0, lostRevenue: 0, cancelledCount: 0, noShowCount: 0,
+  pendingRevenue: 0, overdueRevenue: 0, overdueCount: 0, lostRevenue: 0, cancelledCount: 0, noShowCount: 0,
   avgTicket: 0, clients: 0, revenueSeries: [], hourly: [], topServices: [],
   payments: [], todayAppts: [],
 };
@@ -266,14 +269,15 @@ export default function DashboardScreen() {
         .gte("created_at", `${fetchStartISO}T00:00:00`)
         .lte("created_at", `${todayISO}T23:59:59`),
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
-      // "Por cobrar" mira HACIA ADELANTE (hoy y lo que viene), no al período
-      // elegido: es plata comprometida que todavía no entra. Va en consulta
-      // aparte porque la del panel se corta en hoy y no vería lo futuro.
+      // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha:
+      // una cita agendada vive aquí hasta que alguien la resuelve (la cobra o
+      // la marca cancelada / no asistió). No depende del período elegido, por
+      // eso va en consulta aparte. El tope de 2000 es el mismo del panel.
       supabase.from("appointments")
         .select("appointment_date, status, services(price)")
         .eq("tenant_id", tenantId)
-        .gte("appointment_date", todayISO)
         .in("status", ["pending", "confirmed"])
+        .order("appointment_date")
         .limit(2000),
     ]);
 
@@ -328,24 +332,25 @@ export default function DashboardScreen() {
     const pending   = appts.filter(a => a.status === "pending").length;
     const paidCount = appts.filter(a => isPaidStatus(a.status)).length + standaloneOf(pos).length;
 
-    // Una cita ya pasada que nadie cerró (quedó en pending/confirmed con fecha
-    // anterior a hoy) es una inasistencia de hecho, aunque nadie la marcara.
-    // Mismo criterio que isNoShow() en admin/page.tsx del portal web.
-    const isNoShow = (a: Appt) =>
-      a.status === "no_show" ||
-      (a.appointment_date < todayISO && (a.status === "pending" || a.status === "confirmed"));
+    // Por cobrar: toda cita agendada sin cobrar. Es plata comprometida, no
+    // ingreso — nunca entra en "Ingresos".
+    const uncharged      = ((upcomingRaw as unknown as Appt[]) ?? []);
+    const pendingRevenue = uncharged.reduce((sum, a) => sum + getPrice(a), 0);
 
-    // Por cobrar: todo lo agendado de hoy en adelante sin cobrar. Es plata
-    // comprometida, no ingreso — por eso vive en su propia métrica y no entra
-    // nunca en "Ingresos". No depende del período: siempre mira al futuro.
-    const pendingRevenue = ((upcomingRaw as unknown as Appt[]) ?? [])
-      .reduce((sum, a) => sum + getPrice(a), 0);
+    // Vencidas: la cita ya pasó y nadie la cerró. Se marcan en rojo para que
+    // el negocio decida — cobrarla, o marcarla cancelada / no asistió. Hasta
+    // que lo haga NO es una pérdida: sigue siendo plata por cobrar.
+    const overdue        = uncharged.filter(a => a.appointment_date < todayISO);
+    const overdueRevenue = overdue.reduce((sum, a) => sum + getPrice(a), 0);
+    const overdueCount   = overdue.length;
 
-    // Pérdidas: lo que se cayó, valorado al precio del servicio.
+    // Pérdidas: solo lo que el negocio marcó como caído. Inferir una
+    // inasistencia porque la cita quedó sin cerrar contaría la misma plata
+    // aquí y en "Por cobrar", y daría por perdido algo que quizá se cobre.
     const cancelledCount = appts.filter(a => a.status === "cancelled").length;
-    const noShowCount    = appts.filter(isNoShow).length;
+    const noShowCount    = appts.filter(a => a.status === "no_show").length;
     const lostRevenue    = appts
-      .filter(a => a.status === "cancelled" || isNoShow(a))
+      .filter(a => a.status === "cancelled" || a.status === "no_show")
       .reduce((sum, a) => sum + getPrice(a), 0);
     const avgTicket = paidCount > 0 ? revenue / paidCount : 0;
 
@@ -417,7 +422,7 @@ export default function DashboardScreen() {
 
     setData({
       revenue, prevRevenue, apptCount: active.length, confirmed, pending,
-      pendingRevenue, lostRevenue, cancelledCount, noShowCount,
+      pendingRevenue, overdueRevenue, overdueCount, lostRevenue, cancelledCount, noShowCount,
       avgTicket, clients: clientCount ?? 0, revenueSeries, hourly, topServices,
       payments, todayAppts,
     });
@@ -521,7 +526,10 @@ export default function DashboardScreen() {
             icon="wallet-outline"
             label="Por cobrar"
             raw={data.pendingRevenue} fmt={v => fmtMoney(v)}
-            sub="citas agendadas"
+            sub={data.overdueCount > 0
+              ? `${fmtMoney(data.overdueRevenue)} vencido · ${data.overdueCount} sin cerrar`
+              : "citas agendadas"}
+            alert={data.overdueCount > 0}
             delay={160}
           />
           <MetricCard
