@@ -549,7 +549,12 @@ export default function DashboardScreen() {
             label="Pérdidas"
             raw={data.lostRevenue} fmt={v => fmtMoney(v)}
             sub={`${data.cancelledCount} cancel. · ${data.noShowCount} inasist.`}
-            alert={data.lostRevenue > 0}
+            // El rojo se enciende solo cuando se perdio mas del 15% de lo que
+            // se pudo haber cobrado. Toda empresa tiene cancelaciones: alertar
+            // con que haya un peso perdido convierte el rojo en ruido y deja
+            // de significar "haz algo". Mismo umbral que usa el panel web para
+            // la tasa de inasistencias.
+            alert={data.lostRevenue > (data.revenue + data.lostRevenue) * 0.15}
             delay={210}
           />
           <MetricCard
