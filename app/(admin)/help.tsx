@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  Modal, KeyboardAvoidingView, Platform,
+  Modal, Linking, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -11,7 +11,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { ScreenHeader, Card, SectionLabel } from "@/components/ui";
-import { HELP_CATEGORIES, type HelpArticle, type HelpCategory, type CategoryIconName } from "@/lib/help-content";
+import { HELP_CATEGORIES, allArticles, type HelpArticle, type HelpCategory, type CategoryIconName } from "@/lib/help-content";
+
+/** Correo de soporte (el mismo de zyncra.app/soporte). */
+const SOPORTE_EMAIL = "soporte@zyncra.app";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -26,11 +29,10 @@ const ICONS: Record<CategoryIconName, IoniconName> = {
   Palette:    "color-palette-outline",
 };
 const CAT_COLORS: Record<CategoryIconName, string> = {
-  Zap: "#f59e0b", Calendar: Colors.red, Users: Colors.blue,
+  // No Colors.blue: el #0027fe casi desaparece sobre la card oscura.
+  Zap: "#f59e0b", Calendar: Colors.red, Users: "#3b82f6",
   CreditCard: Colors.success, ChartBar: "#8b5cf6", Chat: "#25D366", Palette: "#ec4899",
 };
-
-const allArticles = (): HelpArticle[] => HELP_CATEGORIES.flatMap(c => c.articles);
 
 // ─── Lector de artículo (pasos) ───────────────────────────────────────────────
 function ArticleModal({ article, category, onClose }: {
@@ -44,7 +46,7 @@ function ArticleModal({ article, category, onClose }: {
         <View style={[m.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={m.accent} />
           <View style={m.headerRow}>
-            <TouchableOpacity onPress={onClose} style={m.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={m.closeBtn} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Ionicons name="close" size={20} color="white" />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
@@ -104,6 +106,15 @@ export default function HelpScreen() {
   }, [query]);
 
   const catOf = (id: string) => HELP_CATEGORIES.find(c => c.id === id)!;
+
+  const escribirSoporte = async () => {
+    const url = `mailto:${SOPORTE_EMAIL}?subject=${encodeURIComponent("Ayuda con la app de Zyncra")}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Escríbenos", `No encontramos una app de correo. Escríbenos a ${SOPORTE_EMAIL}.`);
+    }
+  };
   const openArticle = (a: HelpArticle) => setReading({ a, c: catOf(a.category) });
 
   return (
@@ -127,7 +138,7 @@ export default function HelpScreen() {
             placeholderTextColor={t.subtle}
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery("")}>
+            <TouchableOpacity onPress={() => setQuery("")} hitSlop={8} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
               <Ionicons name="close-circle" size={18} color={t.subtle} />
             </TouchableOpacity>
           )}
@@ -159,7 +170,8 @@ export default function HelpScreen() {
               return (
                 <Animated.View key={cat.id} entering={FadeInDown.delay(i * 40).duration(320)}>
                   <Card>
-                    <TouchableOpacity style={s.catHead} onPress={() => setOpenCat(expanded ? null : cat.id)} activeOpacity={0.7}>
+                    <TouchableOpacity style={s.catHead} onPress={() => setOpenCat(expanded ? null : cat.id)} activeOpacity={0.7}
+                      accessibilityRole="button" accessibilityState={{ expanded }}>
                       <View style={[s.catIcon, { backgroundColor: color + "16" }]}>
                         <Ionicons name={ICONS[cat.iconName]} size={19} color={color} />
                       </View>
@@ -197,6 +209,20 @@ export default function HelpScreen() {
             })}
           </View>
         )}
+
+        {/* Contacto: si la guía no alcanza, un correo (sin enlaces a planes ni pagos). */}
+        <Card style={{ marginTop: 18 }}>
+          <TouchableOpacity style={s.artRow2} onPress={escribirSoporte} activeOpacity={0.6} accessibilityRole="button">
+            <View style={[s.catIcon, { backgroundColor: t.chipBg }]}>
+              <Ionicons name="mail-outline" size={18} color={t.ink} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.artTitle, { color: t.ink }]}>¿No encontraste lo que buscabas?</Text>
+              <Text style={[s.artMeta, { color: t.subtle }]}>Escríbenos a {SOPORTE_EMAIL}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={t.subtle} />
+          </TouchableOpacity>
+        </Card>
       </ScrollView>
 
       {reading && (
