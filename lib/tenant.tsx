@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth";
+import { zonaDelNegocio, ZONA_POR_DEFECTO } from "./tz";
 
 type TenantData = {
   name: string;
@@ -11,6 +12,10 @@ type TenantData = {
 
 type TenantCtx = {
   tenant: TenantData | null;
+  /** Zona horaria del negocio. De aqui salen las fronteras de dia de las
+   *  consultas por `created_at`: la base guarda en UTC y un cobro de la noche
+   *  cae en el dia siguiente si no se convierte. Ver lib/tz.ts. */
+  timezone: string;
   loading: boolean;
   refresh: () => Promise<void>;
   update: (fields: Partial<TenantData>) => Promise<boolean>;
@@ -26,6 +31,7 @@ const DEFAULTS: TenantData = {
 
 const TenantContext = createContext<TenantCtx>({
   tenant: null,
+  timezone: ZONA_POR_DEFECTO,
   loading: true,
   refresh: async () => {},
   update: async () => false,
@@ -35,13 +41,14 @@ const TenantContext = createContext<TenantCtx>({
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { tenantId } = useAuth();
   const [tenant, setTenant] = useState<TenantData | null>(null);
+  const [timezone, setTimezone] = useState<string>(ZONA_POR_DEFECTO);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     if (!tenantId) return;
     const { data } = await supabase
       .from("tenants")
-      .select("name, phone, address, slug")
+      .select("name, phone, address, slug, settings")
       .eq("id", tenantId)
       .single();
     if (data) {
@@ -51,6 +58,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         address: data.address ?? DEFAULTS.address,
         slug: data.slug ?? DEFAULTS.slug,
       });
+      setTimezone(zonaDelNegocio((data as any).settings));
     }
   }, [tenantId]);
 
@@ -77,7 +85,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   }, [tenantId]);
 
   return (
-    <TenantContext.Provider value={{ tenant, loading, refresh, update, patch }}>
+    <TenantContext.Provider value={{ tenant, timezone, loading, refresh, update, patch }}>
       {children}
     </TenantContext.Provider>
   );

@@ -8,6 +8,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { useTenant } from "@/lib/tenant";
+import { inicioDelDiaUTC, finDelDiaUTC } from "@/lib/tz";
 import { Colors, Fonts, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -141,6 +143,7 @@ export default function ReportsScreen() {
   const { t } = useTheme();
   const [period, setPeriod] = useState<Period>("month");
   const { tenantId } = useAuth();
+  const { timezone } = useTenant();
   const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -187,9 +190,9 @@ export default function ReportsScreen() {
         .gte("appointment_date", ps)
         .lte("appointment_date", pe),
       supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId)
-        .gte("created_at", start).lte("created_at", end + "T23:59:59").limit(5000),
+        .gte("created_at", inicioDelDiaUTC(start, timezone)).lte("created_at", finDelDiaUTC(end, timezone)).limit(5000),
       supabase.from("pos_sales").select("total, appointment_id").eq("tenant_id", tenantId)
-        .gte("created_at", ps).lte("created_at", pe + "T23:59:59").limit(5000),
+        .gte("created_at", inicioDelDiaUTC(ps, timezone)).lte("created_at", finDelDiaUTC(pe, timezone)).limit(5000),
     ]);
 
     const cur: any[]  = curRes.data  ?? [];

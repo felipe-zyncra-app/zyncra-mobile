@@ -9,6 +9,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { useTenant } from "@/lib/tenant";
+import { inicioDelDiaUTC, finDelDiaUTC } from "@/lib/tz";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
@@ -39,6 +41,7 @@ export default function PosHistoryScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
+  const { timezone } = useTenant();
   const [month, setMonth]       = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [sales, setSales]       = useState<HistorySale[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -53,8 +56,8 @@ export default function PosHistoryScreen() {
       .from("pos_sales")
       .select("id,created_at,total,payment_method,payments,note,appointment_id,clients(name),pos_sale_items(name,price,quantity)")
       .eq("tenant_id", tenantId)
-      .gte("created_at", `${start}T00:00:00`)
-      .lte("created_at", `${end}T23:59:59`)
+      .gte("created_at", inicioDelDiaUTC(start, timezone))
+      .lte("created_at", finDelDiaUTC(end, timezone))
       .order("created_at", { ascending: false });
     setSales((data ?? []) as unknown as HistorySale[]);
     setLoading(false);

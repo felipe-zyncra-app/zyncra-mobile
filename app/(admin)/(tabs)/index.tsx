@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { getActiveLocationId } from "@/lib/active-location";
+import { inicioDelDiaUTC, finDelDiaUTC, diaLocalDe } from "@/lib/tz";
 import { Colors, Fonts, Gradients, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -238,7 +239,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const { tenant: tenantData } = useTenant();
+  const { tenant: tenantData, timezone } = useTenant();
   const tenantName = tenantData?.name ?? "Tu negocio";
 
   const [period, setPeriod]         = useState<Period>("hoy");
@@ -270,8 +271,11 @@ export default function DashboardScreen() {
     let posQ = supabase.from("pos_sales")
       .select("total, created_at, payment_method, appointment_id")
       .eq("tenant_id", tenantId)
-      .gte("created_at", `${fetchStartISO}T00:00:00`)
-      .lte("created_at", `${todayISO}T23:59:59`);
+      // Fronteras en la zona del negocio: con el literal pelado, Postgres
+      // las leia en UTC y los cobros de la noche caian fuera del dia. Ver
+      // lib/tz.ts — son 86 de 499 cobros en produccion.
+      .gte("created_at", inicioDelDiaUTC(fetchStartISO, timezone))
+      .lte("created_at", finDelDiaUTC(todayISO, timezone));
     // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha —
     // incluidas las vencidas, que se marcan en rojo. Una cita vive aquí hasta
     // que alguien la resuelve: la cobra, o la marca cancelada / no asistió.
@@ -330,8 +334,11 @@ export default function DashboardScreen() {
     const standaloneOf = (list: typeof allPos) => list.filter(sale => !sale.appointment_id);
     const posRevenue  = (list: typeof allPos) => standaloneOf(list).reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
     const sumTotals   = (list: typeof allPos) => list.reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
-    const localDateOf = (sale: { created_at?: string | null }) => toISO(new Date(sale.created_at ?? ""));
-    const localHourOf = (sale: { created_at?: string | null }) => String(new Date(sale.created_at ?? "").getHours()).padStart(2, "0");
+    // Agrupar por el dia y la hora DEL NEGOCIO, no los del dispositivo: si el
+    // dueño viaja, su telefono cambia de zona y los reportes se moverian con el.
+    const localDateOf = (sale: { created_at?: string | null }) => diaLocalDe(sale.created_at ?? "", timezone);
+    const localHourOf = (sale: { created_at?: string | null }) =>
+      new Date(sale.created_at ?? "").toLocaleString("en-US", { timeZone: timezone, hour: "2-digit", hour12: false }).slice(0, 2);
 
     const revenue = apptRevenue(appts) + posRevenue(pos);
 
