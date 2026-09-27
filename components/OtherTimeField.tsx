@@ -1,56 +1,78 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput } from "react-native";
-import { Colors, Radius, Glass } from "@/constants/theme";
+import { Colors, Fonts, Radius } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
-import { fmt12Hour } from "@/lib/format";
+import { fmt12 } from "@/lib/format";
+import { parsearHora } from "@/lib/scheduling";
 
 // ─── "Otra hora": cualquier minuto del día, fuera de la grilla ────────────────
 //
 // La grilla ofrece los inicios "oficiales" del negocio (su intervalo). El equipo
 // a veces necesita meter una cita entre medias — un retoque de 20 min a las
-// 11:10 — y para eso está esto. El choque con otra cita lo valida el guardado
-// (hasSlotConflict), igual que con un cupo de la grilla.
-export function OtherTimeField({ value, inGrid, onChange }: {
-  value: string | null; inGrid: boolean; onChange: (t: string) => void;
+// 11:10 — y para eso está esto. El choque con otra cita o con una ausencia lo
+// valida el guardado (verificarCupo), igual que con un cupo de la grilla; si la
+// hora queda fuera de la jornada o sobre el descanso, la pantalla lo avisa
+// (`aviso`) y pide confirmar antes de guardar.
+export function OtherTimeField({ value, inGrid, onChange, aviso }: {
+  value: string | null;
+  inGrid: boolean;
+  onChange: (t: string) => void;
+  /** Advertencia para la hora elegida (fuera de la jornada, descanso…). */
+  aviso?: string | null;
 }) {
   const { t } = useTheme();
   const [raw, setRaw] = useState("");
-  useEffect(() => { if (inGrid || value === null) setRaw(""); }, [inGrid, value]);
+  const [invalida, setInvalida] = useState(false);
+  useEffect(() => { if (inGrid || value === null) { setRaw(""); setInvalida(false); } }, [inGrid, value]);
+
   const commit = (text: string) => {
-    // Acepta "9:5", "09:05", "1430" → HH:MM en 24 h
-    const digits = text.replace(/\D/g, "");
-    if (digits.length < 3) return;
-    const h = parseInt(digits.length === 3 ? digits.slice(0, 1) : digits.slice(0, 2), 10);
-    const m = parseInt(digits.slice(-2), 10);
-    if (isNaN(h) || isNaN(m) || h > 23 || m > 59) return;
-    onChange(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+    if (!text.trim()) { setInvalida(false); return; }
+    const hora = parsearHora(text);
+    // Antes una entrada que no se entendía se descartaba en silencio y el
+    // usuario creía haber elegido esa hora.
+    setInvalida(!hora);
+    if (hora) onChange(hora);
   };
+
   const outside = value !== null && !inGrid;
   return (
     <View style={{ marginTop: 16 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text style={{ fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: t.muted }}>Otra hora</Text>
+        <Text style={{ fontSize: 12, fontFamily: Fonts.semibold, color: t.muted }}>Otra hora</Text>
         <TextInput
           value={raw}
-          onChangeText={setRaw}
+          onChangeText={v => { setRaw(v); if (invalida) setInvalida(false); }}
           onBlur={() => commit(raw)}
           onSubmitEditing={() => commit(raw)}
-          placeholder="HH:MM (24 h)"
-          placeholderTextColor={Colors.subtle}
+          placeholder="Ej: 11:10"
+          placeholderTextColor={t.subtle}
           keyboardType="numbers-and-punctuation"
           returnKeyType="done"
-          style={{ width: 120, paddingVertical: 9, paddingHorizontal: 12, borderRadius: Radius.md, ...Glass.card, fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: t.text }}
+          accessibilityLabel="Otra hora, en formato de 24 horas"
+          style={{
+            width: 120, paddingVertical: 9, paddingHorizontal: 12, borderRadius: Radius.md,
+            backgroundColor: t.inputBg, borderWidth: 1, borderColor: invalida ? Colors.red : t.inputBorder,
+            fontSize: 13, fontFamily: Fonts.semibold, color: t.text,
+          }}
         />
         {outside && (
-          <Text style={{ fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red, flex: 1 }} numberOfLines={1}>
-            Fuera de la grilla: {fmt12Hour(value!)}
+          <Text style={{ fontSize: 12, fontFamily: Fonts.semibold, color: Colors.red, flex: 1 }} numberOfLines={1}>
+            Elegida: {fmt12(value!)}
           </Text>
         )}
       </View>
-      <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: t.subtle, marginTop: 6 }}>
-        Para agendar entre dos cupos. Si choca con otra cita del colaborador, no se guardará.
+      {invalida ? (
+        <Text style={{ fontSize: 11.5, fontFamily: Fonts.semibold, color: Colors.red, marginTop: 6 }}>
+          No entendimos esa hora. Escríbela como 11:10 o 14:30 (los minutos con dos dígitos).
+        </Text>
+      ) : outside && aviso ? (
+        <Text style={{ fontSize: 11.5, fontFamily: Fonts.semibold, color: "#d97706", marginTop: 6 }}>
+          {aviso}
+        </Text>
+      ) : null}
+      <Text style={{ fontSize: 11, fontFamily: Fonts.regular, color: t.subtle, marginTop: 6 }}>
+        Para agendar entre dos cupos (24 h o con AM/PM). Si choca con otra cita o con una ausencia del profesional, no se guardará.
       </Text>
     </View>
   );
 }
-

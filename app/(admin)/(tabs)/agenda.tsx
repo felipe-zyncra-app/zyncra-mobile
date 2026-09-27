@@ -1,976 +1,312 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  RefreshControl, Modal, ActivityIndicator,
-  KeyboardAvoidingView, Platform, TextInput, Alert,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
-import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
-import { useTheme } from "@/lib/theme";
+import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
+import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { fmt12Hour, localDateStr } from "@/lib/format";
-import { timeToMins, chunk, generateSlotsForDay, buildWeek, hasSlotConflict, effectiveDayHours, normalizeSlotInterval, DEFAULT_SLOT_INTERVAL } from "@/lib/scheduling";
-import { useClientSearch } from "@/lib/useClientSearch";
-import { STATUS_META, STATUS_OPTIONS } from "@/constants/status";
-import NewApptModal from "@/components/NewApptModal";
-import { MonoTag } from "@/components/ui";
+import { useTenant } from "@/lib/tenant";
 import { getActiveLocationId } from "@/lib/active-location";
+import { exigirFilas, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
+import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
+import { reprogramarRecordatorioCita } from "@/lib/notifications";
+import {
+  bloqueosQueAplican, citasQueSeCruzan, duracionServicio, effectiveDayHours, leerHorarioNegocio,
+  profesionalesDeLaSede, timeToMins, verificarCupo,
+  type HorarioNegocio, type ProfesionalAgenda,
+} from "@/lib/scheduling";
+import { MonoTag } from "@/components/ui";
+import ErrorState from "@/components/ErrorState";
+import NewApptModal from "@/components/NewApptModal";
 import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
-import { OtherTimeField } from "@/components/OtherTimeField";
-import { scheduleAppointmentReminder, cancelAppointmentReminder } from "@/lib/notifications";
+import SemanaStrip from "@/components/agenda/SemanaStrip";
+import DayCalendar from "@/components/agenda/DayCalendar";
+import ApptDetailModal from "@/components/agenda/ApptDetailModal";
+import EditApptModal from "@/components/agenda/EditApptModal";
+import { proColor, proInitials, type ApptAgenda, type BloqueoAgenda, type VentaCita } from "@/components/agenda/tipos";
 
-// ─── Scheduling helpers ─────────────────────────────────────────────────────
-
-type ExistingBlock = { appointment_time: string; duration: number };
-type DaySchedule   = { open: boolean; start: string; end: string; break_start?: string | null; break_end?: string | null };
-
-function computeAvailable(slots: string[], existing: ExistingBlock[], duration: number): string[] {
-  return slots.filter(slot => {
-    const s = timeToMins(slot), e = s + duration;
-    return existing.every(b => {
-      const bs = timeToMins(b.appointment_time.slice(0, 5)), be = bs + b.duration;
-      return e <= bs || s >= be;
-    });
-  });
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-const PRO_PALETTE = [
-  "#e11d48", "#7c3aed", "#0284c7", "#059669", "#d97706", "#db2777",
-];
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Professional = { id: string; name: string; role?: string; schedule?: any };
-
-type EditClient  = { id: string; name: string; phone: string };
-type EditService = { id: string; name: string; duration_minutes: number; price: number };
-
-type Appt = {
-  id: string;
-  appointment_date: string;
-  appointment_time: string;
-  status: string;
-  service_id: string;
-  client_id: string | null;
-  location_id?: string | null;
-  clients: { name: string; phone?: string | null } | null;
-  services: { name: string; price?: number; duration_minutes?: number } | null;
-  professionals: { id: string; name: string } | null;
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function proColor(id: string, list: Professional[]) {
-  const idx = list.findIndex(p => p.id === id);
-  return PRO_PALETTE[idx % PRO_PALETTE.length] ?? Colors.muted;
-}
-
-function proInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-}
-
-// ─── Appointment detail modal ─────────────────────────────────────────────────
-
-function ApptDetailModal({ appt, onClose, onStatusChange, onEdit, onCobrar }: {
-  appt: Appt | null; onClose: () => void;
-  onStatusChange: (id: string, status: string) => void;
-  onEdit: () => void;
-  onCobrar: () => void;
-}) {
-  const { t } = useTheme();
-  if (!appt) return null;
-  const time = appt.appointment_time.substring(0, 5);
-
-  return (
-    <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: Colors.cream2 }}>
-        <View style={[dm.header, { backgroundColor: "#0C0C14" }]}>
-          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-          <View style={dm.headerRow}>
-            <TouchableOpacity onPress={onClose} style={dm.closeBtn}>
-              <Ionicons name="close" size={20} color="white" />
-            </TouchableOpacity>
-            <Text style={dm.headerTitle}>Detalle de cita</Text>
-            <TouchableOpacity onPress={onEdit} style={dm.closeBtn}>
-              <Ionicons name="create-outline" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
-          <View style={dm.summaryBox}>
-            <Text style={dm.clientName}>{appt.clients?.name ?? "Sin cliente"}</Text>
-            <Text style={dm.meta}>{appt.services?.name ?? "Sin servicio"}</Text>
-            <Text style={dm.meta}>{time} — {appt.appointment_date}</Text>
-            {appt.professionals?.name && (
-              <Text style={dm.proMeta}>por {appt.professionals.name}</Text>
-            )}
-            {appt.services?.price != null && appt.services.price > 0 && (
-              <Text style={dm.price}>${Math.round(appt.services.price).toLocaleString("es-CO")}</Text>
-            )}
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          {/* Cobrar: la acción principal de una cita pendiente o confirmada.
-              Antes solo se podía desde la pestaña POS, y desde aquí lo único
-              que había era marcarla "Completada" a mano, sin registrar el pago. */}
-          {(appt.status === "pending" || appt.status === "confirmed") && (
-            <TouchableOpacity onPress={onCobrar} activeOpacity={0.85} style={{ marginBottom: 22, borderRadius: Radius.lg, overflow: "hidden" }}>
-              <LinearGradient colors={["#10b981", "#0ea5e9"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dm.cobrarCard}>
-                <View style={dm.cobrarIcon}><Ionicons name="card-outline" size={20} color="white" /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={dm.cobrarTitle}>
-                    Cobrar esta cita{appt.services?.price ? ` · $${Math.round(appt.services.price).toLocaleString("es-CO")}` : ""}
-                  </Text>
-                  <Text style={dm.cobrarSub}>Con el servicio y el cliente ya cargados. Al cobrar queda Completada.</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.85)" />
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          {appt.status === "completed" && (
-            <View style={dm.cobradaRow}>
-              <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
-              <Text style={dm.cobradaText}>Cita cobrada. Quedó en el POS y en la caja.</Text>
-            </View>
-          )}
-
-          <Text style={dm.sectionLabel}>Estado de la cita</Text>
-          <View style={{ gap: 10 }}>
-            {STATUS_OPTIONS.map(opt => {
-              const isActive = appt.status === opt.status;
-              return (
-                <TouchableOpacity
-                  key={opt.status}
-                  style={[dm.statusBtn, isActive && { borderColor: opt.color }]}
-                  onPress={() => { onStatusChange(appt.id, opt.status); onClose(); }}
-                  activeOpacity={0.75}
-                >
-                  {isActive && (
-                    <View style={[StyleSheet.absoluteFill, { borderRadius: Radius.md, backgroundColor: opt.color + "10" }]} />
-                  )}
-                  <View style={[dm.statusIcon, { backgroundColor: opt.color + "15" }]}>
-                    <Ionicons name={opt.icon} size={18} color={opt.color} />
-                  </View>
-                  <Text style={[dm.statusLabel, isActive && { color: opt.color }]}>{opt.label}</Text>
-                  {isActive && <Ionicons name="checkmark-circle" size={18} color={opt.color} />}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
-const dm = StyleSheet.create({
-  header:      { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 24 },
-  headerRow:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
-  closeBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,.2)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
-  headerTitle: { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  summaryBox:  { backgroundColor: "rgba(255,255,255,.18)", borderRadius: Radius.lg, padding: 16, alignItems: "center", gap: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
-  clientName:  { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  meta:        { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,.8)" },
-  proMeta:     { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.65)", fontStyle: "italic" },
-  price:       { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", marginTop: 4 },
-  sectionLabel:{ fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 },
-  statusBtn:   { flexDirection: "row", alignItems: "center", gap: 12, ...Glass.cardStrong, borderRadius: Radius.md, padding: 14, overflow: "hidden" },
-  statusIcon:  { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  statusLabel: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  cobrarCard:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
-  cobrarIcon:  { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
-  cobrarTitle: { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.2 },
-  cobrarSub:   { fontSize: 11.5, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,0.9)", marginTop: 3, lineHeight: 16 },
-  cobradaRow:  { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.08)", borderWidth: 1, borderColor: "rgba(16,185,129,0.3)", marginBottom: 22 },
-  cobradaText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "#065f46" },
-});
-
-// ─── Edit appointment modal ───────────────────────────────────────────────────
-
-function EditApptModal({ appt, tenantId, professionals, onClose, onSaved }: {
-  appt: Appt | null; tenantId: string; professionals: Professional[];
-  onClose: () => void; onSaved: () => void;
-}) {
-  const { t } = useTheme();
-  const [step, setStep]                       = useState(0);
-  const [loading, setLoading]                 = useState(false);
-  const [saving, setSaving]                   = useState(false);
-  const [loadingSlots, setLoadingSlots]       = useState(false);
-
-  const [clients, setClients]                 = useState<EditClient[]>([]);
-  const [services, setServices]               = useState<EditService[]>([]);
-  const [schedule, setSchedule]               = useState<Record<string, DaySchedule> | null>(null);
-  /** Cada cuánto abre cupo el negocio (tenants.settings.slot_interval_min). */
-  const [slotInterval, setSlotInterval]       = useState<number>(DEFAULT_SLOT_INTERVAL);
-
-  const [selectedPro, setSelectedPro]         = useState<Professional | null>(null);
-  const [selectedClient, setSelectedClient]   = useState<EditClient | null>(null);
-  const [clientSearch, setClientSearch]       = useState("");
-  // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
-  const serverClients = useClientSearch(tenantId, clientSearch);
-  const [selectedService, setSelectedService] = useState<EditService | null>(null);
-  const [selectedDate, setSelectedDate]       = useState(new Date());
-  const [weekBase, setWeekBase]               = useState(new Date());
-  const [selectedTime, setSelectedTime]       = useState<string | null>(null);
-  const [availableSlots, setAvailableSlots]   = useState<string[]>([]);
-  const [dayClosed, setDayClosed]             = useState(false);
-
-  // Init from existing appointment data
-  useEffect(() => {
-    if (!appt) return;
-    setStep(0);
-    setClientSearch("");
-    // Resolver contra la lista completa: el join de la cita no trae el schedule del profesional
-    setSelectedPro(professionals.find(p => p.id === appt.professionals?.id) ?? appt.professionals ?? null);
-    const date = new Date(appt.appointment_date + "T12:00:00");
-    setSelectedDate(date);
-    setWeekBase(date);
-    setSelectedTime(null);
-    setAvailableSlots([]);
-    setSchedule(null);
-    setLoading(true);
-
-    Promise.all([
-      supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name").limit(150),
-      supabase.from("services").select("id, name, duration_minutes, price").eq("tenant_id", tenantId).order("name"),
-      supabase.from("tenants").select("settings").eq("id", tenantId).single(),
-    ]).then(([{ data: clis }, { data: svcs }, { data: tenant }]) => {
-      const clientList  = (clis ?? []) as EditClient[];
-      const serviceList = (svcs ?? []) as EditService[];
-      setClients(clientList);
-      setServices(serviceList);
-      setSchedule((tenant?.settings as any)?.schedule ?? {});
-      setSlotInterval(normalizeSlotInterval((tenant?.settings as any)?.slot_interval_min));
-      // Pre-select current client and service
-      setSelectedClient(clientList.find(c => c.id === appt.client_id) ?? null);
-      const svc = serviceList.find(s => s.id === appt.service_id);
-      setSelectedService(svc ?? null);
-      setLoading(false);
-    });
-  }, [appt?.id]);
-
-  // Reload slots when entering step 3 or changing date
-  useEffect(() => {
-    if (step === 3 && selectedPro && selectedService && schedule !== null) {
-      reloadSlots();
-    }
-  }, [step, selectedDate, schedule]);
-
-  const reloadSlots = async () => {
-    const duration = selectedService?.duration_minutes ?? 60;
-    setLoadingSlots(true);
-    setSelectedTime(null);
-    setDayClosed(false);
-
-    // Horario efectivo del día: el propio del profesional (si tiene) sobre el del negocio
-    const dayConfig = effectiveDayHours(selectedDate, schedule, selectedPro?.schedule);
-    if (!dayConfig?.open) {
-      setDayClosed(true); setAvailableSlots([]); setLoadingSlots(false); return;
-    }
-
-    const slots   = generateSlotsForDay(dayConfig, duration, slotInterval);
-    const dateStr = localDateStr(selectedDate);
-    const proId   = selectedPro!.id;
-
-    const { data: existing } = await supabase
-      .from("appointments")
-      .select("appointment_time, service_id")
-      .eq("professional_id", proId)
-      .eq("appointment_date", dateStr)
-      .neq("status", "cancelled")
-      .neq("id", appt!.id);
-
-    if (!existing || existing.length === 0) {
-      const avail = computeAvailable(slots, [], duration);
-      setAvailableSlots(avail);
-      const cur = appt!.appointment_time.slice(0, 5);
-      if (avail.includes(cur)) setSelectedTime(cur);
-      setLoadingSlots(false);
-      return;
-    }
-
-    const svcIds = [...new Set(existing.map((a: any) => a.service_id).filter(Boolean))];
-    const { data: svcs } = await supabase.from("services").select("id, duration_minutes").in("id", svcIds);
-    const durMap = new Map((svcs ?? []).map((s: any) => [s.id, s.duration_minutes]));
-    const blocks: ExistingBlock[] = existing.map((a: any) => ({
-      appointment_time: a.appointment_time as string,
-      duration: durMap.get(a.service_id) ?? 60,
-    }));
-
-    const avail = computeAvailable(slots, blocks, duration);
-    setAvailableSlots(avail);
-    const cur = appt!.appointment_time.slice(0, 5);
-    if (avail.includes(cur)) setSelectedTime(cur);
-    setLoadingSlots(false);
-  };
-
-  const handleSave = async () => {
-    if (!appt || !selectedTime || !selectedService || !selectedPro) return;
-    setSaving(true);
-    try {
-      const dateStr = localDateStr(selectedDate);
-
-      // El slot pudo ocuparse desde otro dispositivo mientras se editaba
-      if (await hasSlotConflict(selectedPro.id, dateStr, timeToMins(selectedTime), selectedService.duration_minutes, appt.id)) {
-        Alert.alert("Horario ya ocupado", "Ese horario acaba de reservarse. Elige otro.");
-        reloadSlots();
-        return;
-      }
-
-      const { error: saveError } = await supabase.from("appointments").update({
-        professional_id:  selectedPro.id,
-        service_id:       selectedService.id,
-        appointment_date: dateStr,
-        appointment_time: `${selectedTime}:00`,
-        ...(selectedClient ? { client_id: selectedClient.id } : {}),
-      }).eq("id", appt.id);
-      if (saveError) {
-        Alert.alert("No se pudo guardar la cita", "Revisa tu conexión e inténtalo de nuevo.");
-        return;
-      }
-      onSaved();
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!appt) return null;
-
-  const filteredClients = serverClients ?? clients.filter(c =>
-    c.name.toLowerCase().includes(clientSearch.toLowerCase()) || c.phone.includes(clientSearch)
-  );
-
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const week  = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekBase);
-    d.setDate(weekBase.getDate() - weekBase.getDay() + i);
-    return d;
-  });
-
-  const canStep0 = selectedPro !== null;
-  const canStep1 = selectedClient !== null;
-  const canStep2 = selectedService !== null;
-  const canSave  = selectedTime !== null;
-  const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
-
-  const STEP_LABELS = ["Paso 1 · Profesional", "Paso 2 · Cliente", "Paso 3 · Servicio", "Paso 4 · Fecha y hora"];
-
-  return (
-    <Modal visible={!!appt} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        {/* Header */}
-        <View style={[em.header, { backgroundColor: "#0C0C14" }]}>
-          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-          <View style={em.headerRow}>
-            <TouchableOpacity onPress={step === 0 ? onClose : () => setStep(p => p - 1)} style={em.headerBtn}>
-              <Text style={em.backText}>{step === 0 ? "✕" : "←"}</Text>
-            </TouchableOpacity>
-            <View style={{ alignItems: "center" }}>
-              <Text style={em.headerTitle}>Modificar cita</Text>
-              <Text style={em.headerSub}>{STEP_LABELS[step]}</Text>
-            </View>
-            <View style={{ width: 40 }} />
-          </View>
-          <View style={em.progressRow}>
-            {STEP_LABELS.map((_, i) => (
-              <View key={i} style={[em.progressDot, step >= i && em.progressActive]} />
-            ))}
-          </View>
-        </View>
-
-        {loading ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={Colors.red} size="large" />
-          </View>
-        ) : (
-          <>
-            {/* ── STEP 0: PROFESSIONAL ── */}
-            {step === 0 && (
-              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                {professionals.map((p, i) => {
-                  const idx    = professionals.findIndex(x => x.id === p.id);
-                  const color  = PRO_PALETTE[idx % PRO_PALETTE.length];
-                  const active = selectedPro?.id === p.id;
-                  return (
-                    <Animated.View key={p.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
-                      <TouchableOpacity
-                        style={[em.selectCard, Shadow.sm, active && em.selectCardActive]}
-                        onPress={() => setSelectedPro(p)}
-                        activeOpacity={0.75}
-                      >
-                        <View style={[em.avatar, { backgroundColor: color + "20" }]}>
-                          <Text style={[em.avatarText, { color }]}>
-                            {p.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[em.cardTitle, active && { color: Colors.red }]}>{p.name}</Text>
-                          <Text style={em.cardSub}>{p.role}</Text>
-                        </View>
-                        {active && <View style={em.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>}
-                      </TouchableOpacity>
-                    </Animated.View>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* ── STEP 1: CLIENT ── */}
-            {step === 1 && (
-              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
-                  <View style={[em.searchBar, Shadow.sm]}>
-                    <Text style={{ fontSize: 15, color: Colors.subtle }}>🔍</Text>
-                    <TextInput
-                      style={em.searchInput}
-                      value={clientSearch}
-                      onChangeText={setClientSearch}
-                      placeholder="Buscar por nombre o teléfono..."
-                      placeholderTextColor={Colors.subtle}
-                    />
-                    {clientSearch.length > 0 && (
-                      <TouchableOpacity onPress={() => setClientSearch("")}>
-                        <Text style={{ color: Colors.subtle, fontSize: 16 }}>✕</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  {filteredClients.map(c => (
-                    <TouchableOpacity
-                      key={c.id}
-                      style={[em.selectCard, Shadow.sm, selectedClient?.id === c.id && em.selectCardActive]}
-                      onPress={() => setSelectedClient(c)}
-                      activeOpacity={0.75}
-                    >
-                      <View style={[em.avatar, { backgroundColor: Colors.red }]}>
-                        <Text style={em.avatarWhite}>{c.name[0].toUpperCase()}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[em.cardTitle, selectedClient?.id === c.id && { color: Colors.red }]}>{c.name}</Text>
-                        <Text style={em.cardSub}>{c.phone}</Text>
-                      </View>
-                      {selectedClient?.id === c.id && <View style={em.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </KeyboardAvoidingView>
-            )}
-
-            {/* ── STEP 2: SERVICE ── */}
-            {step === 2 && (
-              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                {services.map((svc, i) => (
-                  <Animated.View key={svc.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
-                    <TouchableOpacity
-                      style={[em.svcCard, Shadow.sm, selectedService?.id === svc.id && em.selectCardActive]}
-                      onPress={() => setSelectedService(svc)}
-                      activeOpacity={0.75}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={[em.cardTitle, selectedService?.id === svc.id && { color: Colors.red }]}>{svc.name}</Text>
-                        <Text style={em.cardSub}>⏱ {svc.duration_minutes} min</Text>
-                      </View>
-                      <View style={{ alignItems: "flex-end", gap: 6 }}>
-                        <Text style={em.svcPrice}>${Number(svc.price).toLocaleString("es-CO")}</Text>
-                        {selectedService?.id === svc.id && <View style={em.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>}
-                      </View>
-                    </TouchableOpacity>
-                  </Animated.View>
-                ))}
-              </ScrollView>
-            )}
-
-            {/* ── STEP 3: DATE + TIME ── */}
-            {step === 3 && (
-              <ScrollView contentContainerStyle={{ paddingBottom: 130 }}>
-                {/* Service reminder */}
-                {selectedService && (
-                  <View style={em.durationNote}>
-                    <Text style={em.durationNoteText}>{selectedService.name}  ·  ⏱ {selectedService.duration_minutes} min</Text>
-                  </View>
-                )}
-
-                {/* Week strip */}
-                <View style={[em.weekStrip, Shadow.sm]}>
-                  <TouchableOpacity style={em.arrow} onPress={() => setWeekBase(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })}>
-                    <Text style={em.arrowText}>‹</Text>
-                  </TouchableOpacity>
-                  {week.map((d, i) => {
-                    const isPast   = d < today;
-                    const isClosed = schedule ? effectiveDayHours(d, schedule, selectedPro?.schedule)?.open === false : false;
-                    const blocked  = isPast || isClosed;
-                    const isSel    = d.toDateString() === selectedDate.toDateString();
-                    const isToday  = d.toDateString() === new Date().toDateString();
-                    return (
-                      <TouchableOpacity
-                        key={i}
-                        style={[em.dayCol, blocked && { opacity: 0.3 }]}
-                        onPress={() => { if (!blocked) setSelectedDate(new Date(d)); }}
-                        disabled={blocked}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[em.dayName, isSel && !blocked && { color: Colors.red }]}>{DAYS[d.getDay()]}</Text>
-                        {isSel && !blocked ? (
-                          <View style={[em.dayCircle, { backgroundColor: Colors.red }]}>
-                            <Text style={[em.dayNum, { color: "white" }]}>{d.getDate()}</Text>
-                          </View>
-                        ) : (
-                          <View style={[em.dayCircle, isToday && !blocked && { backgroundColor: Colors.red + "15" }]}>
-                            <Text style={[em.dayNum, isToday && !blocked && { color: Colors.red }]}>{d.getDate()}</Text>
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <TouchableOpacity style={em.arrow} onPress={() => setWeekBase(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })}>
-                    <Text style={em.arrowText}>›</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
-                  <Text style={em.sectionLabel}>Horas disponibles</Text>
-                  {loadingSlots ? (
-                    <View style={{ alignItems: "center", paddingVertical: 32 }}>
-                      <ActivityIndicator color={Colors.red} />
-                    </View>
-                  ) : dayClosed ? (
-                    <View style={[em.emptyBox, Shadow.sm]}>
-                      <Text style={{ fontSize: 28, marginBottom: 8 }}>🚫</Text>
-                      <Text style={em.emptyTitle}>Día no laborable</Text>
-                    </View>
-                  ) : availableSlots.length === 0 ? (
-                    <View style={[em.emptyBox, Shadow.sm]}>
-                      <Text style={{ fontSize: 28, marginBottom: 8 }}>😔</Text>
-                      <Text style={em.emptyTitle}>Sin disponibilidad</Text>
-                      <Text style={em.emptySub}>Prueba con otro día</Text>
-                    </View>
-                  ) : (
-                    <View style={{ gap: 8 }}>
-                      {chunk(availableSlots, 3).map((row, ri) => (
-                        <View key={ri} style={{ flexDirection: "row", gap: 8 }}>
-                          {row.map(t => (
-                            <TouchableOpacity
-                              key={t}
-                              style={[em.timeSlot, { flex: 1 }, selectedTime === t && em.timeSlotActive]}
-                              onPress={() => setSelectedTime(t)}
-                              activeOpacity={0.75}
-                            >
-                              {selectedTime === t && (
-                                <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.red }]} />
-                              )}
-                              <Text style={[em.timeSlotText, selectedTime === t && { color: "white" }]}>{fmt12Hour(t)}</Text>
-                            </TouchableOpacity>
-                          ))}
-                          {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
-                            <View key={`pad-${i}`} style={{ flex: 1 }} />
-                          ))}
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {!loadingSlots && !dayClosed && (
-                    <OtherTimeField
-                      value={selectedTime}
-                      inGrid={selectedTime !== null && availableSlots.includes(selectedTime)}
-                      onChange={setSelectedTime}
-                    />
-                  )}
-                </View>
-              </ScrollView>
-            )}
-
-            {/* Bottom bar */}
-            <View style={em.bottomBar}>
-              {step < 3 ? (
-                <TouchableOpacity
-                  style={[em.btn, !stepCanProceed[step] && { opacity: 0.4 }]}
-                  onPress={() => setStep(p => p + 1)}
-                  disabled={!stepCanProceed[step]}
-                  activeOpacity={0.85}
-                >
-                  <View style={em.btnGrad}>
-                    <Text style={em.btnText}>Siguiente →</Text>
-                  </View>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[em.btn, (!canSave || saving) && { opacity: 0.4 }]}
-                  onPress={handleSave}
-                  disabled={!canSave || saving}
-                  activeOpacity={0.85}
-                >
-                  <View style={em.btnGrad}>
-                    {saving ? <ActivityIndicator color="white" /> : <Text style={em.btnText}>Guardar cambios</Text>}
-                  </View>
-                </TouchableOpacity>
-              )}
-            </View>
-          </>
-        )}
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-const em = StyleSheet.create({
-  header:         { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 18 },
-  headerRow:      { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
-  headerBtn:      { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,.2)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
-  backText:       { color: "white", fontSize: 18, fontFamily: "SpaceGrotesk_600SemiBold" },
-  headerTitle:    { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  headerSub:      { fontSize: 12, color: "rgba(255,255,255,.75)", fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
-  progressRow:    { flexDirection: "row", gap: 6 },
-  progressDot:    { height: 4, flex: 1, borderRadius: 2, backgroundColor: "rgba(255,255,255,.3)" },
-  progressActive: { backgroundColor: "rgba(255,255,255,.95)" },
-  sectionLabel:   { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
-  selectCard:     { flexDirection: "row", alignItems: "center", ...Glass.cardStrong, borderRadius: Radius.lg, padding: 14, marginBottom: 10, gap: 14 },
-  selectCardActive:{ borderColor: Colors.red, backgroundColor: "rgba(251,15,5,0.08)" },
-  svcCard:        { flexDirection: "row", alignItems: "center", ...Glass.cardStrong, borderRadius: Radius.lg, padding: 16, marginBottom: 10 },
-  svcPrice:       { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
-  avatar:         { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  avatarText:     { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold" },
-  avatarWhite:    { color: "white", fontSize: 15, fontFamily: "SpaceGrotesk_700Bold" },
-  cardTitle:      { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text, marginBottom: 2 },
-  cardSub:        { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
-  check:          { width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center" },
-  searchBar:      { flexDirection: "row", alignItems: "center", ...Glass.card, borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12, gap: 8 },
-  searchInput:    { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
-  durationNote:   { backgroundColor: Colors.red + "10", paddingHorizontal: 20, paddingVertical: 12 },
-  durationNoteText:{ fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red },
-  weekStrip:      { ...Glass.cardStrong, flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 2 },
-  arrow:          { width: 32, alignItems: "center" },
-  arrowText:      { fontSize: 24, color: Colors.muted, lineHeight: 28 },
-  dayCol:         { flex: 1, alignItems: "center", gap: 5 },
-  dayName:        { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle, textTransform: "uppercase" },
-  dayCircle:      { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  dayNum:         { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  timeSlot:       { paddingVertical: 13, borderRadius: Radius.md, overflow: "hidden", ...Glass.card, alignItems: "center" },
-  timeSlotActive: { borderWidth: 0 },
-  timeSlotText:   { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  emptyBox:       { ...Glass.cardStrong, borderRadius: Radius.lg, padding: 32, alignItems: "center" },
-  emptyTitle:     { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 4 },
-  emptySub:       { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
-  bottomBar:      { position: "absolute", bottom: 0, left: 0, right: 0, padding: 20, paddingBottom: 34, backgroundColor: "rgba(244,244,249,0.85)", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.6)" },
-  btn:            { borderRadius: Radius.full, overflow: "hidden" },
-  btnGrad: { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
-  btnText:        { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: 0.3 },
-});
+/** Área táctil extra de los botones pequeños del encabezado (CAL-24). */
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 // ─── Professional filter chip ─────────────────────────────────────────────────
 
 function ProChip({ label, initials, color, active, onPress }: {
   label: string; initials?: string; color?: string; active: boolean; onPress: () => void;
 }) {
+  const { t } = useTheme();
+  const c = color ?? Colors.red;
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.75} style={[pc.chip, active && pc.chipActive]}>
-      {active && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: color ?? Colors.red, borderRadius: Radius.full }]} />
-      )}
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={[pc.chip, { backgroundColor: active ? c : t.cardSolid, borderColor: active ? c : t.line }]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+    >
       {initials ? (
-        <View style={[pc.avatar, { backgroundColor: active ? "rgba(255,255,255,.25)" : (color ?? Colors.red) + "18" }]}>
-          <Text style={[pc.avatarText, { color: active ? "white" : (color ?? Colors.red) }]}>{initials}</Text>
+        <View style={[pc.avatar, { backgroundColor: active ? "rgba(255,255,255,.25)" : c + "18" }]}>
+          <Text style={[pc.avatarText, { color: active ? "white" : c }]}>{initials}</Text>
         </View>
       ) : (
-        <Ionicons name="people-outline" size={13} color={active ? "white" : Colors.muted} />
+        <Ionicons name="people-outline" size={13} color={active ? "white" : t.muted} />
       )}
-      <Text style={[pc.label, active && { color: "white" }]}>{label}</Text>
+      <Text style={[pc.label, { color: active ? "white" : t.muted }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
 const pc = StyleSheet.create({
-  chip:       { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: Radius.full, paddingVertical: 7, paddingHorizontal: 12, ...Glass.card, overflow: "hidden" },
-  chipActive: { borderWidth: 0 },
+  chip:       { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: Radius.full, paddingVertical: 7, paddingHorizontal: 12, borderWidth: 1, minHeight: 34 },
   avatar:     { width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
-  avatarText: { fontSize: 9, fontFamily: "SpaceGrotesk_700Bold" },
-  label:      { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted },
+  avatarText: { fontSize: 9, fontFamily: Fonts.bold },
+  label:      { fontSize: 12, fontFamily: Fonts.semibold },
 });
 
-// ─── Timeline slot ────────────────────────────────────────────────────────────
+// ─── Datos del día ────────────────────────────────────────────────────────────
 
-const START_MINS = 8 * 60;   // 8:00 AM
-const END_MINS   = 21 * 60;  // 9:00 PM
-const SLOT_MINS  = 30;
-const ROW_H      = 60;
-const TIME_COL_W = 56;
+type DatosDia = {
+  dia: string;
+  citas: ApptAgenda[];
+  bloqueos: BloqueoAgenda[];
+  profesionales: ProfesionalAgenda[];
+  horario: HorarioNegocio;
+  /** Cobros por cita del día; null si no se pudieron leer (no se marca "por cobrar"). */
+  ventas: Map<string, VentaCita> | null;
+  /**
+   * Sede que se está mirando, solo si el negocio tiene más de una: la agenda
+   * se filtra por ella y sin el nombre a la vista parecía que faltaban citas
+   * (ARQ-10). null con una sola sede o si no se pudo leer.
+   */
+  sede: { id: string; nombre: string } | null;
+};
 
 /**
- * Reparte las citas que se solapan en "carriles" (como Google Calendar y el
- * calendario de la web): se agrupan en racimos de citas encadenadas y cada
- * racimo se divide en tantas columnas como haga falta. Antes cada bloque
- * ocupaba todo el ancho y, con dos citas a la misma hora en el filtro "Todos",
- * la de arriba tapaba a la otra: parecía que solo había una.
+ * Todo lo que necesita un día de la Agenda. Lanza ErrorDB si falla la parte
+ * esencial: antes un corte de red se veía como "Sin citas este día" y el
+ * dueño creía tener el día libre (AGE-X1).
  */
-function layoutLanes(appts: Appt[]): { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] {
-  const items = appts
-    .map(a => {
-      const start = timeToMins(a.appointment_time.slice(0, 5));
-      const dur   = Math.max(a.services?.duration_minutes ?? 60, 10);
-      return { appt: a, start, end: start + dur, dur };
-    })
-    .sort((x, y) => x.start - y.start || x.end - y.end);
+async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
+  // Misma sede que el panel web: allí la agenda se filtra por la sede seleccionada.
+  const loc = await getActiveLocationId(tenantId);
+  const [citas, prosRes, bloqRes, tenRes, sedesRes] = await Promise.all([
+    traerTodo<ApptAgenda>((desde, hasta) => {
+      let q = supabase.from("appointments")
+        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(price)")
+        .eq("tenant_id", tenantId)
+        .eq("appointment_date", dia);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("appointment_time").order("id").range(desde, hasta) as unknown as PromiseLike<{ data: ApptAgenda[] | null; error: unknown }>;
+    }, { contexto: "No se pudieron cargar las citas" }),
+    supabase.from("professionals").select("id, name, role, schedule, location_id")
+      .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+    supabase.from("blocked_slots").select("id, start_time, end_time, professional_id, reason")
+      .eq("tenant_id", tenantId).eq("blocked_date", dia).order("start_time"),
+    supabase.from("tenants").select("settings").eq("id", tenantId).single(),
+    // Mismo criterio que lib/active-location (sedes activas, la principal primero).
+    supabase.from("locations").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("created_at"),
+  ]);
+  const pros = (revisar(prosRes, "No se pudo cargar el equipo") ?? []) as ProfesionalAgenda[];
+  const bloqueos = (revisar(bloqRes, "No se pudieron cargar las ausencias") ?? []) as BloqueoAgenda[];
+  const tenant = revisar(tenRes, "No se pudo cargar el horario del negocio") as { settings?: unknown } | null;
 
-  const out: { appt: Appt; start: number; dur: number; lane: number; lanes: number }[] = [];
-  let cluster: typeof items = [];
-  let clusterEnd = -1;
-  const flush = () => {
-    if (cluster.length === 0) return;
-    const laneEnds: number[] = [];
-    const assigned = cluster.map(it => {
-      let lane = laneEnds.findIndex(e => e <= it.start);
-      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
-      else laneEnds[lane] = it.end;
-      return { ...it, lane };
-    });
-    for (const a of assigned) out.push({ appt: a.appt, start: a.start, dur: a.dur, lane: a.lane, lanes: laneEnds.length });
-    cluster = []; clusterEnd = -1;
+  // Cobros de las citas del día, para distinguir "completada" de "por cobrar".
+  let ventas: Map<string, VentaCita> | null = null;
+  try {
+    const filas = await traerPorIds<{ id: string; appointment_id: string | null; total: number }>(
+      citas.map(c => c.id),
+      (lote, desde, hasta) => supabase.from("pos_sales").select("id, appointment_id, total")
+        .in("appointment_id", lote).order("id").range(desde, hasta),
+    );
+    ventas = new Map(filas.filter(v => v.appointment_id).map(v => [v.appointment_id!, { id: v.id, total: Number(v.total) || 0 }]));
+  } catch {
+    ventas = null;
+  }
+
+  // El nombre de la sede es solo informativo: si falla, la agenda se muestra igual.
+  const sedes = (sedesRes.error ? [] : sedesRes.data ?? []) as { id: string; name: string | null }[];
+  const activa = sedes.length > 1 ? sedes.find(x => x.id === loc) : undefined;
+
+  return {
+    dia,
+    citas,
+    bloqueos,
+    profesionales: profesionalesDeLaSede(pros, loc),
+    horario: leerHorarioNegocio(tenant?.settings),
+    ventas,
+    sede: activa ? { id: activa.id, nombre: activa.name?.trim() || "Sede sin nombre" } : null,
   };
-  for (const it of items) {
-    if (cluster.length > 0 && it.start >= clusterEnd) flush();
-    cluster.push(it);
-    clusterEnd = Math.max(clusterEnd, it.end);
-  }
-  flush();
-  return out;
 }
-
-// ─── Day Calendar ─────────────────────────────────────────────────────────────
-
-function DayCalendar({ appts, professionals, onPressAppt, onAddPress, showPro, refreshing, onRefresh }: {
-  appts: Appt[]; professionals: Professional[]; onPressAppt: (a: Appt) => void;
-  onAddPress: () => void; showPro: boolean; refreshing: boolean; onRefresh: () => void;
-}) {
-  const { t } = useTheme();
-  const scrollRef = useRef<ScrollView>(null);
-  const [gridW, setGridW] = useState(0);
-  const now       = new Date();
-  const nowMins   = now.getHours() * 60 + now.getMinutes();
-  const nowY      = ((nowMins - START_MINS) / SLOT_MINS) * ROW_H;
-  const placed    = layoutLanes(appts);
-
-  const slots: string[] = [];
-  for (let m = START_MINS; m < END_MINS; m += SLOT_MINS) {
-    const h = Math.floor(m / 60), mm = m % 60;
-    slots.push(`${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
-  }
-  const totalH = slots.length * ROW_H;
-
-  useEffect(() => {
-    const offset = Math.max(0, nowY - 120);
-    const timer = setTimeout(() => scrollRef.current?.scrollTo({ y: offset, animated: false }), 100);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <ScrollView
-      ref={scrollRef}
-      style={{ flex: 1 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
-      contentContainerStyle={{ paddingBottom: 110 }}
-    >
-      <View style={{ height: totalH, position: "relative" }} onLayout={e => setGridW(e.nativeEvent.layout.width)}>
-
-        {/* Grid lines */}
-        {slots.map((time, i) => {
-          const isHour   = time.endsWith(":00");
-          const h        = parseInt(time.slice(0, 2), 10);
-          const hLabel   = `${h % 12 || 12} ${h >= 12 ? "PM" : "AM"}`;
-          const slotMins = START_MINS + i * SLOT_MINS;
-          const isNow    = nowMins >= slotMins && nowMins < slotMins + SLOT_MINS;
-          return (
-            <View key={time} style={{ position: "absolute", top: i * ROW_H, left: 0, right: 0, height: ROW_H, flexDirection: "row" }}>
-              <View style={{ width: TIME_COL_W, paddingTop: 8, paddingRight: 12, alignItems: "flex-end" }}>
-                {isHour && (
-                  <Text style={{ fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: isNow ? Colors.red : t.subtle }}>
-                    {hLabel}
-                  </Text>
-                )}
-              </View>
-              <View style={{ flex: 1, borderTopWidth: isHour ? 1 : StyleSheet.hairlineWidth, borderTopColor: isHour ? t.border : t.divider }} />
-            </View>
-          );
-        })}
-
-        {/* Current time indicator */}
-        {nowMins >= START_MINS && nowMins < END_MINS && (
-          <View style={{ position: "absolute", top: nowY, left: 0, right: 0, zIndex: 10, flexDirection: "row", alignItems: "center" }}>
-            <View style={{ width: TIME_COL_W, alignItems: "flex-end", paddingRight: 6 }}>
-              <View style={dg.nowDot} />
-            </View>
-            <View style={dg.nowLine} />
-          </View>
-        )}
-
-        {/* Appointment blocks — en carriles cuando se solapan */}
-        {placed.map(({ appt, start: startMins, dur: duration, lane, lanes }) => {
-          if (startMins < START_MINS || startMins >= END_MINS) return null;
-          const top      = ((startMins - START_MINS) / SLOT_MINS) * ROW_H + 2;
-          const height   = Math.max((duration / SLOT_MINS) * ROW_H - 4, ROW_H - 6);
-          const color    = STATUS_META[appt.status]?.color ?? Colors.subtle;
-          const label    = STATUS_META[appt.status]?.label ?? appt.status;
-          const pColor   = appt.professionals ? proColor(appt.professionals.id, professionals) : Colors.subtle;
-          const areaW    = Math.max(0, gridW - TIME_COL_W - 4 - 8);
-          const laneGap  = 4;
-          const laneW    = lanes > 1 ? (areaW - laneGap * (lanes - 1)) / lanes : areaW;
-          const left     = TIME_COL_W + 4 + lane * (laneW + laneGap);
-          const narrow   = lanes > 1;
-          return (
-            <TouchableOpacity
-              key={appt.id}
-              style={[dg.block, Shadow.sm, { top, left, width: gridW ? laneW : undefined, right: gridW ? undefined : 8, height, backgroundColor: t.card, borderColor: color + "50" }]}
-              onPress={() => onPressAppt(appt)}
-              activeOpacity={0.85}
-            >
-              <View style={[dg.blockAccent, { backgroundColor: color }]} />
-              <View style={{ flex: 1, paddingHorizontal: narrow ? 6 : 8, paddingVertical: 5, gap: 1 }}>
-                <Text style={[dg.blockClient, { color: t.text }]} numberOfLines={1}>{appt.clients?.name ?? "Sin cliente"}</Text>
-                {height >= 40 && <Text style={[dg.blockService, { color: t.muted }]} numberOfLines={1}>{appt.services?.name ?? ""}</Text>}
-                {height >= 60 && showPro && appt.professionals && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pColor }} />
-                    <Text style={[dg.blockPro, { color: pColor }]} numberOfLines={1}>{appt.professionals.name.split(" ")[0]}</Text>
-                  </View>
-                )}
-              </View>
-              {/* Con varios carriles no cabe la etiqueta de estado: el color del borde y la franja ya lo dicen */}
-              {!narrow && (
-                <View style={[dg.blockBadge, { backgroundColor: color + "20" }]}>
-                  <Text style={[dg.blockBadgeText, { color }]}>{label}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-
-        {/* Empty state — tocable: abre el modal de nueva cita */}
-        {appts.length === 0 && (
-          <Animated.View
-            entering={FadeInDown.duration(400)}
-            style={{ position: "absolute", top: Math.max(8, nowY - 50), left: TIME_COL_W + 8, right: 8 }}
-          >
-            <TouchableOpacity
-              style={[dg.emptyCard, { backgroundColor: t.card, borderColor: t.cardBorder }]}
-              onPress={onAddPress}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="calendar-outline" size={30} color={t.subtle} />
-              <Text style={[dg.emptyTitle, { color: t.text }]}>Sin citas este día</Text>
-              <Text style={[dg.emptySub, { color: t.muted }]}>Toca para agendar</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-      </View>
-    </ScrollView>
-  );
-}
-
-const dg = StyleSheet.create({
-  nowDot:        { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.red },
-  nowLine:       { flex: 1, height: 2, backgroundColor: Colors.red, opacity: 0.75 },
-  block:         { position: "absolute", borderRadius: 10, flexDirection: "row", overflow: "hidden", borderWidth: 1 },
-  blockAccent:   { width: 4 },
-  blockClient:   { fontSize: 12, fontFamily: "SpaceGrotesk_600SemiBold" },
-  blockService:  { fontSize: 10, fontFamily: "SpaceGrotesk_400Regular" },
-  blockPro:      { fontSize: 9,  fontFamily: "SpaceGrotesk_600SemiBold" },
-  blockBadge:    { paddingHorizontal: 6, paddingVertical: 4, alignSelf: "center", marginRight: 6, borderRadius: 6 },
-  blockBadgeText:{ fontSize: 9, fontFamily: "SpaceGrotesk_700Bold" },
-  emptyCard:     { borderRadius: Radius.xl, borderWidth: 1, padding: 28, alignItems: "center", gap: 8 },
-  emptyTitle:    { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold" },
-  emptySub:      { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", textAlign: "center" },
-});
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function AgendaScreen() {
   const { t } = useTheme();
-  const [selected, setSelected]       = useState(new Date());
-  const [week, setWeek]               = useState(() => buildWeek(new Date()));
-  const [appts, setAppts]             = useState<Appt[]>([]);
-  const [professionals, setProfessionals] = useState<Professional[]>([]);
-  const [filterProId, setFilterProId] = useState<string | null>(null);
+  const s = useMemo(() => crearEstilos(t), [t]);
+  const router = useRouter();
   const { tenantId } = useAuth();
+  const { timezone, ready, tenant } = useTenant();
+  const guard = useGuardRespuestas();
+
+  const [selected, setSelected]       = useState(() => hoyNegocio(timezone));
+  const [semana, setSemana]           = useState(() => inicioDeSemana(hoyNegocio(timezone)));
+  const [datos, setDatos]             = useState<DatosDia | null>(null);
+  const [error, setError]             = useState<unknown>(null);
+  const [errorDia, setErrorDia]       = useState<string | null>(null);
+  const [filterProId, setFilterProId] = useState<string | null>(null);
   const [refreshing, setRefreshing]   = useState(false);
   const [showNew, setShowNew]         = useState(false);
-  const [refreshKey, setRefreshKey]   = useState(0);
-  const [detailAppt, setDetailAppt]   = useState<Appt | null>(null);
-  const [editAppt, setEditAppt]       = useState<Appt | null>(null);
+  const [detailAppt, setDetailAppt]   = useState<ApptAgenda | null>(null);
+  const [editAppt, setEditAppt]       = useState<ApptAgenda | null>(null);
   const [chargeAppt, setChargeAppt]   = useState<LinkedAppt | null>(null);
 
-  const loadAppts = useCallback(async (date: Date) => {
+  const { hoy, recargar } = useRecarga(async () => {
     if (!tenantId) return;
-    const dateStr = localDateStr(date);
-    // Misma sede que el panel web: allí la agenda se filtra por la sede
-    // seleccionada. Sin esto, con varias sedes el móvil mostraba todas las
-    // citas y la web solo las de una, y los dos "no cuadraban".
-    const loc = await getActiveLocationId(tenantId);
-    let apptQ = supabase.from("appointments")
-      .select("id, appointment_date, appointment_time, status, service_id, client_id, location_id, clients(name, phone), services(name, price, duration_minutes), professionals(id, name)")
-      .eq("tenant_id", tenantId)
-      .eq("appointment_date", dateStr);
-    if (loc) apptQ = apptQ.eq("location_id", loc);
-    const [{ data: apptData }, { data: proData }] = await Promise.all([
-      apptQ.order("appointment_time"),
-      supabase.from("professionals")
-        .select("id, name, schedule")
-        .eq("tenant_id", tenantId)
-        .eq("is_active", true)
-        .order("name"),
-    ]);
-    setAppts((apptData as unknown as Appt[]) ?? []);
-    setProfessionals((proData as Professional[]) ?? []);
-  }, [tenantId]);
-
-  const handleStatusChange = async (id: string, status: string) => {
-    await supabase.from("appointments").update({ status }).eq("id", id);
-    if (status === "cancelled" || status === "completed") {
-      await cancelAppointmentReminder(id);
-    } else {
-      const { data: a } = await supabase
-        .from("appointments")
-        .select("id, appointment_date, appointment_time, clients(name), services(name)")
-        .eq("id", id).single();
-      if (a) {
-        const { data: settings } = await supabase
-          .from("reminder_settings").select("hours_before, message_template")
-          .eq("tenant_id", tenantId!).single();
-        await scheduleAppointmentReminder(
-          { id: a.id, date: (a as any).appointment_date, time: (a as any).appointment_time,
-            clientName: (a.clients as any)?.name ?? "Cliente",
-            serviceName: (a.services as any)?.name ?? "Servicio" },
-          settings?.hours_before ?? 24,
-          settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
-        );
-      }
+    // Solo la respuesta del último día pedido se pinta: antes, al tocar lunes
+    // y martes seguidos, la respuesta tardía del lunes quedaba bajo el
+    // encabezado del martes y se cobraba la cita equivocada (AGE-13 / ARQ-08).
+    const turno = guard.nuevo();
+    const dia = selected;
+    try {
+      const d = await cargarDia(tenantId, dia);
+      if (!turno.vigente()) return;
+      setDatos(d);
+      setError(null);
+      setErrorDia(null);
+    } catch (e) {
+      if (!turno.vigente()) return;
+      setError(e);
+      setErrorDia(dia);
     }
-    await loadAppts(selected);
+  }, [tenantId, timezone, selected], { timeZone: timezone, habilitado: !!tenantId && ready });
+
+  // Si se estaba mirando "hoy" y cambia el día del negocio (medianoche, o
+  // llegó la zona real del negocio), se sigue en el nuevo hoy.
+  const hoyPrevio = useRef(hoy);
+  useEffect(() => {
+    const antes = hoyPrevio.current;
+    hoyPrevio.current = hoy;
+    if (antes !== hoy && selected === antes) {
+      setSelected(hoy);
+      setSemana(inicioDeSemana(hoy));
+    }
+  }, [hoy, selected]);
+
+  const onRefresh = async () => { setRefreshing(true); await recargar(); setRefreshing(false); };
+
+  const irADia = (dia: string) => {
+    setSelected(dia);
+    setSemana(inicioDeSemana(dia));
   };
 
+  // Datos del día seleccionado (nunca los de otro día bajo este encabezado).
+  const vigentes = datos && datos.dia === selected ? datos : null;
+  const profesionales = vigentes?.profesionales ?? datos?.profesionales ?? [];
+  const citas = vigentes?.citas ?? [];
+  const visibles = filterProId ? citas.filter(a => a.professional_id === filterProId) : citas;
+  const bloqueosVisibles = vigentes
+    ? (filterProId
+        ? bloqueosQueAplican(vigentes.bloqueos, filterProId)
+        : vigentes.bloqueos.filter(b => !b.professional_id || profesionales.some(p => p.id === b.professional_id)))
+    : [];
+  const horariosDelDia = vigentes
+    ? [
+        effectiveDayHours(selected, vigentes.horario, null),
+        ...(filterProId ? profesionales.filter(p => p.id === filterProId) : profesionales)
+          .map(p => effectiveDayHours(selected, vigentes.horario, p.schedule)),
+      ]
+    : [];
+  const cruzadas = citasQueSeCruzan(visibles.map(a => {
+    const inicio = timeToMins(a.appointment_time.slice(0, 5));
+    return { id: a.id, professionalId: a.professional_id, inicio, fin: inicio + duracionServicio(a.services), status: a.status };
+  }));
+  const activas = citas.filter(a => a.status !== "cancelled");
 
-  useEffect(() => {
-    let cancelled = false;
-    loadAppts(selected).then(() => { if (cancelled) return; });
-    return () => { cancelled = true; };
-  }, [selected, tenantId, refreshKey]);
-  const onRefresh = async () => { setRefreshing(true); await loadAppts(selected); setRefreshing(false); };
+  // ── Cambio manual de estado ─────────────────────────────────────────────────
+  const handleStatusChange = async (appt: ApptAgenda, status: string) => {
+    if (!tenantId || status === appt.status) return;
+    // Completar = cobrar: la única vía a "completada" es el cobro (D10).
+    if (status === "completed") return;
 
-  // Filter + group by time
-  const visible = filterProId
-    ? appts.filter(a => (a.professionals as any)?.id === filterProId)
-    : appts;
+    // Revalidar en la base que la cita no tenga cobro: el detalle pudo quedar
+    // viejo (otro dispositivo o el web la cobraron mientras tanto).
+    const venta = await supabase.from("pos_sales").select("id").eq("appointment_id", appt.id).limit(1);
+    if (venta.error) {
+      Alert.alert("No se pudo cambiar el estado", mensajeError(venta.error, "No se pudo revisar el cobro de la cita"));
+      return;
+    }
+    if ((venta.data ?? []).length > 0) {
+      Alert.alert(
+        "Esta cita ya se cobró",
+        "Para cambiar su estado, anula primero el cobro desde el historial de ventas.",
+        [{ text: "Cancelar", style: "cancel" }, { text: "Ir al historial", onPress: () => router.push("/(admin)/pos-history") }],
+      );
+      return;
+    }
 
-  const conflictCount = (() => {
-    const byTime: Record<string, number> = {};
-    visible.forEach(a => { const k = a.appointment_time.slice(0, 5); byTime[k] = (byTime[k] ?? 0) + 1; });
-    return Object.values(byTime).filter(n => n > 1).length;
-  })();
+    // Reactivar una cancelada o no-show: su hora pudo ocuparse (AGE-15).
+    const reactivar = (appt.status === "cancelled" || appt.status === "no_show") && (status === "pending" || status === "confirmed");
+    if (reactivar && appt.professional_id) {
+      try {
+        const v = await verificarCupo({
+          tenantId,
+          professionalId: appt.professional_id,
+          dia: appt.appointment_date,
+          hora: appt.appointment_time.slice(0, 5),
+          duracion: duracionServicio(appt.services),
+          excluirCitaId: appt.id,
+        });
+        if (!v.ok) {
+          Alert.alert("Ese horario ya no está libre", `${v.motivo} Modifica la cita para elegir otra hora.`);
+          return;
+        }
+      } catch (e) {
+        Alert.alert("No se pudo cambiar el estado", mensajeError(e));
+        return;
+      }
+    }
+
+    try {
+      exigirFilas(
+        await supabase.from("appointments").update({ status }).eq("id", appt.id).select("id"),
+        "No se pudo cambiar el estado de la cita",
+      );
+    } catch (e) {
+      Alert.alert("No se pudo cambiar el estado", mensajeError(e));
+      return;
+    }
+
+    // Recordatorio solo DESPUÉS de que el cambio se guardó: se cancela si ya
+    // no está vigente (cancelada, no asistió) y se reprograma si se reactivó.
+    reprogramarRecordatorioCita(tenantId, {
+      id: appt.id,
+      date: appt.appointment_date,
+      time: appt.appointment_time,
+      clientName: appt.clients?.name ?? "Cliente",
+      serviceName: appt.services?.name ?? "Servicio",
+      status,
+    }, timezone).catch(() => {});
+
+    await recargar();
+  };
+
+  const abrirCobro = (a: ApptAgenda) => {
+    setChargeAppt({
+      id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
+      serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
+      locationId: a.location_id ?? null, time: a.appointment_time,
+    });
+    setDetailAppt(null);
+  };
+
+  const cargandoDia = !vigentes && !(error && errorDia === selected);
+  // La sede no depende del día: mientras carga otro día se sigue mostrando.
+  const sede = (vigentes ?? datos)?.sede ?? null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -978,15 +314,38 @@ export default function AgendaScreen() {
       <View style={s.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <MonoTag>Agenda</MonoTag>
-          <Text style={[s.headerTitle, { color: t.ink }]}>
-            {selected.toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}
-          </Text>
+          <Text style={[s.headerTitle, { color: t.ink }]}>{fmtDia(selected, "largo")}</Text>
           <Text style={[s.headerSub, { color: t.muted }]}>
-            {appts.length} cita{appts.length !== 1 ? "s" : ""} · {appts.filter(a => a.status === "confirmed").length} confirmadas
-            {conflictCount > 0 ? <Text style={{ color: "#d97706" }}> · {conflictCount} conflicto{conflictCount !== 1 ? "s" : ""}</Text> : null}
+            {vigentes ? (
+              <>
+                {activas.length} cita{activas.length !== 1 ? "s" : ""} · {citas.filter(a => a.status === "confirmed").length} confirmadas
+                {cruzadas.size > 0
+                  ? <Text style={{ color: "#d97706" }}> · {cruzadas.size} se cruzan</Text>
+                  : null}
+              </>
+            ) : " "}
           </Text>
+          {sede && (
+            <TouchableOpacity
+              onPress={() => router.push("/settings/locations")}
+              style={[s.sedeChip, { borderColor: t.line, backgroundColor: t.cardSolid }]}
+              activeOpacity={0.75}
+              hitSlop={HIT_SLOP}
+              accessibilityRole="button"
+              accessibilityLabel={`Sede ${sede.nombre}. Cambiar de sede`}
+            >
+              <Ionicons name="location-outline" size={12} color={t.muted} />
+              <Text style={[s.sedeText, { color: t.text }]} numberOfLines={1}>{sede.nombre}</Text>
+              <Ionicons name="chevron-forward" size={12} color={t.subtle} />
+            </TouchableOpacity>
+          )}
         </View>
-        <TouchableOpacity onPress={() => setShowNew(true)} activeOpacity={0.85} style={s.addBtnWrap}>
+        {selected !== hoy && (
+          <TouchableOpacity onPress={() => irADia(hoy)} style={[s.todayBtn, { borderColor: t.line, backgroundColor: t.cardSolid }]} accessibilityRole="button">
+            <Text style={[s.todayText, { color: t.text }]}>Hoy</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity onPress={() => setShowNew(true)} activeOpacity={0.85} style={s.addBtnWrap} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Nueva cita">
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.addBtn}>
             <Ionicons name="add" size={20} color="white" />
           </LinearGradient>
@@ -994,56 +353,47 @@ export default function AgendaScreen() {
       </View>
 
       {/* ── Week strip ── */}
-      <View style={[s.weekStrip, Shadow.sm]}>
-        <TouchableOpacity style={s.weekArrow} onPress={() => setWeek(buildWeek(new Date(week[0].getTime() - 86400000 * 7)))}>
-          <Ionicons name="chevron-back" size={18} color={Colors.subtle} />
-        </TouchableOpacity>
-        {week.map((d, i) => {
-          const isToday = d.toDateString() === new Date().toDateString();
-          const isSel   = d.toDateString() === selected.toDateString();
-          return (
-            <TouchableOpacity key={i} style={s.dayCol} onPress={() => setSelected(d)} activeOpacity={0.7}>
-              <Text style={[s.dayName, isSel && { color: Colors.red, fontFamily: "SpaceGrotesk_700Bold" }]}>
-                {DAYS[d.getDay()]}
-              </Text>
-              <View style={[s.dayNum, isSel && s.dayNumSel, isToday && !isSel && { backgroundColor: Colors.red + "15" }]}>
-                {isSel && <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.red, borderRadius: 12 }]} />}
-                <Text style={[s.dayNumText, isSel && { color: "white" }, isToday && !isSel && { color: Colors.red }]}>
-                  {d.getDate()}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity style={s.weekArrow} onPress={() => setWeek(buildWeek(new Date(week[0].getTime() + 86400000 * 7)))}>
-          <Ionicons name="chevron-forward" size={18} color={Colors.subtle} />
-        </TouchableOpacity>
-      </View>
+      <SemanaStrip
+        semana={semana}
+        seleccionado={selected}
+        hoy={hoy}
+        onSeleccionar={setSelected}
+        onCambiarSemana={setSemana}
+      />
 
       {/* ── Professional filter ── */}
-      {professionals.length > 0 && (
+      {profesionales.length > 0 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.filterRow}
-          style={s.filterStrip}
+          style={[s.filterStrip, { borderBottomColor: t.line }]}
         >
-          <ProChip
-            label="Todos"
-            active={filterProId === null}
-            onPress={() => setFilterProId(null)}
-          />
-          {professionals.map(p => (
+          <ProChip label="Todos" active={filterProId === null} onPress={() => setFilterProId(null)} />
+          {profesionales.map(p => (
             <ProChip
               key={p.id}
               label={p.name.split(" ")[0]}
               initials={proInitials(p.name)}
-              color={proColor(p.id, professionals)}
+              color={proColor(p.id, profesionales)}
               active={filterProId === p.id}
               onPress={() => setFilterProId(prev => prev === p.id ? null : p.id)}
             />
           ))}
         </ScrollView>
+      )}
+
+      {vigentes?.horario.porDefecto && (
+        <TouchableOpacity
+          onPress={() => router.push("/settings/schedule")}
+          style={[s.banner, { borderColor: "rgba(217,119,6,0.35)", backgroundColor: "rgba(217,119,6,0.08)" }]}
+          accessibilityRole="link"
+        >
+          <Ionicons name="time-outline" size={15} color="#d97706" />
+          <Text style={[s.bannerText, { color: t.text }]}>
+            Aún no configuras tu horario: se ofrecen cupos de 8:00 AM a 7:00 PM. <Text style={{ color: Colors.red, fontFamily: Fonts.bold }}>Configurar</Text>
+          </Text>
+        </TouchableOpacity>
       )}
 
       {/* ── Timeline ── */}
@@ -1053,24 +403,17 @@ export default function AgendaScreen() {
           onClose={() => setShowNew(false)}
           tenantId={tenantId}
           initialDate={selected}
-          onSuccess={() => setRefreshKey(k => k + 1)}
+          onSuccess={() => { recargar(); }}
         />
       )}
 
       <ApptDetailModal
         appt={detailAppt}
         onClose={() => setDetailAppt(null)}
-        onStatusChange={handleStatusChange}
-        onEdit={() => { setEditAppt(detailAppt); setDetailAppt(null); }}
-        onCobrar={() => {
-          const a = detailAppt!;
-          setChargeAppt({
-            id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
-            serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
-            locationId: a.location_id ?? null, time: a.appointment_time,
-          });
-          setDetailAppt(null);
-        }}
+        onCambiarEstado={handleStatusChange}
+        onEditar={() => { setEditAppt(detailAppt); setDetailAppt(null); }}
+        onCobrar={() => { if (detailAppt) abrirCobro(detailAppt); }}
+        onIrAlHistorial={() => router.push("/(admin)/pos-history")}
       />
 
       {tenantId && (
@@ -1079,7 +422,8 @@ export default function AgendaScreen() {
           tenantId={tenantId}
           target={chargeAppt ? { kind: "appointment", appt: chargeAppt } : null}
           onClose={() => setChargeAppt(null)}
-          onSaved={() => setRefreshKey(k => k + 1)}
+          onSaved={() => { recargar(); }}
+          businessName={tenant?.name ?? null}
         />
       )}
 
@@ -1087,46 +431,69 @@ export default function AgendaScreen() {
         <EditApptModal
           appt={editAppt}
           tenantId={tenantId}
-          professionals={professionals}
+          professionals={profesionales}
           onClose={() => setEditAppt(null)}
-          onSaved={() => { setEditAppt(null); setRefreshKey(k => k + 1); }}
+          onSaved={() => { setEditAppt(null); recargar(); }}
         />
       )}
 
-      <DayCalendar
-        appts={visible}
-        professionals={professionals}
-        onPressAppt={setDetailAppt}
-        onAddPress={() => setShowNew(true)}
-        showPro={filterProId === null}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
-      />
+      {error && errorDia === selected && !vigentes ? (
+        // Falló la carga del día que se está mirando y no hay datos de ese día.
+        <ErrorState error={error} onRetry={recargar} />
+      ) : cargandoDia ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator color={Colors.red} />
+        </View>
+      ) : vigentes ? (
+        <>
+          {error && errorDia === selected && (
+            // Falló una recarga del mismo día: se conserva lo que había y se avisa.
+            <TouchableOpacity onPress={recargar} style={[s.banner, { borderColor: "rgba(251,15,5,0.3)", backgroundColor: "rgba(251,15,5,0.06)" }]} accessibilityRole="button">
+              <Ionicons name="cloud-offline-outline" size={15} color={Colors.red} />
+              <Text style={[s.bannerText, { color: t.text }]}>
+                No se pudo actualizar la agenda. {mensajeError(error)} <Text style={{ color: Colors.red, fontFamily: Fonts.bold }}>Reintentar</Text>
+              </Text>
+            </TouchableOpacity>
+          )}
+          <DayCalendar
+            key={selected}
+            dia={selected}
+            hoy={hoy}
+            timezone={timezone}
+            citas={visibles}
+            bloqueos={bloqueosVisibles}
+            profesionales={profesionales}
+            horarios={horariosDelDia}
+            ventas={vigentes.ventas}
+            cruzadas={cruzadas}
+            onPressAppt={setDetailAppt}
+            onAddPress={() => setShowNew(true)}
+            showPro={filterProId === null}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+          />
+        </>
+      ) : null}
     </SafeAreaView>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
-  headerTitle: { fontSize: 21, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5, textTransform: "capitalize", marginTop: 3 },
-  headerSub:   { fontSize: 12.5, fontFamily: "SpaceGrotesk_400Regular", marginTop: 3 },
-  addBtnWrap:  { borderRadius: 19, overflow: "hidden" },
-  addBtn:      { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
-
-  weekStrip:    { ...Glass.cardStrong, flexDirection: "row", paddingVertical: 12, paddingHorizontal: 4, alignItems: "center" },
-  weekArrow:    { width: 32, alignItems: "center", justifyContent: "center" },
-  dayCol:       { flex: 1, alignItems: "center", gap: 6 },
-  dayName:      { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle, textTransform: "uppercase" },
-  dayNum:       { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  dayNumSel:    { borderRadius: 10 },
-  dayNumText:   { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-
-  filterStrip:  { backgroundColor: "rgba(255,255,255,0.65)", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.5)", maxHeight: 56 },
-  filterRow:    { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
-
-  empty:        { ...Glass.cardStrong, borderRadius: Radius.xl, padding: 44, alignItems: "center", marginTop: 8 },
-  emptyTitle:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 6 },
-  emptySub:     { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, textAlign: "center" },
-});
+function crearEstilos(t: ThemeColors) {
+  return StyleSheet.create({
+    header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
+    headerTitle: { fontSize: 21, fontFamily: Fonts.bold, letterSpacing: -0.5, textTransform: "capitalize", marginTop: 3 },
+    headerSub:   { fontSize: 12.5, fontFamily: Fonts.regular, marginTop: 3 },
+    todayBtn:    { height: 38, paddingHorizontal: 14, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+    todayText:   { fontSize: 13, fontFamily: Fonts.bold },
+    addBtnWrap:  { borderRadius: 19, overflow: "hidden" },
+    addBtn:      { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
+    filterStrip: { backgroundColor: t.bg, borderBottomWidth: 1, maxHeight: 56 },
+    filterRow:   { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+    banner:      { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 10, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 9 },
+    bannerText:  { flex: 1, fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17 },
+    sedeChip:    { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: Radius.full, paddingHorizontal: 9, paddingVertical: 4, marginTop: 7 },
+    sedeText:    { flexShrink: 1, fontSize: 11.5, fontFamily: Fonts.semibold },
+  });
+}
