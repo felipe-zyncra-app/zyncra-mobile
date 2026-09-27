@@ -172,7 +172,7 @@ function TabResumen({ sales, session, movements, period, loading }: {
     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
       <Animated.View entering={FadeInDown.duration(320)} style={s.kpiGrid}>
         {[
-          { label: `Ingresos (${period}d)`, value: fmt(totalIngresos), sub: `${countSales} ventas` },
+          { label: `Cobrado (${period}d)`, value: fmt(totalIngresos), sub: `${countSales} cobros en el POS` },
           { label: "Promedio / venta",       value: fmt(avgSale),       sub: "por transacción"      },
           { label: `Ventas (${period}d)`,    value: String(countSales), sub: "transacciones"        },
           { label: "Caja actual", value: fmt(cajaBalance), sub: session ? "sesión activa" : "sin sesión" },
@@ -457,8 +457,10 @@ function TabReportes({ sales, loading }: { sales: Sale[]; loading: boolean }) {
     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
       <Animated.View entering={FadeInDown.duration(320)} style={s.kpiGrid}>
         {[
-          { label: "Ingresos totales",   value: fmt(totalIngresos)    },
-          { label: "Ticket promedio",    value: fmt(avgTicket)        },
+          { label: "Cobrado en el período", value: fmt(totalIngresos) },
+          // "Promedio por cobro", no "Ticket promedio": divide entre
+          // transacciones del POS, no entre citas cobradas como el Panel.
+          { label: "Promedio por cobro",    value: fmt(avgTicket)     },
           { label: "Ventas registradas", value: String(sales.length)  },
           { label: "Clientes únicos",    value: String(uniqueClients) },
         ].map((k, i) => (
