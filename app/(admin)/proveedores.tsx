@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  Modal, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, FlatList,
+  Modal, KeyboardAvoidingView, ActivityIndicator, Alert, FlatList,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -14,6 +14,10 @@ import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { fmtMoney } from "@/lib/format";
+import { diaLocalDe, fmtDia } from "@/lib/tz";
+import { ErrorDB, mensajeError, nuevoId, revisar, traerTodo } from "@/lib/db";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
+import ErrorState from "@/components/ErrorState";
 import { ScreenHeader, Card, SegmentedControl, SectionLabel } from "@/components/ui";
 
 type Product = {
@@ -47,15 +51,37 @@ const PAYMENT_METHODS = [
 
 type Tab = "catalogo" | "pedidos";
 
+// Área táctil extra para los botones de solo ícono (CAL-24). En los +/- no se
+// pisan: entre los dos está la cantidad (minWidth 22-24 > 8 + 8).
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
+/** Pedido mínimo del producto (al menos 1). */
+const minimo = (p: Pick<Product, "min_order_qty">) => Math.max(1, Math.floor(Number(p.min_order_qty) || 1));
+
+function aProducto(p: Record<string, unknown>): Product {
+  const sup = p.suppliers as { company_name?: string } | null | undefined;
+  return {
+    ...(p as unknown as Product),
+    price: Number(p.price) || 0,
+    min_order_qty: Number(p.min_order_qty) || 1,
+    stock: p.stock == null ? null : Number(p.stock),
+    unit: (p.unit as string) ?? "und",
+    supplier_name: sup?.company_name ?? "—",
+  };
+}
+
 export default function ProveedoresScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const { tenant } = useTenant();
+  const { tenant, timezone } = useTenant();
+  const guardCat = useGuardRespuestas();
+  const guardPed = useGuardRespuestas();
 
   const [tab, setTab] = useState<Tab>("catalogo");
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingCat, setLoadingCat] = useState(true);
+  const [errorCat, setErrorCat] = useState<unknown>(null);
   const [search, setSearch] = useState("");
 
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -63,51 +89,91 @@ export default function ProveedoresScreen() {
 
   const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [errorOrders, setErrorOrders] = useState<unknown>(null);
 
-  const loadCatalog = useCallback(async () => {
+  const { recargar: loadCatalog } = useRecarga(async () => {
+    const turno = guardCat.nuevo();
     setLoadingCat(true);
-    const { data } = await supabase.from("supplier_products")
-      .select("*, suppliers(company_name)")
-      .eq("is_active", true)
-      .order("name");
-    setProducts((data ?? []).map((p: any) => ({ ...p, supplier_name: p.suppliers?.company_name ?? "—" })) as Product[]);
-    setLoadingCat(false);
-  }, []);
+    try {
+      const data = await traerTodo<Record<string, unknown>>((d, h) => supabase.from("supplier_products")
+        .select("*, suppliers(company_name)")
+        .eq("is_active", true)
+        .order("name").order("id")
+        .range(d, h), { contexto: "No se pudo cargar el catálogo" });
+      if (!turno.vigente()) return;
+      setProducts(data.map(aProducto));
+      setErrorCat(null);
+    } catch (e) {
+      if (turno.vigente()) setErrorCat(e);
+    } finally {
+      if (turno.vigente()) setLoadingCat(false);
+    }
+  }, [], { alCambiarDia: false, alCambiarSede: false, frescuraMs: 60_000 });
 
-  const loadOrders = useCallback(async () => {
+  const { recargar: loadOrders } = useRecarga(async () => {
     if (!tenantId) return;
+    const turno = guardPed.nuevo();
     setLoadingOrders(true);
-    const { data } = await supabase.from("supplier_orders")
-      .select("*, suppliers(company_name)")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false });
-    setMyOrders((data ?? []).map((o: any) => ({ ...o, supplier_name: o.suppliers?.company_name ?? "—" })) as MyOrder[]);
-    setLoadingOrders(false);
-  }, [tenantId]);
-
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
-  useEffect(() => { if (tab === "pedidos") loadOrders(); }, [tab, loadOrders]);
+    try {
+      const data = await traerTodo<Record<string, unknown>>((d, h) => supabase.from("supplier_orders")
+        .select("id, order_number, status, payment_status, total, created_at, suppliers(company_name)")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false }).order("id")
+        .range(d, h), { tope: 2000, contexto: "No se pudieron cargar tus pedidos" });
+      if (!turno.vigente()) return;
+      setMyOrders(data.map(o => ({
+        ...(o as unknown as MyOrder),
+        total: Number(o.total) || 0,
+        supplier_name: (o.suppliers as { company_name?: string } | null)?.company_name ?? "—",
+      })));
+      setErrorOrders(null);
+    } catch (e) {
+      if (turno.vigente()) setErrorOrders(e);
+    } finally {
+      if (turno.vigente()) setLoadingOrders(false);
+    }
+  }, [tenantId, tab], { habilitado: !!tenantId && tab === "pedidos", alCambiarDia: false, alCambiarSede: false });
 
   // ── Carrito ──
+  // Respeta el pedido mínimo (antes el "−" bajaba de 12 a 11, 10… y se
+  // enviaban 5 unidades a un mayorista que pide 12) y el stock del proveedor.
   const addToCart = (p: Product) => {
-    setCart(prev => {
-      const ex = prev.find(i => i.id === p.id);
-      if (ex) return prev.map(i => i.id === p.id ? { ...i, qty: i.qty + (p.min_order_qty || 1) } : i);
-      return [...prev, { ...p, qty: p.min_order_qty || 1 }];
-    });
+    const min = minimo(p);
+    const ex = cart.find(i => i.id === p.id);
+    const nueva = (ex?.qty ?? 0) + min;
+    if (p.stock != null && nueva > p.stock) {
+      Alert.alert("Sin stock suficiente", p.stock < min
+        ? `El proveedor no tiene las ${min} unidades mínimas de "${p.name}".`
+        : `El proveedor solo tiene ${p.stock} unidades de "${p.name}".`);
+      return;
+    }
+    setCart(prev => ex
+      ? prev.map(i => i.id === p.id ? { ...i, qty: nueva } : i)
+      : [...prev, { ...p, qty: min }]);
   };
   const updateQty = (id: string, qty: number) => {
-    if (qty <= 0) { setCart(prev => prev.filter(i => i.id !== id)); return; }
+    const it = cart.find(i => i.id === id);
+    if (!it) return;
+    const min = minimo(it);
+    if (qty < min) {
+      // Por debajo del mínimo el mayorista no lo despacha: se quita del carrito.
+      setCart(prev => prev.filter(i => i.id !== id));
+      return;
+    }
+    if (it.stock != null && qty > it.stock) {
+      Alert.alert("Sin stock suficiente", `El proveedor solo tiene ${it.stock} unidades de "${it.name}".`);
+      return;
+    }
     setCart(prev => prev.map(i => i.id === id ? { ...i, qty } : i));
   };
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  const filtered = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.supplier_name ?? "").toLowerCase().includes(search.toLowerCase())
-  );
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? products.filter(p => p.name.toLowerCase().includes(q) || (p.supplier_name ?? "").toLowerCase().includes(q))
+    : products;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -136,6 +202,9 @@ export default function ProveedoresScreen() {
             </View>
           </View>
 
+          {errorCat && products.length === 0 && !loadingCat ? (
+            <ErrorState error={errorCat} onRetry={loadCatalog} />
+          ) : (
           <FlatList
             data={filtered}
             keyExtractor={p => p.id}
@@ -143,6 +212,7 @@ export default function ProveedoresScreen() {
             showsVerticalScrollIndicator={false}
             renderItem={({ item: p, index: i }) => {
               const inCart = cart.find(c => c.id === p.id);
+              const agotado = p.stock != null && p.stock < minimo(p);
               return (
                 <Animated.View entering={i < 12 ? FadeInDown.delay(i * 25).duration(280) : undefined}>
                   <Card style={{ marginBottom: 10 }}>
@@ -153,23 +223,28 @@ export default function ProveedoresScreen() {
                         <View style={s.prodMetaRow}>
                           <Text style={[s.prodPrice, { color: Colors.red }]}>{fmtMoney(p.price)}</Text>
                           <Text style={[s.prodUnit, { color: t.subtle }]}>/ {p.unit}</Text>
-                          {p.min_order_qty > 1 && (
-                            <Text style={[s.prodMin, { color: t.subtle }]}>· mín {p.min_order_qty}</Text>
+                          {minimo(p) > 1 && (
+                            <Text style={[s.prodMin, { color: t.subtle }]}>· mín {minimo(p)}</Text>
                           )}
+                          {agotado && <Text style={[s.prodMin, { color: Colors.red }]}>· agotado</Text>}
                         </View>
                       </View>
                       {inCart ? (
                         <View style={[s.qtyControl, { borderColor: t.line }]}>
-                          <TouchableOpacity onPress={() => updateQty(p.id, inCart.qty - 1)} style={s.qtyBtn}>
-                            <Ionicons name="remove" size={16} color={t.ink} />
+                          <TouchableOpacity onPress={() => updateQty(p.id, inCart.qty - 1)} style={s.qtyBtn} hitSlop={HIT_SLOP}
+                            accessibilityRole="button" accessibilityLabel={inCart.qty - 1 < minimo(p) ? `Quitar ${p.name}` : `Restar uno de ${p.name}`}>
+                            <Ionicons name={inCart.qty - 1 < minimo(p) ? "trash-outline" : "remove"} size={16} color={t.ink} />
                           </TouchableOpacity>
                           <Text style={[s.qtyText, { color: t.ink }]}>{inCart.qty}</Text>
-                          <TouchableOpacity onPress={() => updateQty(p.id, inCart.qty + 1)} style={s.qtyBtn}>
+                          <TouchableOpacity onPress={() => updateQty(p.id, inCart.qty + 1)} style={s.qtyBtn} hitSlop={HIT_SLOP}
+                            accessibilityRole="button" accessibilityLabel={`Sumar uno de ${p.name}`}>
                             <Ionicons name="add" size={16} color={t.ink} />
                           </TouchableOpacity>
                         </View>
                       ) : (
-                        <TouchableOpacity onPress={() => addToCart(p)} activeOpacity={0.85} style={s.addWrap}>
+                        <TouchableOpacity onPress={() => addToCart(p)} disabled={agotado} activeOpacity={0.85} style={[s.addWrap, agotado && { opacity: 0.4 }]}
+                          hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel={agotado ? `${p.name} agotado` : `Agregar ${p.name}`}
+                          accessibilityState={{ disabled: agotado }}>
                           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.addBtn}>
                             <Ionicons name="add" size={18} color="white" />
                           </LinearGradient>
@@ -192,10 +267,11 @@ export default function ProveedoresScreen() {
               )
             }
           />
+          )}
 
           {cartCount > 0 && (
             <View style={s.cartBarWrap}>
-              <TouchableOpacity onPress={() => setShowCart(true)} activeOpacity={0.9}>
+              <TouchableOpacity onPress={() => setShowCart(true)} activeOpacity={0.9} accessibilityRole="button">
                 <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.cartBar}>
                   <View style={s.cartBadge}>
                     <Text style={s.cartBadgeText}>{cartCount}</Text>
@@ -207,6 +283,8 @@ export default function ProveedoresScreen() {
             </View>
           )}
         </>
+      ) : errorOrders && myOrders.length === 0 && !loadingOrders ? (
+        <ErrorState error={errorOrders} onRetry={loadOrders} />
       ) : (
         <FlatList
           data={myOrders}
@@ -230,7 +308,7 @@ export default function ProveedoresScreen() {
                     <Text style={[s.orderSupplier, { color: t.ink }]} numberOfLines={1}>{o.supplier_name}</Text>
                     <View style={s.orderBottom}>
                       <Text style={[s.orderDate, { color: t.subtle }]}>
-                        {new Date(o.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}
+                        {fmtDia(diaLocalDe(o.created_at, timezone), "corto")}
                         {"  ·  "}
                         <Text style={{ color: pay.color }}>{pay.label}</Text>
                       </Text>
@@ -260,6 +338,7 @@ export default function ProveedoresScreen() {
           defaultAddress={tenant?.address ?? ""}
           onClose={() => setShowCart(false)}
           onUpdateQty={updateQty}
+          onReplaceCart={setCart}
           onSuccess={() => { setCart([]); setShowCart(false); setTab("pedidos"); }}
         />
       )}
@@ -268,15 +347,23 @@ export default function ProveedoresScreen() {
 }
 
 // ─── Checkout ──────────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, onSuccess }: {
+function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, onReplaceCart, onSuccess }: {
   cart: CartItem[]; tenantId: string; defaultAddress: string;
-  onClose: () => void; onUpdateQty: (id: string, qty: number) => void; onSuccess: () => void;
+  onClose: () => void; onUpdateQty: (id: string, qty: number) => void;
+  onReplaceCart: (updater: (prev: CartItem[]) => CartItem[]) => void;
+  onSuccess: () => void;
 }) {
   const { t } = useTheme();
   const [address, setAddress] = useState(defaultAddress);
   const [notes, setNotes] = useState("");
   const [method, setMethod] = useState("transferencia");
   const [placing, setPlacing] = useState(false);
+  const [revisando, setRevisando] = useState(false);
+  const enCurso = useRef(false);
+  // Id del pedido por proveedor, generado en el teléfono: si se pierde la
+  // respuesta y se reintenta, se reconoce el pedido ya creado en vez de
+  // duplicarlo.
+  const idsPedido = useRef<Record<string, string>>({});
 
   // Agrupar por proveedor (un pedido por proveedor)
   const bySupplier = cart.reduce((acc, item) => {
@@ -287,46 +374,145 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
 
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
+  /**
+   * Relee precio, mínimo, stock y disponibilidad del catálogo. El catálogo
+   * se cargó al abrir la pantalla: si el proveedor subió un precio mientras
+   * tanto, el pedido salía con el viejo sin avisar. Devuelve true si algo cambió.
+   */
+  const refrescarPrecios = async (): Promise<boolean> => {
+    const ids = cart.map(i => i.id);
+    if (ids.length === 0) return false;
+    const filas = (revisar(
+      await supabase.from("supplier_products").select("id, name, price, min_order_qty, stock, is_active, unit").in("id", ids),
+      "No se pudieron revisar los precios del catálogo",
+    ) ?? []) as { id: string; name: string; price: number; min_order_qty: number | null; stock: number | null; is_active: boolean | null; unit: string | null }[];
+    const porId = new Map(filas.map(f => [f.id, f]));
+    const cambios: string[] = [];
+    const nuevo: CartItem[] = [];
+    for (const it of cart) {
+      const f = porId.get(it.id);
+      if (!f || f.is_active === false) { cambios.push(`"${it.name}" ya no está disponible`); continue; }
+      const precio = Number(f.price) || 0;
+      const min = Math.max(1, Number(f.min_order_qty) || 1);
+      const stock = f.stock == null ? null : Number(f.stock);
+      let qty = Math.max(it.qty, min);
+      if (stock != null && qty > stock) qty = stock;
+      if (qty < min) { cambios.push(`"${it.name}" no tiene stock suficiente`); continue; }
+      if (precio !== it.price) cambios.push(`"${it.name}": ${fmtMoney(it.price)} → ${fmtMoney(precio)}`);
+      else if (qty !== it.qty) cambios.push(`"${it.name}": cantidad ajustada a ${qty}`);
+      nuevo.push({ ...it, name: f.name ?? it.name, price: precio, min_order_qty: min, stock, unit: f.unit ?? it.unit, qty });
+    }
+    if (cambios.length > 0) {
+      onReplaceCart(() => nuevo);
+      Alert.alert("El catálogo cambió", `${cambios.join("\n")}\n\nRevisa el total antes de enviar.`);
+      return true;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    let vivo = true;
+    setRevisando(true);
+    refrescarPrecios()
+      .catch(e => { if (vivo) Alert.alert("No se pudieron revisar los precios", mensajeError(e)); })
+      .finally(() => { if (vivo) setRevisando(false); });
+    return () => { vivo = false; };
+    // Solo al abrir el checkout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const placeOrder = async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || enCurso.current) return;
+    enCurso.current = true;
     setPlacing(true);
+    const enviados: string[] = [];
+    const nombresEnviados: string[] = [];
     try {
+      if (await refrescarPrecios()) return;
+
       for (const [supplierId, group] of Object.entries(bySupplier)) {
-        const subtotal = group.items.reduce((s, i) => s + i.price * i.qty, 0);
-        const { data: numData, error: rpcErr } = await supabase.rpc("generate_order_number");
-        if (rpcErr) throw new Error("Número de pedido: " + rpcErr.message);
+        let orderId = idsPedido.current[supplierId] ?? nuevoId();
+        idsPedido.current[supplierId] = orderId;
 
-        const { data: newOrder, error: orderErr } = await supabase.from("supplier_orders").insert({
-          order_number: numData as string,
-          tenant_id: tenantId,
-          supplier_id: supplierId,
-          subtotal,
-          shipping_cost: 0,
-          total: subtotal,
-          shipping_address: address.trim() || null,
-          notes: notes.trim() || null,
-          payment_method: method,
-          payment_status: "pending",
-          status: "pending",
-        }).select("id").single();
-        if (orderErr) throw new Error("Pedido: " + orderErr.message);
+        // ¿Quedó creado en un intento anterior (respuesta perdida)?
+        const previo = await supabase.from("supplier_orders").select("id, status").eq("id", orderId).maybeSingle();
+        if (previo.error) throw new ErrorDB(previo.error, `No se pudo revisar el pedido a ${group.name}`);
+        let existe = !!previo.data;
+        if (previo.data && previo.data.status === "cancelled") {
+          orderId = nuevoId();
+          idsPedido.current[supplierId] = orderId;
+          existe = false;
+        }
 
-        const items = group.items.map(i => ({
-          order_id: newOrder.id,
-          product_id: i.id,
-          product_name: i.name,
-          product_price: i.price,
-          quantity: i.qty,
-          subtotal: i.price * i.qty,
-        }));
-        const { error: itemsErr } = await supabase.from("supplier_order_items").insert(items);
-        if (itemsErr) throw new Error("Ítems: " + itemsErr.message);
+        if (!existe) {
+          const { data: numData, error: rpcErr } = await supabase.rpc("generate_order_number");
+          if (rpcErr) throw new ErrorDB(rpcErr, "No se pudo generar el número de pedido");
+          // Con la migración el servidor ignora estos montos y los calcula con
+          // los precios del catálogo; sin ella hacen falta para que el pedido
+          // no quede en $0.
+          const subtotal = group.items.reduce((s, i) => s + i.price * i.qty, 0);
+          const ins = await supabase.from("supplier_orders").insert({
+            id: orderId,
+            order_number: numData as string,
+            tenant_id: tenantId,
+            supplier_id: supplierId,
+            subtotal,
+            shipping_cost: 0,
+            total: subtotal,
+            shipping_address: address.trim() || null,
+            notes: notes.trim() || null,
+            payment_method: method,
+            payment_status: "pending",
+            status: "pending",
+          });
+          if (ins.error && (ins.error as { code?: string }).code !== "23505") {
+            throw new ErrorDB(ins.error, `No se pudo crear el pedido a ${group.name}`);
+          }
+        }
+
+        // Ítems: solo si el pedido todavía no los tiene (un reintento no los duplica).
+        const yaTiene = await supabase.from("supplier_order_items").select("id", { count: "exact", head: true }).eq("order_id", orderId);
+        if (yaTiene.error) throw new ErrorDB(yaTiene.error, `No se pudo revisar el pedido a ${group.name}`);
+        if ((yaTiene.count ?? 0) === 0) {
+          const items = group.items.map(i => ({
+            order_id: orderId,
+            product_id: i.id,
+            product_name: i.name,
+            product_price: i.price,
+            quantity: i.qty,
+            subtotal: i.price * i.qty,
+          }));
+          const insItems = await supabase.from("supplier_order_items").insert(items);
+          if (insItems.error) {
+            // Sin ítems el proveedor recibiría un pedido vacío: se cancela
+            // (el negocio no puede borrar pedidos) y el reintento crea otro.
+            const cancel = await supabase.from("supplier_orders")
+              .update({ status: "cancelled", notes: "Cancelado automáticamente: no se pudieron agregar los productos." })
+              .eq("id", orderId).select("id");
+            if (!cancel.error && (cancel.data ?? []).length > 0) delete idsPedido.current[supplierId];
+            throw new ErrorDB(insItems.error, `No se pudo completar el pedido a ${group.name}`);
+          }
+        }
+        enviados.push(supplierId);
+        nombresEnviados.push(group.name);
+        delete idsPedido.current[supplierId];
       }
       Alert.alert("¡Pedido enviado!", "El proveedor lo confirmará pronto.");
       onSuccess();
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "No se pudo crear el pedido.");
+    } catch (e) {
+      if (enviados.length > 0) {
+        // Los que sí salieron se quitan del carrito: reintentar no los repite.
+        const listos = new Set(enviados);
+        onReplaceCart(prev => prev.filter(i => !listos.has(i.supplier_id)));
+        Alert.alert(
+          "Pedido enviado a medias",
+          `Se enviaron los pedidos a ${nombresEnviados.join(", ")}. ${mensajeError(e)}\n\nLo que falta sigue en el carrito para reintentar.`,
+        );
+      } else {
+        Alert.alert("No se envió el pedido", mensajeError(e));
+      }
     } finally {
+      enCurso.current = false;
       setPlacing(false);
     }
   };
@@ -337,7 +523,7 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
         <View style={[c.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={c.accent} />
           <View style={c.headerRow}>
-            <TouchableOpacity onPress={onClose} style={c.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={c.closeBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Ionicons name="close" size={20} color="white" />
             </TouchableOpacity>
             <Text style={c.title}>Confirmar pedido</Text>
@@ -347,6 +533,9 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
 
         <KeyboardAvoidingView style={{ flex: 1 }}>
           <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+            {cart.length === 0 ? (
+              <Text style={[c.itemPrice, { color: t.muted, textAlign: "center", marginVertical: 30 }]}>El carrito quedó vacío.</Text>
+            ) : null}
             {Object.entries(bySupplier).map(([sid, group]) => (
               <View key={sid} style={{ marginBottom: 16 }}>
                 <SectionLabel>{group.name}</SectionLabel>
@@ -355,14 +544,18 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
                     <View key={it.id} style={[c.cartItem, idx < group.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.divider }]}>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={[c.itemName, { color: t.ink }]} numberOfLines={1}>{it.name}</Text>
-                        <Text style={[c.itemPrice, { color: t.subtle }]}>{fmtMoney(it.price)} / {it.unit}</Text>
+                        <Text style={[c.itemPrice, { color: t.subtle }]}>
+                          {fmtMoney(it.price)} / {it.unit}{minimo(it) > 1 ? ` · mín ${minimo(it)}` : ""}
+                        </Text>
                       </View>
                       <View style={[c.qtyControl, { borderColor: t.line }]}>
-                        <TouchableOpacity onPress={() => onUpdateQty(it.id, it.qty - 1)} style={c.qtyBtn}>
-                          <Ionicons name="remove" size={15} color={t.ink} />
+                        <TouchableOpacity onPress={() => onUpdateQty(it.id, it.qty - 1)} style={c.qtyBtn} hitSlop={HIT_SLOP}
+                          accessibilityRole="button" accessibilityLabel={it.qty - 1 < minimo(it) ? `Quitar ${it.name}` : `Restar uno de ${it.name}`}>
+                          <Ionicons name={it.qty - 1 < minimo(it) ? "trash-outline" : "remove"} size={15} color={t.ink} />
                         </TouchableOpacity>
                         <Text style={[c.qtyText, { color: t.ink }]}>{it.qty}</Text>
-                        <TouchableOpacity onPress={() => onUpdateQty(it.id, it.qty + 1)} style={c.qtyBtn}>
+                        <TouchableOpacity onPress={() => onUpdateQty(it.id, it.qty + 1)} style={c.qtyBtn} hitSlop={HIT_SLOP}
+                          accessibilityRole="button" accessibilityLabel={`Sumar uno de ${it.name}`}>
                           <Ionicons name="add" size={15} color={t.ink} />
                         </TouchableOpacity>
                       </View>
@@ -389,6 +582,8 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
                   key={pm.key}
                   style={[c.methodChip, { borderColor: t.line }, method === pm.key && { backgroundColor: t.ink, borderColor: t.ink }]}
                   onPress={() => setMethod(pm.key)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: method === pm.key }}
                 >
                   <Text style={[c.methodText, { color: method === pm.key ? t.cardSolid : t.muted }]}>{pm.label}</Text>
                 </TouchableOpacity>
@@ -404,6 +599,7 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
               placeholderTextColor={t.subtle}
               multiline
             />
+            <Text style={[c.itemPrice, { color: t.subtle, marginTop: 4 }]}>El total final lo confirma el proveedor (incluye el envío, si aplica).</Text>
           </ScrollView>
 
           <View style={[c.bottomBar, { backgroundColor: t.canvas, borderTopColor: t.line }]}>
@@ -411,9 +607,10 @@ function CheckoutModal({ cart, tenantId, defaultAddress, onClose, onUpdateQty, o
               <Text style={[c.totalLabel, { color: t.subtle }]}>Total</Text>
               <Text style={[c.totalValue, { color: t.ink }]}>{fmtMoney(total)}</Text>
             </View>
-            <TouchableOpacity onPress={placeOrder} disabled={placing} activeOpacity={0.85} style={c.placeWrap}>
+            <TouchableOpacity onPress={placeOrder} disabled={placing || revisando || cart.length === 0} activeOpacity={0.85}
+              style={[c.placeWrap, (placing || revisando || cart.length === 0) && { opacity: 0.6 }]} accessibilityRole="button">
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={c.placeBtn}>
-                {placing ? <ActivityIndicator color="white" /> : <Text style={c.placeText}>Enviar pedido</Text>}
+                {placing || revisando ? <ActivityIndicator color="white" /> : <Text style={c.placeText}>Enviar pedido</Text>}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -430,7 +627,7 @@ const s = StyleSheet.create({
   prodRow:     { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
   prodName:    { fontSize: 14, fontFamily: Fonts.semibold },
   prodSupplier:{ fontSize: 11.5, fontFamily: Fonts.regular, marginTop: 1 },
-  prodMetaRow: { flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: 6 },
+  prodMetaRow: { flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: 6, flexWrap: "wrap" },
   prodPrice:   { fontSize: 14, fontFamily: Fonts.bold },
   prodUnit:    { fontSize: 11, fontFamily: Fonts.regular },
   prodMin:     { fontSize: 11, fontFamily: Fonts.regular },

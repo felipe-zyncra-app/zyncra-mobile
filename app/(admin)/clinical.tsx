@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  Modal, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, FlatList,
+  Modal, KeyboardAvoidingView, ActivityIndicator, Alert, FlatList,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -10,10 +10,17 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
-import { ScreenHeader, Card, CardHead, MonoTag, SectionLabel } from "@/components/ui";
+import { ScreenHeader, Card, SectionLabel } from "@/components/ui";
 import Avatar from "@/components/Avatar";
+import ErrorState from "@/components/ErrorState";
+import { exigirFilas, mensajeError, patchTenantSettings, revisar, traerPorIds, traerTodo, ErrorDB } from "@/lib/db";
+import { diaLocalDe, fmtDia, horaLocalDe, hoyNegocio, inicioDeMes, inicioDelDiaUTC } from "@/lib/tz";
+import { fmt12, fmtTelefono } from "@/lib/format";
+import { useListaClientes } from "@/lib/useListaClientes";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 
 type Vertical = "odontologia" | "estetica" | "general";
 const VERTICALS: { key: Vertical; label: string; desc: string }[] = [
@@ -22,7 +29,7 @@ const VERTICALS: { key: Vertical; label: string; desc: string }[] = [
   { key: "estetica",    label: "Medicina estética", desc: "Procedimientos" },
 ];
 
-type ClientRow = { id: string; name: string; phone: string | null; email: string | null };
+type ClientRow = { id: string; name: string; phone: string | null; phone_country_code?: string | null; email: string | null };
 type RecordRow = {
   id: string; client_id: string; updated_at: string;
   document_type: string | null; document_number: string | null;
@@ -32,6 +39,8 @@ type RecordRow = {
   blood_type: string | null; allergies: string | null; medications: string | null;
   medical_history: string | null; family_history: string | null; habits: string | null;
 };
+/** Lo mínimo para la lista: nada de alergias ni diagnósticos en memoria (CAL-21 / SEG-15). */
+type RecordLite = { id: string; client_id: string; updated_at: string };
 type Vitals = { ta?: string; fc?: string; fr?: string; temp?: string; peso?: string; talla?: string };
 type EntryRow = {
   id: string; record_id: string; entry_type: string;
@@ -41,6 +50,10 @@ type EntryRow = {
   vitals: Vitals | null; status: string; signed_name: string | null;
   signed_at: string | null; created_at: string;
 };
+type Profesional = { id: string; name: string };
+
+// Área táctil extra para los botones pequeños (CAL-24).
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 const ENTRY_TYPES: { key: string; label: string }[] = [
   { key: "evolucion",    label: "Evolución" },
@@ -52,7 +65,7 @@ const ENTRY_TYPES: { key: string; label: string }[] = [
 const FICHA_FIELDS: { key: keyof RecordRow; label: string; kb?: "default" | "numeric" | "phone-pad"; multiline?: boolean }[] = [
   { key: "document_type",           label: "Tipo de documento" },
   { key: "document_number",         label: "Número de documento" },
-  { key: "birth_date",              label: "Fecha de nacimiento (YYYY-MM-DD)" },
+  { key: "birth_date",              label: "Fecha de nacimiento (AAAA-MM-DD)" },
   { key: "gender",                  label: "Género" },
   { key: "occupation",              label: "Ocupación" },
   { key: "address",                 label: "Dirección" },
@@ -73,94 +86,181 @@ const VITAL_FIELDS: { key: keyof Vitals; label: string }[] = [
   { key: "temp", label: "Temp" }, { key: "peso", label: "Peso" }, { key: "talla", label: "Talla" },
 ];
 
+type Respuesta<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
+
+function esFechaReal(dia: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia);
+  if (!m) return false;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * Rastro de accesos a la historia clínica (Res. 1995/1999, Ley 1581), igual
+ * que logAction del portal: 'view', 'create_record', 'update_record',
+ * 'create_entry', 'sign_entry', 'delete_entry'. Antes el móvil no dejaba
+ * ninguno. No bloquea al profesional si falla (se avisa en consola): la
+ * atención no puede esperar a que el log responda.
+ */
+async function registrarAcceso(tenantId: string, userId: string | null, recordId: string | null, action: string, detail?: string) {
+  const { error } = await supabase.from("clinical_access_logs").insert({
+    tenant_id: tenantId, record_id: recordId, user_id: userId, action, detail: detail ?? "app móvil",
+  });
+  if (error) console.warn(`[clinical] no se registró el acceso "${action}":`, error.message);
+}
+
 // ─── Detalle de paciente (ficha + evoluciones) ────────────────────────────────
-function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
-  client: ClientRow; tenantId: string; vertical: Vertical;
+function PatientModal({ client, tenantId, onClose, onSaved }: {
+  client: ClientRow; tenantId: string;
   onClose: () => void; onSaved: () => void;
 }) {
   const { t } = useTheme();
+  const { user } = useAuth();
+  const { timezone } = useTenant();
   const insets = useSafeAreaInsets();
+  const guard = useGuardRespuestas();
   const [tab, setTab] = useState<"ficha" | "evolucion">("evolucion");
   const [record, setRecord] = useState<RecordRow | null>(null);
   const [entries, setEntries] = useState<EntryRow[]>([]);
+  const [profesionales, setProfesionales] = useState<Profesional[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [savingFicha, setSavingFicha] = useState(false);
   const [ficha, setFicha] = useState<Partial<RecordRow>>({});
+  const vistaRegistrada = useRef<string | null>(null);
 
   // Formulario de nueva evolución
   const [entryType, setEntryType] = useState("evolucion");
+  const [entryPro, setEntryPro] = useState<string | null>(null);
   const [soap, setSoap] = useState({ subjective: "", objective: "", assessment: "", plan: "" });
   const [vitals, setVitals] = useState<Vitals>({});
   const [savingEntry, setSavingEntry] = useState(false);
+  const savingEntryRef = useRef(false);
 
   const load = useCallback(async () => {
+    const turno = guard.nuevo();
     setLoading(true);
-    const { data: rec } = await supabase.from("clinical_records")
-      .select("*").eq("tenant_id", tenantId).eq("client_id", client.id).limit(1).maybeSingle();
-    setRecord(rec ?? null);
-    setFicha(rec ?? {});
-    if (rec) {
-      const { data: ents } = await supabase.from("clinical_entries")
-        .select("*").eq("record_id", rec.id).order("created_at", { ascending: false }).limit(300);
-      setEntries((ents ?? []) as EntryRow[]);
-      setTab("evolucion");
-    } else {
-      setEntries([]);
-      setTab("ficha");
+    try {
+      const [recRes, prosRes] = await Promise.all([
+        supabase.from("clinical_records")
+          .select("*").eq("tenant_id", tenantId).eq("client_id", client.id).limit(1).maybeSingle(),
+        supabase.from("professionals").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+      ]);
+      const rec = revisar(recRes, "No se pudo cargar la historia clínica") as RecordRow | null;
+      const pros = (revisar(prosRes, "No se pudo cargar el equipo") ?? []) as Profesional[];
+      let ents: EntryRow[] = [];
+      if (rec) {
+        ents = await traerTodo<EntryRow>((d, h) => supabase.from("clinical_entries")
+          .select("*").eq("record_id", rec.id)
+          .order("created_at", { ascending: false }).order("id")
+          .range(d, h) as unknown as Respuesta<EntryRow>, { tope: 3000, contexto: "No se pudieron cargar las evoluciones" });
+      }
+      if (!turno.vigente()) return;
+      setRecord(rec ?? null);
+      setFicha(rec ?? {});
+      setEntries(ents);
+      setProfesionales(pros);
+      if (pros.length === 1) setEntryPro(prev => prev ?? pros[0].id);
+      setTab(rec ? "evolucion" : "ficha");
+      setError(null);
+      if (rec && vistaRegistrada.current !== rec.id) {
+        vistaRegistrada.current = rec.id;
+        registrarAcceso(tenantId, user?.id ?? null, rec.id, "view");
+      }
+    } catch (e) {
+      if (turno.vigente()) setError(e);
+    } finally {
+      if (turno.vigente()) setLoading(false);
     }
-    setLoading(false);
-  }, [client.id, tenantId]);
+  }, [client.id, tenantId, user?.id, guard]);
 
   useEffect(() => { load(); }, [load]);
 
   const saveFicha = async () => {
-    setSavingFicha(true);
-    const payload: Record<string, unknown> = { tenant_id: tenantId, client_id: client.id };
-    FICHA_FIELDS.forEach(f => { payload[f.key] = (ficha[f.key] as string)?.trim?.() || null; });
-    if (record) {
-      const { error } = await supabase.from("clinical_records").update(payload).eq("id", record.id);
-      if (!error) { setRecord({ ...record, ...payload } as RecordRow); Alert.alert("Ficha actualizada"); }
-      else Alert.alert("Error", error.message);
-    } else {
-      const { data, error } = await supabase.from("clinical_records").insert(payload).select("*").single();
-      if (!error && data) { setRecord(data as RecordRow); setTab("evolucion"); onSaved(); }
-      else Alert.alert("Error", error?.message ?? "No se pudo crear la ficha");
+    if (savingFicha) return;
+    const nacimiento = ((ficha.birth_date as string) ?? "").trim();
+    if (nacimiento && (!esFechaReal(nacimiento) || nacimiento > hoyNegocio(timezone))) {
+      Alert.alert("Fecha inválida", "La fecha de nacimiento debe ser real y en formato AAAA-MM-DD (ej: 1990-04-15).");
+      return;
     }
-    setSavingFicha(false);
+    setSavingFicha(true);
+    try {
+      const payload: Record<string, unknown> = { tenant_id: tenantId, client_id: client.id };
+      FICHA_FIELDS.forEach(f => { payload[f.key] = (ficha[f.key] as string)?.trim?.() || null; });
+      if (record) {
+        const filas = exigirFilas(
+          await supabase.from("clinical_records").update(payload).eq("id", record.id).select("*"),
+          "No se pudo guardar la ficha",
+        );
+        setRecord(filas[0] as RecordRow);
+        registrarAcceso(tenantId, user?.id ?? null, record.id, "update_record");
+        Alert.alert("Ficha actualizada");
+      } else {
+        const data = revisar(
+          await supabase.from("clinical_records").insert(payload).select("*").single(),
+          "No se pudo crear la historia clínica",
+        ) as RecordRow;
+        setRecord(data);
+        setTab("evolucion");
+        vistaRegistrada.current = data.id;
+        registrarAcceso(tenantId, user?.id ?? null, data.id, "create_record");
+        onSaved();
+      }
+    } catch (e) {
+      Alert.alert("No se guardó", mensajeError(e));
+    } finally {
+      setSavingFicha(false);
+    }
   };
 
   const entryHasContent = () => Object.values(soap).some(s => s.trim());
 
   const saveEntry = async (sign: boolean) => {
-    if (!record) return;
+    if (!record || savingEntryRef.current) return;
     if (!entryHasContent()) { Alert.alert("Nota vacía", "Escribe al menos una sección (S/O/A/P)."); return; }
+    const pro = profesionales.find(p => p.id === entryPro) ?? null;
+    if (sign && profesionales.length > 0 && !pro) {
+      Alert.alert("¿Quién firma?", "Elige el profesional que atendió: la firma queda a su nombre.");
+      return;
+    }
+    const firmante = pro?.name ?? user?.email ?? "Profesional";
     const doSave = async () => {
+      savingEntryRef.current = true;
       setSavingEntry(true);
-      const payload: Record<string, unknown> = {
-        tenant_id: tenantId, record_id: record.id, entry_type: entryType,
-        subjective: soap.subjective.trim() || null,
-        objective: soap.objective.trim() || null,
-        assessment: soap.assessment.trim() || null,
-        plan: soap.plan.trim() || null,
-        vitals: Object.values(vitals).some(v => v) ? vitals : null,
-      };
-      if (sign) {
-        const { data: u } = await supabase.auth.getUser();
-        payload.status = "signed";
-        payload.signed_at = new Date().toISOString();
-        payload.signed_by = u.user?.id ?? null;
-        payload.signed_name = u.user?.email ?? "Profesional";
+      try {
+        const payload: Record<string, unknown> = {
+          tenant_id: tenantId, record_id: record.id, entry_type: entryType,
+          professional_id: pro?.id ?? null,
+          subjective: soap.subjective.trim() || null,
+          objective: soap.objective.trim() || null,
+          assessment: soap.assessment.trim() || null,
+          plan: soap.plan.trim() || null,
+          vitals: Object.values(vitals).some(v => v) ? vitals : null,
+        };
+        if (sign) {
+          payload.status = "signed";
+          // Con la migración, el servidor pisa signed_at con now() y signed_by
+          // con el usuario real (el reloj del teléfono se puede manipular).
+          payload.signed_at = new Date().toISOString();
+          payload.signed_by = user?.id ?? null;
+          payload.signed_name = firmante;
+        }
+        revisar(await supabase.from("clinical_entries").insert(payload).select("id").single(), "No se pudo guardar la evolución");
+        registrarAcceso(tenantId, user?.id ?? null, record.id, sign ? "sign_entry" : "create_entry");
+        setSoap({ subjective: "", objective: "", assessment: "", plan: "" });
+        setVitals({});
+        await load();
+        onSaved();
+      } catch (e) {
+        Alert.alert("No se guardó", mensajeError(e));
+      } finally {
+        savingEntryRef.current = false;
+        setSavingEntry(false);
       }
-      const { error } = await supabase.from("clinical_entries").insert(payload);
-      setSavingEntry(false);
-      if (error) { Alert.alert("Error", error.message); return; }
-      setSoap({ subjective: "", objective: "", assessment: "", plan: "" });
-      setVitals({});
-      await load();
-      onSaved();
     };
     if (sign) {
-      Alert.alert("Firmar evolución", "Una entrada firmada queda bloqueada y no puede editarse ni eliminarse. ¿Continuar?", [
+      Alert.alert("Firmar evolución", `Vas a firmar como "${firmante}". Una entrada firmada queda bloqueada y no puede editarse ni eliminarse. ¿Continuar?`, [
         { text: "Cancelar", style: "cancel" },
         { text: "Firmar", style: "destructive", onPress: doSave },
       ]);
@@ -173,11 +273,18 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
     Alert.alert("Eliminar borrador", "¿Eliminar esta evolución?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Eliminar", style: "destructive", onPress: async () => {
-        await supabase.from("clinical_entries").delete().eq("id", id);
-        setEntries(prev => prev.filter(e => e.id !== id));
+        try {
+          exigirFilas(await supabase.from("clinical_entries").delete().eq("id", id).select("id"), "No se pudo eliminar el borrador");
+          registrarAcceso(tenantId, user?.id ?? null, record?.id ?? null, "delete_entry");
+          setEntries(prev => prev.filter(e => e.id !== id));
+        } catch (e) {
+          Alert.alert("No se eliminó", mensajeError(e));
+        }
       }},
     ]);
   };
+
+  const fechaEntrada = (iso: string) => `${fmtDia(diaLocalDe(iso, timezone), "corto")} · ${fmt12(horaLocalDe(iso, timezone))}`;
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -185,7 +292,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
         <View style={[dm.header, { backgroundColor: "#0C0C14", paddingTop: insets.top + 10 }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={dm.accent} />
           <View style={dm.headerRow}>
-            <TouchableOpacity onPress={onClose} style={dm.iconBtn}>
+            <TouchableOpacity onPress={onClose} style={dm.iconBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Volver">
               <Ionicons name="arrow-back" size={20} color="white" />
             </TouchableOpacity>
             <View style={{ alignItems: "center", flex: 1 }}>
@@ -196,7 +303,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
           </View>
           <View style={dm.tabs}>
             {(["ficha", "evolucion"] as const).map(tb => (
-              <TouchableOpacity key={tb} style={[dm.tab, tab === tb && dm.tabActive]} onPress={() => setTab(tb)}>
+              <TouchableOpacity key={tb} style={[dm.tab, tab === tb && dm.tabActive]} onPress={() => setTab(tb)} accessibilityRole="tab" accessibilityState={{ selected: tab === tb }}>
                 <Text style={[dm.tabText, tab === tb && dm.tabTextActive]}>
                   {tb === "ficha" ? "Ficha" : "Evoluciones"}
                 </Text>
@@ -205,10 +312,12 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
           </View>
         </View>
 
-        {loading ? (
+        {loading && !record && entries.length === 0 && !error ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={Colors.red} size="large" />
           </View>
+        ) : error ? (
+          <ErrorState error={error} onRetry={load} />
         ) : (
           <KeyboardAvoidingView style={{ flex: 1 }}>
             <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
@@ -233,7 +342,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
                       ))}
                     </View>
                   </Card>
-                  <TouchableOpacity onPress={saveFicha} disabled={savingFicha} activeOpacity={0.85} style={{ marginTop: 16, borderRadius: Radius.md, overflow: "hidden" }}>
+                  <TouchableOpacity onPress={saveFicha} disabled={savingFicha} activeOpacity={0.85} style={{ marginTop: 16, borderRadius: Radius.md, overflow: "hidden" }} accessibilityRole="button">
                     <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={dm.saveBtn}>
                       {savingFicha ? <ActivityIndicator color="white" /> : (
                         <Text style={dm.saveBtnText}>{record ? "Guardar ficha" : "Crear historia clínica"}</Text>
@@ -245,7 +354,7 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
                 <Card>
                   <View style={{ padding: 28, alignItems: "center" }}>
                     <Ionicons name="document-text-outline" size={32} color={t.subtle} />
-                    <Text style={[dm.emptyText, { color: t.muted }]}>Primero crea la ficha del paciente en la pestaña "Ficha".</Text>
+                    <Text style={[dm.emptyText, { color: t.muted }]}>Primero crea la ficha del paciente en la pestaña &quot;Ficha&quot;.</Text>
                   </View>
                 </Card>
               ) : (
@@ -260,11 +369,32 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
                             key={et.key}
                             style={[dm.typeChip, { borderColor: t.line }, entryType === et.key && { backgroundColor: t.ink, borderColor: t.ink }]}
                             onPress={() => setEntryType(et.key)}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: entryType === et.key }}
                           >
                             <Text style={[dm.typeChipText, { color: entryType === et.key ? t.cardSolid : t.muted }]}>{et.label}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
+
+                      {profesionales.length > 0 && (
+                        <View>
+                          <Text style={[dm.fieldLabel, { color: t.subtle }]}>Profesional que atiende</Text>
+                          <View style={dm.typeRow}>
+                            {profesionales.map(p => (
+                              <TouchableOpacity
+                                key={p.id}
+                                style={[dm.typeChip, { borderColor: t.line }, entryPro === p.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }]}
+                                onPress={() => setEntryPro(prev => prev === p.id ? null : p.id)}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: entryPro === p.id }}
+                              >
+                                <Text style={[dm.typeChipText, { color: entryPro === p.id ? "white" : t.muted }]}>{p.name}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      )}
 
                       {([["subjective", "Subjetivo (S)"], ["objective", "Objetivo (O)"], ["assessment", "Análisis (A)"], ["plan", "Plan (P)"]] as const).map(([key, label]) => (
                         <View key={key}>
@@ -297,10 +427,10 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
                       </View>
 
                       <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
-                        <TouchableOpacity onPress={() => saveEntry(false)} disabled={savingEntry} activeOpacity={0.8} style={[dm.draftBtn, { borderColor: t.lineStrong }]}>
+                        <TouchableOpacity onPress={() => saveEntry(false)} disabled={savingEntry} activeOpacity={0.8} style={[dm.draftBtn, { borderColor: t.lineStrong }, savingEntry && { opacity: 0.5 }]} accessibilityRole="button">
                           <Text style={[dm.draftBtnText, { color: t.ink }]}>Guardar borrador</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => saveEntry(true)} disabled={savingEntry} activeOpacity={0.85} style={{ flex: 1, borderRadius: Radius.md, overflow: "hidden" }}>
+                        <TouchableOpacity onPress={() => saveEntry(true)} disabled={savingEntry} activeOpacity={0.85} style={{ flex: 1, borderRadius: Radius.md, overflow: "hidden" }} accessibilityRole="button">
                           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={dm.signBtn}>
                             {savingEntry ? <ActivityIndicator color="white" /> : <Text style={dm.signBtnText}>Firmar y guardar</Text>}
                           </LinearGradient>
@@ -328,13 +458,13 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
                                   <Text style={[dm.signedText, { color: Colors.success }]}>Firmada</Text>
                                 </View>
                               ) : (
-                                <TouchableOpacity onPress={() => deleteDraft(en.id)}>
+                                <TouchableOpacity onPress={() => deleteDraft(en.id)} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Eliminar borrador">
                                   <Text style={[dm.deleteText, { color: Colors.red }]}>Eliminar</Text>
                                 </TouchableOpacity>
                               )}
                             </View>
                             <Text style={[dm.entryDate, { color: t.subtle }]}>
-                              {new Date(en.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {fechaEntrada(en.signed_at ?? en.created_at)}
                               {en.signed_name ? ` · ${en.signed_name}` : ""}
                             </Text>
                             {([["subjective", "S"], ["objective", "O"], ["assessment", "A"], ["plan", "P"]] as const).map(([key, tag]) =>
@@ -366,85 +496,141 @@ function PatientModal({ client, tenantId, vertical, onClose, onSaved }: {
 }
 
 // ─── Lista de pacientes ────────────────────────────────────────────────────────
+type Metricas = { clientes: number; conHistoria: number; evolMes: number };
+
 export default function ClinicalScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenantId } = useAuth();
-  const [clients, setClients] = useState<ClientRow[]>([]);
-  const [records, setRecords] = useState<Map<string, RecordRow>>(new Map());
-  const [counts, setCounts] = useState<Map<string, number>>(new Map());
-  const [monthEntries, setMonthEntries] = useState(0);
-  const [vertical, setVertical] = useState<Vertical>("general");
-  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const { timezone, ready } = useTenant();
+  const guard = useGuardRespuestas();
+  const guardFichas = useGuardRespuestas();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Map<string, RecordLite>>(new Map());
+  const [counts, setCounts] = useState<Map<string, number>>(new Map());
+  const [metricas, setMetricas] = useState<Metricas | null>(null);
+  const [errorMetricas, setErrorMetricas] = useState<unknown>(null);
+  const [vertical, setVertical] = useState<Vertical>("general");
+  // null = todavía no se sabe (o falló la lectura): los chips no se pueden tocar.
+  const [verticalListo, setVerticalListo] = useState(false);
+  const [guardandoVertical, setGuardandoVertical] = useState(false);
   const [selected, setSelected] = useState<ClientRow | null>(null);
 
-  const load = useCallback(async () => {
+  // Pacientes: paginado y con búsqueda en el servidor (antes limit 500 y
+  // búsqueda local: el paciente 501 no existía para el móvil).
+  const lista = useListaClientes<ClientRow>({
+    tenantId,
+    busqueda: search,
+    columnas: "id, name, phone, phone_country_code, email",
+    porPagina: 50,
+    timeZone: timezone,
+  });
+
+  // Métricas con conteos del servidor, no sobre listas truncadas, y "este mes"
+  // desde el día 1 en la zona del negocio.
+  const { recargar: recargarMetricas } = useRecarga(async () => {
     if (!tenantId) return;
-    const [{ data: cls }, { data: recs }, { data: tenant }] = await Promise.all([
-      supabase.from("clients").select("id,name,phone,email").eq("tenant_id", tenantId).order("name").limit(500),
-      supabase.from("clinical_records").select("*").eq("tenant_id", tenantId).limit(1000),
-      supabase.from("tenants").select("settings").eq("id", tenantId).limit(1).maybeSingle(),
-    ]);
-    setClients((cls ?? []) as ClientRow[]);
-    const recMap = new Map<string, RecordRow>();
-    (recs ?? []).forEach((r: any) => recMap.set(r.client_id, r));
-    setRecords(recMap);
-
-    const s = (tenant?.settings ?? {}) as Record<string, unknown>;
-    setSettings(s);
-    if (s.vertical === "odontologia" || s.vertical === "estetica" || s.vertical === "general") setVertical(s.vertical);
-
-    if (recs && recs.length > 0) {
-      const { data: ents } = await supabase.from("clinical_entries")
-        .select("record_id,created_at").eq("tenant_id", tenantId).limit(5000);
-      const c = new Map<string, number>();
-      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-      let month = 0;
-      (ents ?? []).forEach((e: any) => {
-        c.set(e.record_id, (c.get(e.record_id) ?? 0) + 1);
-        if (new Date(e.created_at) >= monthStart) month++;
-      });
-      setCounts(c);
-      setMonthEntries(month);
-    } else {
-      setCounts(new Map());
-      setMonthEntries(0);
+    const turno = guard.nuevo();
+    try {
+      const desdeMes = inicioDelDiaUTC(inicioDeMes(hoyNegocio(timezone)), timezone);
+      const [cli, rec, ent, ten] = await Promise.all([
+        supabase.from("clients").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+        supabase.from("clinical_records").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+        supabase.from("clinical_entries").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).gte("created_at", desdeMes),
+        supabase.from("tenants").select("settings").eq("id", tenantId).single(),
+      ]);
+      for (const r of [cli, rec, ent]) if (r.error) throw new ErrorDB(r.error, "No se pudieron calcular las métricas");
+      if (!turno.vigente()) return;
+      setMetricas({ clientes: cli.count ?? 0, conHistoria: rec.count ?? 0, evolMes: ent.count ?? 0 });
+      setErrorMetricas(null);
+      if (ten.error) {
+        setVerticalListo(false);
+      } else {
+        const s = (ten.data?.settings ?? {}) as Record<string, unknown>;
+        if (s.vertical === "odontologia" || s.vertical === "estetica" || s.vertical === "general") setVertical(s.vertical);
+        setVerticalListo(true);
+      }
+      // Al volver a la pantalla, las fichas pudieron cambiar desde el portal.
+      cargarFichas();
+    } catch (e) {
+      if (turno.vigente()) setErrorMetricas(e);
     }
-    setLoading(false);
-  }, [tenantId]);
+  }, [tenantId, timezone], { timeZone: timezone, habilitado: !!tenantId && ready, alCambiarSede: false });
 
-  useEffect(() => { setLoading(true); load(); }, [load]);
+  // Fichas y conteo de evoluciones SOLO de los pacientes visibles: la lista ya
+  // no descarga select('*') de todas las historias del negocio.
+  const idsVisibles = useMemo(() => lista.filas.map(c => c.id), [lista.filas]);
+  const claveIds = idsVisibles.join(",");
+  const cargarFichas = useCallback(async () => {
+    if (!tenantId || idsVisibles.length === 0) { setRecords(new Map()); setCounts(new Map()); return; }
+    const turno = guardFichas.nuevo();
+    try {
+      const recs = await traerPorIds<RecordLite>(idsVisibles, (lote, d, h) => supabase.from("clinical_records")
+        .select("id, client_id, updated_at").eq("tenant_id", tenantId).in("client_id", lote)
+        .order("id").range(d, h) as unknown as Respuesta<RecordLite>, { contexto: "No se pudieron cargar las historias" });
+      const ents = await traerPorIds<{ id: string; record_id: string }>(recs.map(r => r.id), (lote, d, h) => supabase.from("clinical_entries")
+        .select("id, record_id").in("record_id", lote)
+        .order("id").range(d, h) as unknown as Respuesta<{ id: string; record_id: string }>, { contexto: "No se pudieron contar las evoluciones" });
+      if (!turno.vigente()) return;
+      const recMap = new Map<string, RecordLite>();
+      recs.forEach(r => recMap.set(r.client_id, r));
+      const c = new Map<string, number>();
+      ents.forEach(e => c.set(e.record_id, (c.get(e.record_id) ?? 0) + 1));
+      setRecords(recMap);
+      setCounts(c);
+    } catch (e) {
+      if (turno.vigente()) setErrorMetricas(e);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, claveIds, guardFichas]);
+  useEffect(() => { cargarFichas(); }, [cargarFichas]);
 
-  const saveVertical = async (v: Vertical) => {
-    if (!tenantId) return;
-    setVertical(v);
-    const next = { ...settings, vertical: v };
-    await supabase.from("tenants").update({ settings: next }).eq("id", tenantId);
-    setSettings(next);
+  const recargarTodo = async () => {
+    await Promise.all([lista.recargar(), recargarMetricas()]);
+    await cargarFichas();
   };
 
-  const filtered = useMemo(() => clients.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone ?? "").includes(search)
-  ), [clients, search]);
+  // D7: se escribe SOLO la clave "vertical" (patchTenantSettings: RPC atómica
+  // o leer-fresco-y-fusionar). Antes se escribía una copia de settings tomada
+  // al abrir la pantalla, o {} si aún no había cargado, y se borraban el
+  // horario, la zona horaria y el resto de ajustes que usa la reserva pública.
+  const saveVertical = async (v: Vertical) => {
+    if (!tenantId || !verticalListo || guardandoVertical || v === vertical) return;
+    const anterior = vertical;
+    setVertical(v);
+    setGuardandoVertical(true);
+    try {
+      await patchTenantSettings(tenantId, { vertical: v });
+    } catch (e) {
+      setVertical(anterior);
+      Alert.alert("No se guardó el tipo de práctica", mensajeError(e));
+    } finally {
+      setGuardandoVertical(false);
+    }
+  };
 
-  const withRecord = clients.filter(c => records.has(c.id)).length;
+  const withRecord = metricas?.conHistoria ?? 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
       <ScreenHeader
         crumb="Clientes"
         title="Historias clínicas"
-        subtitle={`${withRecord} paciente${withRecord !== 1 ? "s" : ""} con historia abierta`}
+        subtitle={metricas ? `${withRecord} paciente${withRecord !== 1 ? "s" : ""} con historia abierta` : "Cargando…"}
         onBack={() => router.back()}
       />
 
+      {lista.error && lista.filas.length === 0 && !lista.cargando ? (
+        <ErrorState error={lista.error} onRetry={recargarTodo} />
+      ) : (
       <FlatList
-        data={filtered}
+        data={lista.filas}
         keyExtractor={c => c.id}
         contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onEndReached={lista.cargarMas}
+        onEndReachedThreshold={0.5}
         ListHeaderComponent={
           <View style={{ marginBottom: 16 }}>
             {/* Tipo de práctica */}
@@ -452,12 +638,16 @@ export default function ClinicalScreen() {
             <View style={dm.vertRow}>
               {VERTICALS.map(v => {
                 const active = vertical === v.key;
+                const bloqueado = !verticalListo || guardandoVertical;
                 return (
                   <TouchableOpacity
                     key={v.key}
-                    style={[dm.vertChip, { backgroundColor: active ? Colors.blue + "10" : t.cardSolid, borderColor: active ? Colors.blue : t.line }]}
+                    style={[dm.vertChip, { backgroundColor: active ? Colors.blue + "10" : t.cardSolid, borderColor: active ? Colors.blue : t.line }, bloqueado && !active && { opacity: 0.5 }]}
                     onPress={() => saveVertical(v.key)}
+                    disabled={bloqueado}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active, disabled: bloqueado }}
                   >
                     <Text style={[dm.vertLabel, { color: active ? Colors.blue : t.ink }]} numberOfLines={2}>{v.label}</Text>
                   </TouchableOpacity>
@@ -465,13 +655,19 @@ export default function ClinicalScreen() {
               })}
             </View>
 
+            {errorMetricas ? (
+              <TouchableOpacity onPress={recargarTodo} style={[dm.errorBanner, { borderColor: Colors.red + "40" }]} accessibilityRole="button">
+                <Text style={[dm.errorBannerText, { color: t.ink }]}>{mensajeError(errorMetricas)} Toca para reintentar.</Text>
+              </TouchableOpacity>
+            ) : null}
+
             {/* Métricas */}
-            {!loading && clients.length > 0 && (
+            {metricas && metricas.clientes > 0 && (
               <View style={dm.metricsRow}>
                 {[
-                  { label: "Con historia", value: withRecord, color: Colors.success },
-                  { label: "Sin historia", value: clients.length - withRecord, color: t.subtle },
-                  { label: "Evol. este mes", value: monthEntries, color: Colors.blue },
+                  { label: "Con historia", value: metricas.conHistoria, color: Colors.success },
+                  { label: "Sin historia", value: Math.max(0, metricas.clientes - metricas.conHistoria), color: t.subtle },
+                  { label: "Evol. este mes", value: metricas.evolMes, color: Colors.blue },
                 ].map(m => (
                   <View key={m.label} style={[dm.metricCard, { backgroundColor: t.cardSolid, borderColor: t.line }]}>
                     <Text style={[dm.metricValue, { color: t.ink }]}>{m.value}</Text>
@@ -488,9 +684,11 @@ export default function ClinicalScreen() {
                 style={[dm.searchInput, { color: t.ink }]}
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Buscar paciente..."
+                placeholder="Buscar paciente por nombre o teléfono..."
                 placeholderTextColor={t.subtle}
+                autoCorrect={false}
               />
+              {lista.cargando && search.trim().length >= 2 ? <ActivityIndicator size="small" color={t.subtle} /> : null}
             </View>
           </View>
         }
@@ -503,16 +701,19 @@ export default function ClinicalScreen() {
                 style={[dm.row, { backgroundColor: t.cardSolid, borderColor: t.line }]}
                 onPress={() => setSelected(c)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
               >
                 <Avatar name={c.name} size={38} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={[dm.rowName, { color: t.ink }]} numberOfLines={1}>{c.name}</Text>
-                  <Text style={[dm.rowPhone, { color: t.subtle }]} numberOfLines={1}>{c.phone ?? "Sin teléfono"}</Text>
+                  <Text style={[dm.rowPhone, { color: t.subtle }]} numberOfLines={1}>
+                    {c.phone ? fmtTelefono(c.phone, { indicativo: c.phone_country_code }) : "Sin teléfono"}
+                  </Text>
                 </View>
                 {rec ? (
                   <View style={[dm.recBadge, { backgroundColor: Colors.success + "12" }]}>
                     <View style={[dm.recDot, { backgroundColor: Colors.success }]} />
-                    <Text style={[dm.recBadgeText, { color: "#0d9668" }]}>{count} evol.</Text>
+                    <Text style={[dm.recBadgeText, { color: Colors.success }]}>{count} evol.</Text>
                   </View>
                 ) : (
                   <View style={dm.newBadgeWrap}>
@@ -525,28 +726,37 @@ export default function ClinicalScreen() {
             </Animated.View>
           );
         }}
+        ListFooterComponent={
+          lista.cargandoMas ? <ActivityIndicator color={Colors.red} style={{ marginVertical: 16 }} />
+          : lista.error && lista.filas.length > 0 ? (
+            <TouchableOpacity onPress={lista.cargarMas} style={[dm.errorBanner, { borderColor: Colors.red + "40" }]} accessibilityRole="button">
+              <Text style={[dm.errorBannerText, { color: t.ink }]}>{mensajeError(lista.error)} Toca para reintentar.</Text>
+            </TouchableOpacity>
+          ) : null
+        }
         ListEmptyComponent={
-          loading ? (
+          lista.cargando ? (
             <ActivityIndicator color={Colors.red} style={{ marginTop: 40 }} />
           ) : (
             <View style={{ padding: 40, alignItems: "center" }}>
               <Ionicons name="pulse-outline" size={40} color={t.subtle} style={{ marginBottom: 12 }} />
               <Text style={[dm.emptyTitle, { color: t.ink }]}>{search ? "Sin resultados" : "Aún no hay pacientes"}</Text>
               <Text style={[dm.emptyText, { color: t.muted }]}>
-                {search ? `No encontramos "${search}"` : "Tus clientes del CRM aparecen aquí para abrirles historia clínica."}
+                {search ? (search.trim().length < 2 ? "Escribe al menos 2 letras." : `No encontramos "${search}"`) : "Tus clientes del CRM aparecen aquí para abrirles historia clínica."}
               </Text>
             </View>
           )
         }
       />
+      )}
 
       {selected && tenantId && (
         <PatientModal
+          key={selected.id}
           client={selected}
           tenantId={tenantId}
-          vertical={vertical}
           onClose={() => setSelected(null)}
-          onSaved={load}
+          onSaved={() => { recargarMetricas(); cargarFichas(); }}
         />
       )}
     </SafeAreaView>
@@ -600,6 +810,9 @@ const dm = StyleSheet.create({
 
   emptyTitle: { fontSize: 15, fontFamily: Fonts.bold, marginBottom: 6 },
   emptyText:  { fontSize: 13, fontFamily: Fonts.regular, textAlign: "center", lineHeight: 19, marginTop: 10 },
+
+  errorBanner:     { borderWidth: 1, borderRadius: Radius.md, padding: 12, marginBottom: 14, backgroundColor: Colors.red + "10" },
+  errorBannerText: { fontSize: 12.5, fontFamily: Fonts.semibold },
 
   // Lista
   vertRow:    { flexDirection: "row", gap: 8, marginBottom: 18 },

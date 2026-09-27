@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Modal, Alert, KeyboardAvoidingView, Platform,
+  TextInput, Modal, Alert, KeyboardAvoidingView,
   ActivityIndicator,
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -11,7 +11,15 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, MonoLabel, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { useAuth } from "@/lib/auth";
+import { useTenant } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
+import ErrorState from "@/components/ErrorState";
+import { IconButton } from "@/components/ui";
+import { exigirFilas, mensajeError, revisar, traerTodo } from "@/lib/db";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
+import { fmt12, fmtMoneyFull } from "@/lib/format";
+import { diaLocalDe, fmtDia, horaLocalDe } from "@/lib/tz";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,21 +37,26 @@ interface Product {
   is_active: boolean;
 }
 
+type TipoMovimiento = "purchase" | "sale" | "adjustment" | "return" | "courtesy";
+
 interface Movement {
   id: string;
   product_id: string;
-  type: "purchase" | "sale" | "adjustment" | "return" | "courtesy";
+  type: TipoMovimiento;
   quantity: number;
   notes: string | null;
   created_at: string;
   products?: { name: string; sku: string };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+type Respuesta<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
-}
+// Área táctil extra para los botones de solo ícono (CAL-24).
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
+const PRODUCT_COLS = "id, sku, name, description, cost_price, sale_price, discount_type, discount_value, stock_quantity, low_stock_alert, is_active";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function effectivePrice(p: Product): number {
   if (!p.discount_value) return p.sale_price;
@@ -56,11 +69,19 @@ function genSku() {
   return "SKU-" + Math.random().toString(36).toUpperCase().slice(2, 7);
 }
 
-const MOVE_META: Record<string, { label: string; color: string; icon: any }> = {
+/** Entero positivo escrito por el usuario ("12", "-5" → 5), o null si no es un número. */
+function cantidadEscrita(texto: string): number | null {
+  const limpio = texto.trim().replace(/^[-+]/, "");
+  if (!/^\d+$/.test(limpio)) return null;
+  const n = Number(limpio);
+  return n > 0 ? n : null;
+}
+
+const MOVE_META: Record<string, { label: string; color: string; icon: React.ComponentProps<typeof Ionicons>["name"] }> = {
   purchase:   { label: "Compra",     color: "#10b981", icon: "arrow-down-outline"    },
   sale:       { label: "Venta",      color: "#6366f1", icon: "cart-outline"          },
   adjustment: { label: "Ajuste",     color: "#f59e0b", icon: "options-outline"       },
-  return:     { label: "Devolución", color: "#8E879B", icon: "return-up-back-outline"},
+  return:     { label: "Devolución", color: "#736C82", icon: "return-up-back-outline"},
   courtesy:   { label: "Cortesía",   color: "#ec4899", icon: "gift-outline"          },
 };
 
@@ -69,62 +90,70 @@ const MOVE_META: Record<string, { label: string; color: string; icon: any }> = {
 export default function InventarioScreen() {
   const router = useRouter();
   const { t, mode } = useTheme();
+  // Antes se buscaba el negocio con tenants.owner_id + .single(): con dos
+  // negocios fallaba y la pantalla quedaba vacía. El negocio activo es el de la sesión.
+  const { tenantId } = useAuth();
+  const { timezone, ready } = useTenant();
+  const guard = useGuardRespuestas();
 
   const [tab, setTab]           = useState<"productos" | "movimientos">("productos");
   const [products, setProducts]  = useState<Product[]>([]);
   const [movements, setMovements]= useState<Movement[]>([]);
   const [search, setSearch]      = useState("");
-  const [tenantId, setTenantId]  = useState<string | null>(null);
   const [loading, setLoading]    = useState(true);
+  const [error, setError]        = useState<unknown>(null);
 
   const [showModal, setShowModal]   = useState(false);
   const [editing, setEditing]       = useState<Product | null>(null);
   const [form, setForm]             = useState<Partial<Product>>({});
+  const [savingProduct, setSavingProduct] = useState(false);
 
   const [showAdjust, setShowAdjust]       = useState(false);
   const [adjustTarget, setAdjustTarget]   = useState<Product | null>(null);
   const [adjustQty, setAdjustQty]         = useState("");
   const [adjustType, setAdjustType]       = useState<"purchase" | "adjustment" | "return" | "courtesy">("purchase");
   const [adjustNotes, setAdjustNotes]     = useState("");
+  const [savingAdjust, setSavingAdjust]   = useState(false);
+  // Candado síncrono: el estado de React tarda un render y un doble toque
+  // alcanzaba a registrar dos movimientos.
+  const ocupado = useRef(false);
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
-      const { data } = await supabase.from("tenants").select("id").eq("owner_id", user.id).single();
-      if (data?.id) setTenantId(data.id);
-      else          setLoading(false);
-    })();
-  }, []);
-
-  const loadData = useCallback(async () => {
+  const { recargar: loadData } = useRecarga(async () => {
     if (!tenantId) return;
+    const turno = guard.nuevo();
     setLoading(true);
-    const [prodRes, movRes] = await Promise.all([
-      supabase
-        .from("products")
-        .select("id, sku, name, description, cost_price, sale_price, discount_type, discount_value, stock_quantity, low_stock_alert, is_active")
-        .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
-      supabase
-        .from("inventory_movements")
-        .select("id, product_id, type, quantity, notes, created_at, products(name, sku)")
-        .eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(100),
-    ]);
-    if (prodRes.data) setProducts(prodRes.data as Product[]);
-    if (movRes.data)  setMovements(movRes.data as unknown as Movement[]);
-    setLoading(false);
-  }, [tenantId]);
-
-  useEffect(() => { if (tenantId) loadData(); }, [tenantId, loadData]);
+    try {
+      const [prods, movRes] = await Promise.all([
+        traerTodo<Product>((d, h) => supabase
+          .from("products")
+          .select(PRODUCT_COLS)
+          .eq("tenant_id", tenantId).eq("is_active", true)
+          .order("name").order("id")
+          .range(d, h) as unknown as Respuesta<Product>, { contexto: "No se pudo cargar el inventario" }),
+        supabase
+          .from("inventory_movements")
+          .select("id, product_id, type, quantity, notes, created_at, products(name, sku)")
+          .eq("tenant_id", tenantId).order("created_at", { ascending: false }).order("id").limit(100),
+      ]);
+      const movs = (revisar(movRes, "No se pudieron cargar los movimientos") ?? []) as unknown as Movement[];
+      if (!turno.vigente()) return;
+      setProducts(prods.map(p => ({ ...p, sku: p.sku ?? "", description: p.description ?? "" })));
+      setMovements(movs);
+      setError(null);
+    } catch (e) {
+      if (turno.vigente()) setError(e);
+    } finally {
+      if (turno.vigente()) setLoading(false);
+    }
+  }, [tenantId, timezone], { timeZone: timezone, habilitado: !!tenantId && ready });
 
   const totalValue = products.reduce((s, p) => s + p.stock_quantity * p.cost_price, 0);
   const lowStock   = products.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.low_stock_alert).length;
-  const outStock   = products.filter(p => p.stock_quantity === 0).length;
+  const outStock   = products.filter(p => p.stock_quantity <= 0).length;
 
-  const filtered = search
-    ? products.filter(p =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.sku.toLowerCase().includes(search.toLowerCase()))
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? products.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
     : products;
 
   const openCreate = () => {
@@ -136,79 +165,151 @@ export default function InventarioScreen() {
   const openEdit = (p: Product) => { setEditing(p); setForm({ ...p }); setShowModal(true); };
 
   const handleSave = async () => {
+    if (!tenantId || ocupado.current) return;
     if (!form.name?.trim()) { Alert.alert("Requerido", "El nombre del producto es obligatorio"); return; }
-    if (!tenantId) return;
+    const costo = Number(form.cost_price ?? 0);
+    const venta = Number(form.sale_price ?? 0);
+    const inicial = Math.floor(Number(form.stock_quantity ?? 0));
+    const alerta = Math.floor(Number(form.low_stock_alert ?? 5));
+    if (!(costo >= 0) || !(venta >= 0)) { Alert.alert("Precio inválido", "Los precios no pueden ser negativos."); return; }
+    if (!(inicial >= 0) || !(alerta >= 0)) { Alert.alert("Cantidad inválida", "El stock y la alerta deben ser números enteros positivos."); return; }
 
-    if (editing) {
-      const { error } = await supabase.from("products").update({
-        sku: form.sku, name: form.name, description: form.description ?? "",
-        cost_price: form.cost_price ?? 0, sale_price: form.sale_price ?? 0,
-        discount_type: form.discount_type ?? null, discount_value: form.discount_value ?? 0,
-        low_stock_alert: form.low_stock_alert ?? 5,
-      }).eq("id", editing.id).eq("tenant_id", tenantId);
-      if (error) { Alert.alert("Error", error.message); return; }
-    } else {
-      const initialStock = form.stock_quantity ?? 0;
-      const { data: newProd, error } = await supabase.from("products").insert({
-        tenant_id: tenantId, sku: form.sku ?? genSku(), name: form.name,
-        description: form.description ?? "", cost_price: form.cost_price ?? 0,
-        sale_price: form.sale_price ?? 0, discount_type: form.discount_type ?? null,
-        discount_value: form.discount_value ?? 0, stock_quantity: initialStock,
-        low_stock_alert: form.low_stock_alert ?? 5, is_active: true,
-      }).select("id").single();
-      if (error) { Alert.alert("Error", error.message); return; }
-      if (newProd && initialStock > 0) {
-        await supabase.from("inventory_movements").insert({
-          tenant_id: tenantId, product_id: newProd.id,
-          type: "purchase", quantity: initialStock, notes: "Stock inicial",
-        });
+    ocupado.current = true;
+    setSavingProduct(true);
+    try {
+      if (editing) {
+        exigirFilas(await supabase.from("products").update({
+          sku: form.sku?.trim() || editing.sku, name: form.name.trim(), description: form.description ?? "",
+          cost_price: costo, sale_price: venta,
+          discount_type: form.discount_type ?? null, discount_value: form.discount_value ?? 0,
+          low_stock_alert: alerta,
+        }).eq("id", editing.id).eq("tenant_id", tenantId).select("id"), "No se pudo guardar el producto");
+      } else {
+        // El producto nace con stock 0 y el movimiento "Stock inicial" lo sube:
+        // el trigger trg_update_product_stock ya suma cada movimiento. Antes se
+        // escribía el stock a mano Y el trigger lo volvía a sumar (12 → 24).
+        const nuevo = revisar(await supabase.from("products").insert({
+          tenant_id: tenantId, sku: form.sku?.trim() || genSku(), name: form.name.trim(),
+          description: form.description ?? "", cost_price: costo,
+          sale_price: venta, discount_type: form.discount_type ?? null,
+          discount_value: form.discount_value ?? 0, stock_quantity: 0,
+          low_stock_alert: alerta, is_active: true,
+        }).select("id").single(), "No se pudo crear el producto") as { id: string };
+        if (inicial > 0) {
+          const mov = await supabase.from("inventory_movements").insert({
+            tenant_id: tenantId, product_id: nuevo.id,
+            type: "purchase", quantity: inicial, notes: "Stock inicial", unit_cost: costo,
+          });
+          if (mov.error) {
+            // Sin el movimiento el producto quedaría en 0 sin explicación: se
+            // deshace para que el reintento no deje un duplicado.
+            const deshecho = await supabase.from("products").delete().eq("id", nuevo.id);
+            if (deshecho.error) {
+              setShowModal(false);
+              await loadData();
+              Alert.alert("Stock inicial sin registrar", `"${form.name.trim()}" quedó creado con 0 unidades. Registra el stock inicial con "Ajustar stock". (${mensajeError(mov.error)})`);
+              return;
+            }
+            throw mov.error;
+          }
+        }
       }
+      setShowModal(false);
+      await loadData();
+    } catch (e) {
+      Alert.alert("No se guardó", mensajeError(e, editing ? "No se pudo guardar el producto" : "No se pudo crear el producto"));
+    } finally {
+      ocupado.current = false;
+      setSavingProduct(false);
     }
-    setShowModal(false);
-    await loadData();
   };
 
-  const handleDelete = (id: string) => {
-    Alert.alert("Eliminar producto", "¿Eliminar este producto del inventario?", [
+  const handleDelete = (p: Product) => {
+    Alert.alert("Eliminar producto", `¿Quitar "${p.name}" del inventario? Su historial de movimientos se conserva.`, [
       { text: "Cancelar", style: "cancel" },
       { text: "Eliminar", style: "destructive", onPress: async () => {
-        const { error } = await supabase.from("products").update({ is_active: false }).eq("id", id).eq("tenant_id", tenantId!);
-        if (error) { Alert.alert("Error", error.message); return; }
-        await loadData();
+        try {
+          exigirFilas(await supabase.from("products").update({ is_active: false }).eq("id", p.id).eq("tenant_id", tenantId!).select("id"), "No se pudo eliminar el producto");
+          await loadData();
+        } catch (e) {
+          Alert.alert("No se eliminó", mensajeError(e));
+        }
       }},
     ]);
   };
 
+  const cantidadAjuste = cantidadEscrita(adjustQty);
+
   const handleAdjust = async () => {
-    if (!adjustTarget || !adjustQty || !tenantId) return;
-    const qty = parseInt(adjustQty) || 0;
+    if (!adjustTarget || !tenantId || ocupado.current) return;
+    if (!cantidadAjuste) { Alert.alert("Cantidad inválida", "Escribe una cantidad entera mayor que 0."); return; }
     // Salidas (restan stock): cortesía siempre resta; ajuste resta si el usuario escribió "-".
-    const isNegative = adjustType === "courtesy" || (adjustType === "adjustment" && adjustQty.startsWith("-"));
-    const actualDelta = isNegative ? -Math.abs(qty) : Math.abs(qty);
-    const newStock = Math.max(0, adjustTarget.stock_quantity + actualDelta);
+    const isNegative = adjustType === "courtesy" || (adjustType === "adjustment" && adjustQty.trim().startsWith("-"));
+    const delta = isNegative ? -cantidadAjuste : cantidadAjuste;
 
-    const { error: movErr } = await supabase.from("inventory_movements").insert({
-      tenant_id: tenantId, product_id: adjustTarget.id,
-      type: adjustType, quantity: actualDelta, notes: adjustNotes || null,
-      // Snapshot del costo unitario para valorar cortesías en Finanzas.
-      unit_cost: adjustTarget.cost_price ?? null,
-    });
-    if (movErr) { Alert.alert("Error", movErr.message); return; }
+    ocupado.current = true;
+    setSavingAdjust(true);
+    try {
+      if (delta < 0) {
+        // Stock FRESCO, no el de cuando se abrió la pantalla: el POS pudo vender mientras tanto.
+        const actual = revisar(
+          await supabase.from("products").select("stock_quantity").eq("id", adjustTarget.id).single(),
+          "No se pudo revisar el stock",
+        ) as { stock_quantity: number };
+        if (cantidadAjuste > actual.stock_quantity) {
+          setAdjustTarget(prev => prev ? { ...prev, stock_quantity: actual.stock_quantity } : prev);
+          Alert.alert("No hay suficiente stock", `Solo quedan ${actual.stock_quantity} unidades de "${adjustTarget.name}".`);
+          return;
+        }
+      }
+      // Solo el movimiento: el trigger aplica el cambio de stock en el servidor
+      // de forma atómica. Antes, además, se escribía stock_quantity con el
+      // valor que había en pantalla y se borraban las ventas hechas mientras.
+      const base = {
+        tenant_id: tenantId, product_id: adjustTarget.id,
+        quantity: delta,
+        // Snapshot del costo unitario para valorar cortesías en Finanzas.
+        unit_cost: adjustTarget.cost_price ?? null,
+      };
+      const notas = adjustNotes.trim() || null;
+      let res = await supabase.from("inventory_movements").insert({ ...base, type: adjustType, notes: notas });
+      let avisoCortesia = false;
+      if (res.error && adjustType === "courtesy" && (res.error as { code?: string }).code === "23514") {
+        // El servidor todavía no acepta 'courtesy' (lo agrega la migración):
+        // se registra como ajuste de salida marcado "Cortesía" para no perder
+        // el descuento de stock.
+        res = await supabase.from("inventory_movements").insert({
+          ...base, type: "adjustment", notes: notas ? `Cortesía · ${notas}` : "Cortesía",
+        });
+        avisoCortesia = !res.error;
+      }
+      if (res.error) throw res.error;
 
-    const { error: prodErr } = await supabase.from("products")
-      .update({ stock_quantity: newStock }).eq("id", adjustTarget.id).eq("tenant_id", tenantId);
-    if (prodErr) { Alert.alert("Error", prodErr.message); return; }
-
-    setShowAdjust(false); setAdjustQty(""); setAdjustNotes("");
-    await loadData();
+      setShowAdjust(false); setAdjustQty(""); setAdjustNotes("");
+      await loadData();
+      if (avisoCortesia) {
+        Alert.alert("Cortesía registrada como ajuste", "El stock se descontó. Se guardó como ajuste con la nota \"Cortesía\" porque el servidor aún no tiene habilitado ese tipo.");
+      }
+    } catch (e) {
+      Alert.alert("No se registró el movimiento", mensajeError(e));
+    } finally {
+      ocupado.current = false;
+      setSavingAdjust(false);
+    }
   };
 
   const openAdjust = (p: Product) => {
     setAdjustTarget(p); setAdjustQty(""); setAdjustNotes(""); setAdjustType("purchase"); setShowAdjust(true);
+    // Muestra el stock del momento (el de la lista puede ser de hace rato).
+    // Si la lectura falla se queda el de la lista: las salidas se revalidan al registrar.
+    supabase.from("products").select("stock_quantity").eq("id", p.id).single().then(({ data, error: err }) => {
+      if (err) { console.warn("[inventario] no se pudo refrescar el stock:", err.message); return; }
+      if (data) setAdjustTarget(prev => (prev && prev.id === p.id ? { ...prev, stock_quantity: Number(data.stock_quantity) || 0 } : prev));
+    });
   };
 
   const StockBadge = ({ p }: { p: Product }) => {
-    const isOut = p.stock_quantity === 0;
+    const isOut = p.stock_quantity <= 0;
     const isLow = p.stock_quantity > 0 && p.stock_quantity <= p.low_stock_alert;
     const color = isOut ? "#ef4444" : isLow ? "#d97706" : "#059669";
     const bg    = isOut ? "rgba(239,68,68,0.12)" : isLow ? "rgba(245,158,11,0.12)" : "rgba(16,185,129,0.10)";
@@ -220,7 +321,7 @@ export default function InventarioScreen() {
     );
   };
 
-  if (loading) {
+  if (loading && products.length === 0 && !error) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg, alignItems: "center", justifyContent: "center" }} edges={["top"]}>
         <ActivityIndicator size="large" color={Colors.red} />
@@ -231,6 +332,7 @@ export default function InventarioScreen() {
 
   // ── Shared input style (needs theme at render time) ────────────────────────
   const inputStyle = [s.inputBase, { backgroundColor: t.inputBg, borderColor: t.inputBorder, color: t.text }];
+  const fechaMov = (iso: string) => `${fmtDia(diaLocalDe(iso, timezone), "dia-mes")} · ${fmt12(horaLocalDe(iso, timezone))}`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={["top"]}>
@@ -241,14 +343,14 @@ export default function InventarioScreen() {
         <View style={s.headerBlob1} />
         <View style={s.headerBlob2} />
         <View style={s.headerTopRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Volver">
             <Ionicons name="chevron-back" size={20} color="white" />
           </TouchableOpacity>
           <View style={s.headerIconBox}>
             <Ionicons name="cube-outline" size={15} color="white" />
           </View>
           <Text style={s.headerLabel}>CONTROL DE STOCK</Text>
-          <TouchableOpacity style={s.addBtn} onPress={openCreate} activeOpacity={0.8}>
+          <TouchableOpacity style={s.addBtn} onPress={openCreate} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Nuevo producto">
             <Ionicons name="add" size={16} color="white" />
             <Text style={s.addBtnText}>Nuevo</Text>
           </TouchableOpacity>
@@ -256,22 +358,32 @@ export default function InventarioScreen() {
         <Text style={s.headerTitle}>Inventario</Text>
       </LinearGradient>
 
+      {error && products.length === 0 ? (
+        <ErrorState error={error} onRetry={loadData} />
+      ) : (
+      <>
       {/* Stats strip */}
       <Animated.View entering={FadeInDown.duration(300)}>
         <View style={[s.statsStrip, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>
           {[
             { label: "Productos",  value: String(products.length), color: t.text                                    },
-            { label: "Valor",      value: fmt(totalValue),         color: t.text                                    },
+            { label: "Valor",      value: fmtMoneyFull(totalValue), color: t.text                                   },
             { label: "Bajo stock", value: String(lowStock),        color: lowStock > 0 ? "#d97706" : "#10b981"      },
             { label: "Sin stock",  value: String(outStock),        color: outStock > 0 ? "#ef4444" : "#10b981"      },
           ].map((stat, i) => (
             <View key={i} style={[s.statItem, i > 0 && { borderLeftWidth: 1, borderColor: t.border }]}>
               <Text style={[s.statLabel, { color: t.subtle }]}>{stat.label}</Text>
-              <Text style={[s.statValue, { color: stat.color }]}>{stat.value}</Text>
+              <Text style={[s.statValue, { color: stat.color }]} numberOfLines={1} adjustsFontSizeToFit>{stat.value}</Text>
             </View>
           ))}
         </View>
       </Animated.View>
+
+      {error ? (
+        <TouchableOpacity onPress={loadData} style={s.errorBanner} accessibilityRole="button">
+          <Text style={[s.errorText, { color: t.text }]}>{mensajeError(error)} Toca para reintentar.</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Search + tab pills */}
       <Animated.View entering={FadeInDown.delay(50).duration(300)}>
@@ -287,7 +399,7 @@ export default function InventarioScreen() {
                 style={[s.searchInput, { color: t.text }]}
               />
               {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch("")}>
+                <TouchableOpacity onPress={() => setSearch("")} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
                   <Ionicons name="close-circle" size={16} color={t.subtle} />
                 </TouchableOpacity>
               )}
@@ -300,6 +412,8 @@ export default function InventarioScreen() {
                 style={[s.tabPill, tab === tb && { backgroundColor: mode === "dark" ? Colors.red : Colors.ink }]}
                 onPress={() => setTab(tb)}
                 activeOpacity={0.7}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: tab === tb }}
               >
                 <Text style={[s.tabPillText, { color: tab === tb ? Colors.white : t.muted }]}>
                   {tb === "productos" ? "Productos" : "Movimientos"}
@@ -324,7 +438,7 @@ export default function InventarioScreen() {
                   {search ? `No hay productos con "${search}"` : "Agrega tu primer producto para llevar el control del inventario."}
                 </Text>
                 {!search && (
-                  <TouchableOpacity onPress={openCreate} activeOpacity={0.85}>
+                  <TouchableOpacity onPress={openCreate} activeOpacity={0.85} accessibilityRole="button">
                     <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.emptyBtn}>
                       <Text style={s.emptyBtnText}>+ Crear primer producto</Text>
                     </LinearGradient>
@@ -345,24 +459,18 @@ export default function InventarioScreen() {
                       <Text style={[s.productSku, { color: t.subtle }]}>{p.sku}</Text>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
                         <StockBadge p={p} />
-                        <Text style={[s.productPrice, { color: t.text }]}>{fmt(effectivePrice(p))}</Text>
+                        <Text style={[s.productPrice, { color: t.text }]}>{fmtMoneyFull(effectivePrice(p))}</Text>
                         {p.discount_value > 0 && (
                           <Text style={s.productDiscount}>
-                            −{p.discount_type === "percent" ? `${p.discount_value}%` : fmt(p.discount_value)}
+                            −{p.discount_type === "percent" ? `${p.discount_value}%` : fmtMoneyFull(p.discount_value)}
                           </Text>
                         )}
                       </View>
                     </View>
                     <View style={s.productActions}>
-                      <TouchableOpacity style={s.actionBtn} onPress={() => openAdjust(p)} activeOpacity={0.7}>
-                        <Ionicons name="add-circle-outline" size={18} color={t.muted} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.actionBtn} onPress={() => openEdit(p)} activeOpacity={0.7}>
-                        <Ionicons name="create-outline" size={18} color={t.muted} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.actionBtn} onPress={() => handleDelete(p.id)} activeOpacity={0.7}>
-                        <Ionicons name="trash-outline" size={18} color="#ef4444" />
-                      </TouchableOpacity>
+                      <IconButton icon="add-circle-outline" label={`Ajustar stock de ${p.name}`} onPress={() => openAdjust(p)} tone="plain" color={t.muted} style={s.actionBtn} />
+                      <IconButton icon="create-outline" label={`Editar ${p.name}`} onPress={() => openEdit(p)} tone="plain" color={t.muted} style={s.actionBtn} />
+                      <IconButton icon="trash-outline" label={`Eliminar ${p.name}`} onPress={() => handleDelete(p)} tone="plain" color="#ef4444" style={s.actionBtn} />
                     </View>
                   </View>
                 ))}
@@ -372,9 +480,9 @@ export default function InventarioScreen() {
         </ScrollView>
       ) : (
         <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
-          <View style={s.card}>
+          <View style={[s.card, { backgroundColor: t.bgAlt, borderColor: t.border }]}>
             {movements.length === 0 ? (
-              <Text style={s.emptySub}>Sin movimientos registrados.</Text>
+              <Text style={[s.emptySub, { color: t.muted, marginTop: 20 }]}>Sin movimientos registrados.</Text>
             ) : (
               movements.map((m, i) => {
                 const meta = MOVE_META[m.type] ?? MOVE_META.adjustment;
@@ -395,9 +503,7 @@ export default function InventarioScreen() {
                       <Text style={[s.movQty, { color: m.quantity >= 0 ? "#10b981" : "#ef4444" }]}>
                         {m.quantity >= 0 ? "+" : ""}{m.quantity}
                       </Text>
-                      <Text style={[s.saleDate, { color: t.subtle }]}>
-                        {new Date(m.created_at).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}
-                      </Text>
+                      <Text style={[s.saleDate, { color: t.subtle }]}>{fechaMov(m.created_at)}</Text>
                     </View>
                   </View>
                 );
@@ -406,10 +512,12 @@ export default function InventarioScreen() {
           </View>
         </ScrollView>
       )}
+      </>
+      )}
 
       {/* ── Modal: Create/Edit product ── */}
       <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
           <KeyboardAvoidingView style={{ flex: 1 }}>
             {/* Modal header */}
             <LinearGradient colors={Gradients.ink} style={s.mHeader}>
@@ -418,7 +526,7 @@ export default function InventarioScreen() {
                 <Ionicons name="cube-outline" size={18} color={Colors.red} />
               </View>
               <Text style={s.mTitle}>{editing ? "Editar producto" : "Nuevo producto"}</Text>
-              <TouchableOpacity onPress={() => setShowModal(false)} style={s.mClose} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => setShowModal(false)} style={s.mClose} activeOpacity={0.7} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
               </TouchableOpacity>
             </LinearGradient>
@@ -450,16 +558,16 @@ export default function InventarioScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={[s.fieldLabel, { color: t.subtle }]}>P. Costo *</Text>
                   <TextInput value={form.cost_price ? String(form.cost_price) : ""}
-                    onChangeText={v => setForm(f => ({ ...f, cost_price: parseFloat(v) || 0 }))}
+                    onChangeText={v => setForm(f => ({ ...f, cost_price: Math.max(0, parseFloat(v.replace(",", ".")) || 0) }))}
                     style={[...inputStyle, { fontFamily: Fonts.mono }]}
-                    keyboardType="numeric" placeholder="0" placeholderTextColor={t.subtle} />
+                    keyboardType="decimal-pad" placeholder="0" placeholderTextColor={t.subtle} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.fieldLabel, { color: t.subtle }]}>P. Venta *</Text>
                   <TextInput value={form.sale_price ? String(form.sale_price) : ""}
-                    onChangeText={v => setForm(f => ({ ...f, sale_price: parseFloat(v) || 0 }))}
+                    onChangeText={v => setForm(f => ({ ...f, sale_price: Math.max(0, parseFloat(v.replace(",", ".")) || 0) }))}
                     style={[...inputStyle, { fontFamily: Fonts.mono }]}
-                    keyboardType="numeric" placeholder="0" placeholderTextColor={t.subtle} />
+                    keyboardType="decimal-pad" placeholder="0" placeholderTextColor={t.subtle} />
                 </View>
               </View>
 
@@ -468,27 +576,30 @@ export default function InventarioScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[s.fieldLabel, { color: t.subtle }]}>Stock inicial</Text>
                     <TextInput value={form.stock_quantity ? String(form.stock_quantity) : ""}
-                      onChangeText={v => setForm(f => ({ ...f, stock_quantity: parseInt(v) || 0 }))}
+                      onChangeText={v => setForm(f => ({ ...f, stock_quantity: Math.max(0, parseInt(v, 10) || 0) }))}
                       style={[...inputStyle, { fontFamily: Fonts.mono }]}
-                      keyboardType="numeric" placeholder="0" placeholderTextColor={t.subtle} />
+                      keyboardType="number-pad" placeholder="0" placeholderTextColor={t.subtle} />
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={[s.fieldLabel, { color: t.subtle }]}>Alerta mínimo</Text>
-                  <TextInput value={form.low_stock_alert ? String(form.low_stock_alert) : ""}
-                    onChangeText={v => setForm(f => ({ ...f, low_stock_alert: parseInt(v) || 5 }))}
+                  <TextInput value={form.low_stock_alert != null ? String(form.low_stock_alert) : ""}
+                    onChangeText={v => setForm(f => ({ ...f, low_stock_alert: v.trim() === "" ? 0 : Math.max(0, parseInt(v, 10) || 0) }))}
                     style={[...inputStyle, { fontFamily: Fonts.mono }]}
-                    keyboardType="numeric" placeholder="5" placeholderTextColor={t.subtle} />
+                    keyboardType="number-pad" placeholder="5" placeholderTextColor={t.subtle} />
                 </View>
               </View>
+              {editing ? (
+                <Text style={[s.hint, { color: t.subtle }]}>El stock se cambia con “Ajustar stock” para que quede en el historial de movimientos.</Text>
+              ) : null}
 
               <View style={s.mActions}>
-                <TouchableOpacity style={[s.mCancelBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} onPress={() => setShowModal(false)} activeOpacity={0.7}>
+                <TouchableOpacity style={[s.mCancelBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} onPress={() => setShowModal(false)} activeOpacity={0.7} accessibilityRole="button">
                   <Text style={[s.mCancelText, { color: t.muted }]}>Cancelar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSave} style={{ flex: 1 }} activeOpacity={0.85}>
+                <TouchableOpacity onPress={handleSave} disabled={savingProduct} style={{ flex: 1, opacity: savingProduct ? 0.7 : 1 }} activeOpacity={0.85} accessibilityRole="button">
                   <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mSaveBtn}>
-                    <Text style={s.mSaveText}>{editing ? "Guardar cambios" : "Crear producto"}</Text>
+                    {savingProduct ? <ActivityIndicator color="white" /> : <Text style={s.mSaveText}>{editing ? "Guardar cambios" : "Crear producto"}</Text>}
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -499,7 +610,7 @@ export default function InventarioScreen() {
 
       {/* ── Modal: Adjust stock ── */}
       <Modal visible={showAdjust} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAdjust(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
           <KeyboardAvoidingView style={{ flex: 1 }}>
             <LinearGradient colors={Gradients.ink} style={s.mHeader}>
               <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mAccent} />
@@ -510,7 +621,7 @@ export default function InventarioScreen() {
                 <Text style={s.mTitle}>Ajustar stock</Text>
                 {adjustTarget && <Text style={s.mSub}>{adjustTarget.name}</Text>}
               </View>
-              <TouchableOpacity onPress={() => setShowAdjust(false)} style={s.mClose} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => setShowAdjust(false)} style={s.mClose} activeOpacity={0.7} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
               </TouchableOpacity>
             </LinearGradient>
@@ -533,7 +644,8 @@ export default function InventarioScreen() {
                       <TouchableOpacity key={tb} activeOpacity={0.7}
                         style={[s.adjustTypeBtn, { backgroundColor: t.bgAlt, borderColor: t.border },
                           active && { borderColor: meta.color, backgroundColor: meta.color + "15" }]}
-                        onPress={() => setAdjustType(tb)}>
+                        onPress={() => setAdjustType(tb)}
+                        accessibilityRole="button" accessibilityState={{ selected: active }}>
                         <Ionicons name={meta.icon} size={16} color={active ? meta.color : t.muted} />
                         <Text style={[s.adjustTypeTxt, { color: active ? meta.color : t.muted },
                           active && { fontFamily: Fonts.bold }]}>{meta.label}</Text>
@@ -549,9 +661,12 @@ export default function InventarioScreen() {
                 </Text>
                 <TextInput value={adjustQty} onChangeText={setAdjustQty}
                   style={[...inputStyle, { fontFamily: Fonts.mono, fontSize: 16 }]}
-                  keyboardType="numeric"
+                  keyboardType={adjustType === "adjustment" ? "numbers-and-punctuation" : "number-pad"}
                   placeholder={adjustType === "adjustment" ? "Ej. 10 o -5" : adjustType === "courtesy" ? "Ej. 2" : "Ej. 10"}
                   placeholderTextColor={t.subtle} />
+                {adjustQty.trim().length > 0 && !cantidadAjuste ? (
+                  <Text style={s.fieldError}>Escribe un número entero mayor que 0.</Text>
+                ) : null}
               </View>
 
               <View style={s.mField}>
@@ -561,14 +676,17 @@ export default function InventarioScreen() {
               </View>
 
               <View style={s.mActions}>
-                <TouchableOpacity style={[s.mCancelBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} onPress={() => setShowAdjust(false)} activeOpacity={0.7}>
+                <TouchableOpacity style={[s.mCancelBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} onPress={() => setShowAdjust(false)} activeOpacity={0.7} accessibilityRole="button">
                   <Text style={[s.mCancelText, { color: t.muted }]}>Cancelar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleAdjust} style={{ flex: 1 }} activeOpacity={0.85}>
+                <TouchableOpacity onPress={handleAdjust} disabled={!cantidadAjuste || savingAdjust} style={{ flex: 1 }} activeOpacity={0.85}
+                  accessibilityRole="button" accessibilityState={{ disabled: !cantidadAjuste || savingAdjust }}>
                   <LinearGradient
-                    colors={!adjustQty ? ["rgba(20,15,30,0.10)", "rgba(20,15,30,0.10)"] : Gradients.brand}
+                    colors={!cantidadAjuste ? [t.chipBg, t.chipBg] : Gradients.brand}
                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.mSaveBtn}>
-                    <Text style={[s.mSaveText, !adjustQty && { color: t.subtle }]}>Registrar movimiento</Text>
+                    {savingAdjust ? <ActivityIndicator color="white" /> : (
+                      <Text style={[s.mSaveText, !cantidadAjuste && { color: t.subtle }]}>Registrar movimiento</Text>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -600,6 +718,9 @@ const s = StyleSheet.create({
   statLabel:  { ...MonoLabel, fontSize: 8.5, marginBottom: 4 },
   statValue:  { fontSize: 16, fontFamily: Fonts.bold, fontVariant: ["tabular-nums"] },
 
+  errorBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: Colors.red + "40", backgroundColor: Colors.red + "10", borderRadius: Radius.md, padding: 12 },
+  errorText:   { fontSize: 12.5, fontFamily: Fonts.semibold },
+
   controls:   { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
   searchBox:  { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
   searchInput:{ flex: 1, fontSize: 14, fontFamily: Fonts.regular },
@@ -616,7 +737,10 @@ const s = StyleSheet.create({
   productSku:   { fontSize: 10, fontFamily: Fonts.mono, marginTop: 2 },
   productPrice: { fontSize: 13, fontFamily: Fonts.bold, fontVariant: ["tabular-nums"] },
   productDiscount: { fontSize: 11, fontFamily: Fonts.semibold, color: "#10b981" },
-  productActions:  { flexDirection: "row", gap: 2 },
+  // gap 8 = el hitSlop de IconButton: con menos, el área extra del botón de la
+  // derecha taparía el borde del de la izquierda (tocar cerca del borde de
+  // "Editar" abriría "Eliminar").
+  productActions:  { flexDirection: "row", gap: 8 },
   actionBtn:    { width: 34, height: 34, borderRadius: 8, alignItems: "center", justifyContent: "center" },
 
   badge:     { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
@@ -652,6 +776,8 @@ const s = StyleSheet.create({
   mSaveText:   { fontSize: 14, fontFamily: Fonts.bold, color: "white" },
 
   fieldLabel: { fontSize: 10.5, fontFamily: Fonts.mono, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 },
+  fieldError: { fontSize: 12, fontFamily: Fonts.semibold, color: Colors.red, marginTop: 6 },
+  hint:       { fontSize: 12, fontFamily: Fonts.regular, marginBottom: 10 },
   inputBase:  { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 13, paddingVertical: 11, fontSize: 14, fontFamily: Fonts.regular },
 
   currentStockBox: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 20 },
