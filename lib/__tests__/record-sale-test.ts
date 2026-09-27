@@ -207,6 +207,15 @@ describe("voidSale", () => {
     expect(mockDb.t.pos_sales).toHaveLength(1);
   });
 
+  test("un intento de factura rechazado o ya acreditado no bloquea la anulación", async () => {
+    await recordSale(venta());
+    mockDb.t.invoices.push({ id: "f1", pos_sale_id: "venta-1", status: "rejected", credit_note_cufe: null });
+    mockDb.t.invoices.push({ id: "f2", pos_sale_id: "venta-1", status: "credited", credit_note_cufe: null });
+    const r = await voidSale("venta-1");
+    expect(r).toMatchObject({ ok: true });
+    expect(mockDb.t.pos_sales).toHaveLength(0);
+  });
+
   test("si falla borrar la venta, la caja queda como estaba", async () => {
     await recordSale(venta());
     mockDb.fallas.push({ tabla: "pos_sales", op: "delete", veces: 1 });

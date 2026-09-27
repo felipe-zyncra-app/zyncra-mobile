@@ -411,7 +411,7 @@ export async function voidSale(
   const apptId = appointmentId ?? (sale.appointment_id as string | null) ?? null;
 
   const [inv, gift, movs, stock] = await Promise.all([
-    supabase.from("invoices").select("id, credit_note_cufe").eq("pos_sale_id", saleId),
+    supabase.from("invoices").select("id, number, status, credit_note_cufe").eq("pos_sale_id", saleId),
     supabase.from("gift_card_transactions").select("id").eq("pos_sale_id", saleId).eq("type", "redencion"),
     supabase.from("cash_movements")
       .select("id, session_id, tenant_id, type, amount, description, category, payment_method, created_at, cash_sessions(closed_at)")
@@ -423,18 +423,25 @@ export async function voidSale(
   const errLectura = inv.error || gift.error || movs.error || stock.error;
   if (errLectura) return falla(errLectura);
 
-  if ((inv.data ?? []).some(f => !f.credit_note_cufe)) {
+  // Factura vigente = emitida y sin nota crédito. Mismo criterio que el portal
+  // (/api/factus y pos-sales/delete): los borradores 'rejected' nunca se
+  // emitieron y las 'credited' ya tienen su nota crédito, así que no bloquean.
+  const vigente = (inv.data ?? []).find(f =>
+    !f.credit_note_cufe && f.status !== "rejected" && f.status !== "credited");
+  if (vigente) {
     return {
       ok: false,
       error: "HAS_INVOICE",
-      message: "Este cobro tiene factura electrónica. Emite primero la nota crédito desde el panel web y luego anúlalo.",
+      message: `Este cobro tiene la factura electrónica #${vigente.number || "—"} vigente. Emite primero su nota crédito desde el panel web y luego anula el cobro.`,
     };
   }
+  // No hay forma atómica de devolver el saldo de un bono: ni el móvil ni el
+  // portal anulan estos cobros. Mismo mensaje que el portal.
   if ((gift.data ?? []).length > 0) {
     return {
       ok: false,
       error: "HAS_GIFT_CARD",
-      message: "Este cobro se pagó con un bono de regalo. Anúlalo desde el panel web para devolver el saldo del bono.",
+      message: "Este cobro se pagó con un bono de regalo y no se puede anular. Si hay que devolverle ese dinero al cliente, emítele un bono de cortesía desde el panel web (Bonos → «Emitir cortesía»). El cobro queda como está.",
     };
   }
 
