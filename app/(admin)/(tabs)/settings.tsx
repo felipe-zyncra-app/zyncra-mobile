@@ -68,6 +68,7 @@ const SECTIONS: {
   {
     title: "Negocio",
     items: [
+      { icon: "business-outline",   color: Colors.ink,   label: "Info del negocio",      sub: "Nombre, contacto y zona horaria",     route: "/settings/business-info" },
       { icon: "storefront-outline", color: Colors.red,   label: "Mi Tienda",             sub: "Personalización y link de reservas",  route: "/settings/store" },
       { icon: "time-outline",       color: "#f59e0b",    label: "Horario de atención",   sub: "Días y horas disponibles",            route: "/settings/schedule" },
       { icon: "cut-outline",        color: "#8b5cf6",    label: "Servicios",             sub: "Gestiona tu catálogo de precios",     route: "/settings/services" },
