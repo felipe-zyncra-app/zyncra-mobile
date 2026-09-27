@@ -11,6 +11,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { useTenant } from "@/lib/tenant";
+import { diaLocalDe } from "@/lib/tz";
 import { useAuth } from "@/lib/auth";
 import { fmtDateShort, localDateStr } from "@/lib/format";
 import { STATUS_META } from "@/constants/status";
@@ -226,6 +228,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
   client: Client; tenantId: string; onClose: () => void; onRefresh: () => void;
 }) {
   const { t } = useTheme();
+  const { timezone } = useTenant();
   const insets = useSafeAreaInsets();
   const [client, setClient]   = useState<Client>(initialClient);
   const [appts, setAppts]     = useState<Appt[]>([]);
@@ -279,7 +282,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onRefres
   const noShows    = appts.filter(a => a.status === "no_show").length;
   // Gastado real (POS) — igual que el CRM web; si no hay ventas, precios de citas completadas
   const totalSpent = posTotal > 0 ? posTotal : completed.reduce((s, a) => s + Number(a.services?.price ?? 0), 0);
-  const since      = client.created_at ? fmtDateShort(client.created_at.slice(0, 10)) : "—";
+  const since      = client.created_at ? fmtDateShort(diaLocalDe(client.created_at, timezone)) : "—";
   const fmtMoney   = (n: number) => n >= 1000 ? `$${(n / 1000).toFixed(0)}k` : `$${n}`;
   const segment    = computeSegment(appts);
 

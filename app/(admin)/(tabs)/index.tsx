@@ -321,7 +321,10 @@ export default function DashboardScreen() {
     const inPeriod = (dateISO: string) => dateISO >= startISO && dateISO <= todayISO;
 
     const appts = allAppts.filter(a => inPeriod(a.appointment_date));
-    const pos   = allPos.filter(sale => inPeriod((sale.created_at ?? "").slice(0, 10)));
+    // slice(0,10) da la fecha en UTC: un cobro de las 9 PM en Colombia cae
+    // en el dia siguiente y quedaba fuera del periodo. Arreglar los limites
+    // de la consulta no basta si el filtro en memoria sigue en UTC.
+    const pos   = allPos.filter(sale => inPeriod(diaLocalDe(sale.created_at ?? "", timezone)));
 
     // Ingreso = plata efectivamente cobrada. El POS marca la cita "completed"
     // al cobrarla (lib/record-sale.ts) y la devuelve a "confirmed" si se
@@ -347,7 +350,7 @@ export default function DashboardScreen() {
     if (p === "hoy") {
       const yISO = toISO(addDays(now, -1));
       prevRevenue = apptRevenue(allAppts.filter(a => a.appointment_date === yISO))
-        + posRevenue(allPos.filter(sale => (sale.created_at ?? "").slice(0, 10) === yISO));
+        + posRevenue(allPos.filter(sale => diaLocalDe(sale.created_at ?? "", timezone) === yISO));
     }
 
     const active    = appts.filter(a => a.status !== "cancelled");

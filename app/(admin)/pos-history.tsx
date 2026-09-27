@@ -10,7 +10,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useTenant } from "@/lib/tenant";
-import { inicioDelDiaUTC, finDelDiaUTC } from "@/lib/tz";
+import { inicioDelDiaUTC, finDelDiaUTC, diaLocalDe } from "@/lib/tz";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
 import { useTheme } from "@/lib/theme";
@@ -90,7 +90,7 @@ export default function PosHistoryScreen() {
   const grouped = useMemo(() => {
     const map: Record<string, HistorySale[]> = {};
     sales.forEach(s => {
-      const d = s.created_at.slice(0, 10);
+      const d = diaLocalDe(s.created_at, timezone);
       if (!map[d]) map[d] = [];
       map[d].push(s);
     });

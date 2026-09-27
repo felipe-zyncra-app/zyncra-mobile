@@ -93,6 +93,9 @@ export function finDelDiaUTC(diaISO: string, timeZone = ZONA_POR_DEFECTO): strin
  */
 export function diaLocalDe(instante: string | Date, timeZone = ZONA_POR_DEFECTO): string {
   const d = typeof instante === "string" ? new Date(instante) : instante;
+  // Fecha invalida (campo vacio o nulo): devolver "" como hacia el slice(0,10)
+  // que esto reemplaza. toISOString() lanzaria y tumbaria la pantalla.
+  if (Number.isNaN(d.getTime())) return "";
   const off = offsetMinutes(d, timeZone);
   if (off === null) return d.toISOString().slice(0, 10);
   return new Date(d.getTime() + off * 60000).toISOString().slice(0, 10);

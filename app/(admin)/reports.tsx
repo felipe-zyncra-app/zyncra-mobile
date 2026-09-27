@@ -9,7 +9,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useTenant } from "@/lib/tenant";
-import { inicioDelDiaUTC, finDelDiaUTC } from "@/lib/tz";
+import { inicioDelDiaUTC, finDelDiaUTC, diaLocalDe } from "@/lib/tz";
 import { Colors, Fonts, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -260,7 +260,8 @@ export default function ReportsScreen() {
         return a.appointment_date === slotKey;
       });
       const posMatches = standalone.filter((p: any) => {
-        const d = (p.created_at ?? "").slice(0, period === "year" ? 7 : 10);
+        const local = diaLocalDe(p.created_at ?? "", timezone);
+        const d = period === "year" ? local.slice(0, 7) : local;
         return d === slotKey;
       });
       return apptMatches.reduce((s: number, a: any) => s + priceOf(a), 0)

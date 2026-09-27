@@ -9,6 +9,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, MonoLabel, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { useTenant } from "@/lib/tenant";
+import { diaLocalDe, ZONA_POR_DEFECTO } from "@/lib/tz";
 import { supabase } from "@/lib/supabase";
 import { salePaymentLines, saleUsesMethod, type PaymentLine } from "@/lib/pos-payments";
 
@@ -90,15 +92,17 @@ function saleItemsLabel(items: SaleItem[]): string {
   return names.length === 0 ? "Sin servicios" : names.join(" · ");
 }
 
-function groupByDay(sales: Sale[], days: number): { label: string; pct: number }[] {
+function groupByDay(sales: Sale[], days: number, timeZone = ZONA_POR_DEFECTO): { label: string; pct: number }[] {
+  // Las cubetas y los cobros se fechan en la zona del negocio. Con UTC, un
+  // cobro de las 9 PM en Colombia caia en la barra del dia siguiente.
   const buckets: Record<string, number> = {};
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    buckets[d.toISOString().slice(0, 10)] = 0;
+    buckets[diaLocalDe(d, timeZone)] = 0;
   }
   for (const s of sales) {
-    const key = s.created_at.slice(0, 10);
+    const key = diaLocalDe(s.created_at, timeZone);
     if (key in buckets) buckets[key] += s.total;
   }
   const entries = Object.entries(buckets);
@@ -153,6 +157,7 @@ function TabResumen({ sales, session, movements, period, loading }: {
   period: "7" | "30" | "90"; loading: boolean;
 }) {
   const { t } = useTheme();
+  const { timezone } = useTenant();
   if (loading) return <LoadingView />;
 
   const totalIngresos = sales.reduce((a, s) => a + s.total, 0);
@@ -161,7 +166,7 @@ function TabResumen({ sales, session, movements, period, loading }: {
   const cajaIngresos  = movements.filter(m => m.type === "ingreso").reduce((a, m) => a + m.amount, 0);
   const cajaEgresos   = movements.filter(m => m.type === "egreso").reduce((a, m) => a + m.amount, 0);
   const cajaBalance   = session ? session.opening_amount + cajaIngresos - cajaEgresos : 0;
-  const barData       = groupByDay(sales, 12);
+  const barData       = groupByDay(sales, 12, timezone);
   const pmTotals      = groupByPaymentMethod(sales);
   const grandTotal    = Object.values(pmTotals).reduce((a, b) => a + b, 0) || 1;
   const recentSales   = sales.slice(0, 4);
