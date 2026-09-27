@@ -272,10 +272,11 @@ export default function DashboardScreen() {
       .eq("tenant_id", tenantId)
       .gte("created_at", `${fetchStartISO}T00:00:00`)
       .lte("created_at", `${todayISO}T23:59:59`);
-    // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha:
-    // una cita agendada vive aquí hasta que alguien la resuelve (la cobra o
-    // la marca cancelada / no asistió). No depende del período elegido, por
-    // eso va en consulta aparte. El tope de 2000 es el mismo del panel.
+    // "Por cobrar" es TODA cita agendada sin cobrar, sin importar la fecha —
+    // incluidas las vencidas, que se marcan en rojo. Una cita vive aquí hasta
+    // que alguien la resuelve: la cobra, o la marca cancelada / no asistió.
+    // NO depende del período elegido (a diferencia del resto de las tarjetas),
+    // por eso va en consulta aparte.
     let upcomingQ = supabase.from("appointments")
       .select("appointment_date, status, services(price)")
       .eq("tenant_id", tenantId)
@@ -290,7 +291,10 @@ export default function DashboardScreen() {
       apptQ.order("appointment_date").order("appointment_time").limit(2000),
       posQ,
       supabase.from("clients").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
-      upcomingQ.order("appointment_date").limit(2000),
+      // Descendente a proposito: si un negocio supera el tope, es preferible
+      // perder las mas viejas (probablemente abandonadas) que las futuras,
+      // que son compromisos reales. Con ascendente pasaba justo al reves.
+      upcomingQ.order("appointment_date", { ascending: false }).limit(2000),
     ]);
 
     const allAppts = (apptsRaw as unknown as Appt[]) ?? [];
@@ -544,7 +548,7 @@ export default function DashboardScreen() {
             raw={data.pendingRevenue} fmt={v => fmtMoney(v)}
             sub={data.overdueCount > 0
               ? `${fmtMoney(data.overdueRevenue)} vencido · ${data.overdueCount} sin cerrar`
-              : "citas agendadas"}
+              : "total sin cobrar"}
             alert={data.overdueCount > 0}
             delay={160}
           />
