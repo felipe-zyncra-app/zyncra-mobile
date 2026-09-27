@@ -23,7 +23,8 @@
         "monochromeImage": "./assets/adaptive-monochrome.png",
         "backgroundColor": "#07071a"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png",

@@ -1,3 +1,6 @@
+// Colores de marca y de la paleta CLARA. Para fondos, cards, texto y bordes
+// usa los tokens de useTheme().t (lib/theme), que cambian en modo oscuro:
+// Colors.bg/card/text/subtle solo sirven para superficies que siempre son claras.
 export const Colors = {
   red:     "#fb0f05",
   blue:    "#0027fe",
@@ -15,7 +18,9 @@ export const Colors = {
   text:    "#14111C",
   dim:     "#564E66",
   muted:   "#564E66",
-  subtle:  "#8E879B",
+  // #736C82 da 5:1 sobre blanco y 4,6:1 sobre el lienzo; el #8E879B de antes
+  // (3,2 a 3,5:1) no llegaba al 4,5:1 que piden los textos de 9-11 px.
+  subtle:  "#736C82",
   white:   "#ffffff",
   success: "#10b981",
   card:    "#ffffff",
@@ -43,7 +48,7 @@ export const MonoLabel = {
   fontSize: 10,
   letterSpacing: 0.8,
   textTransform: "uppercase" as const,
-  color: "#8E879B",
+  color: "#736C82",
 };
 
 export const Radius = {
@@ -94,6 +99,8 @@ export const CardStyle = {
 
 // "Glass" es legado: hoy mapea a la card sólida del portal web para que
 // las pantallas sin migrar hereden el nuevo estilo sin tocarlas una a una.
+// Es blanco fijo, así que en modo oscuro queda como un parche claro.
+/** @deprecated Usa useTheme().t: cardSolid/card de fondo y line/cardBorder de borde. */
 export const Glass = {
   card: {
     backgroundColor: "#FFFFFF",

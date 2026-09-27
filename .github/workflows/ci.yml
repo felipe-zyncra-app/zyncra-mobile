@@ -1,0 +1,56 @@
+# Verificación en cada push y PR: tipos, lint y tests.
+# El repo es público: este workflow no usa secretos ni los necesita.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Falla si alguien forzó el add de un archivo que .gitignore excluye por
+      # llevar credenciales (store.config.json trae la cuenta demo de App Review).
+      - name: Sin credenciales versionadas
+        run: |
+          prohibidos=$(git ls-files | grep -E -i \
+            '(^|/)store\.config\.json$|(^|/)google-services\.json$|service-account[^/]*\.json$|play-store[^/]*\.json$|-key\.json$|\.(p8|p12|jks|keystore|key|pem|mobileprovision)$|(^|/)\.env[^/]*\.local$' \
+            || true)
+          if [ -n "$prohibidos" ]; then
+            echo "::error::Archivos con credenciales en el repo:"
+            echo "$prohibidos"
+            exit 1
+          fi
+
+      # Expo SDK 54 pide Node 20.19.4 o superior.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # expo-env.d.ts no se versiona (lo genera expo start); sin él tsc no ve
+      # los tipos globales de Expo (imágenes, process.env.EXPO_PUBLIC_*).
+      - name: Tipos de Expo
+        run: printf '/// <reference types="expo/types" />\n' > expo-env.d.ts
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test -- --ci

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from "react-native-reanimated";
-import { Colors, Shadow, Glass } from "@/constants/theme";
+import { Colors, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
@@ -13,6 +13,7 @@ export type TabItem = { name: string; label: string; icon: IoniconName; iconFocu
 const PILL = 36;
 const BAR_PAD_H = 4; // paddingHorizontal de la barra — la píldora se posiciona relativo a esto
 const SLIDE = { stiffness: 260, damping: 22, mass: 0.9 };
+const BLUR_INTENSITY = 85;
 
 // Tab bar compartida (admin y staff): la píldora roja se desliza con física de
 // resorte hasta el tab activo en vez de saltar de golpe.
@@ -41,7 +42,8 @@ export default function FluidTabBar({ state, navigation, tabs }: BottomTabBarPro
     x.value = withSpring(targetX, SLIDE);
     pulse.value = 0.82;
     pulse.value = withSpring(1, { stiffness: 320, damping: 15 });
-  }, [targetX, innerW, onTab]);
+    // x y pulse son shared values: la referencia es estable, no disparan el efecto.
+  }, [targetX, innerW, onTab, x, pulse]);
 
   const pillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { scale: pulse.value }],
@@ -52,8 +54,9 @@ export default function FluidTabBar({ state, navigation, tabs }: BottomTabBarPro
   return (
     <View style={s.wrapper}>
       <BlurView
+        accessibilityRole="tablist"
         tint={theme.blurTint}
-        intensity={Glass.blurStrong.intensity}
+        intensity={BLUR_INTENSITY}
         style={[s.bar, Shadow.md, { backgroundColor: theme.tabBarBg, borderColor: theme.tabBarBorder }]}
         onLayout={e => setInnerW(e.nativeEvent.layout.width)}
       >
@@ -68,6 +71,9 @@ export default function FluidTabBar({ state, navigation, tabs }: BottomTabBarPro
               style={s.tab}
               onPress={() => navigation.navigate(route.name)}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityLabel={tab.label}
+              accessibilityState={{ selected: focused }}
             >
               <View style={s.tabInner}>
                 <View style={s.iconSlot}>

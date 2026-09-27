@@ -35,6 +35,11 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+# temporal de "npm run gen:types" (si el CLI falla a mitad, no pisa los tipos)
+lib/database.types.tmp
+
+# jest --coverage
+coverage/
 
 # generated native folders
 /ios

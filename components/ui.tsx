@@ -5,7 +5,7 @@
 // por vista. Todo theme-aware (claro/oscuro).
 
 import { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ViewStyle, StyleProp } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ViewStyle, TextStyle, StyleProp } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,6 +13,36 @@ import { Fonts, Gradients, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+
+// Los botones de solo ícono miden 36 pt; con este margen el área táctil llega
+// a 52 pt, por encima de los 44 pt que piden iOS y Android.
+const ICON_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
+// Nombre hablado por VoiceOver/TalkBack cuando un botón de ícono no trae
+// label propio. Sin esto el lector solo dice "botón".
+const ICON_LABELS: Partial<Record<IoniconName, string>> = {
+  "add": "Agregar",
+  "add-circle-outline": "Agregar",
+  "arrow-back": "Volver",
+  "chatbubbles-outline": "Mensajes",
+  "close": "Cerrar",
+  "create-outline": "Editar",
+  "pencil": "Editar",
+  "pencil-outline": "Editar",
+  "trash-outline": "Eliminar",
+  "refresh": "Actualizar",
+  "search": "Buscar",
+  "share-outline": "Compartir",
+  "download-outline": "Descargar",
+  "filter": "Filtrar",
+  "settings-outline": "Ajustes",
+  "chevron-back": "Anterior",
+  "chevron-forward": "Siguiente",
+};
+
+export function iconLabel(icon: IoniconName, label?: string): string | undefined {
+  return label ?? ICON_LABELS[icon];
+}
 
 // ─── Número que cuenta hasta su valor al montar / cambiar ─────────
 export function useCountUp(target: number, dur = 650) {
@@ -41,15 +71,16 @@ export function TrendChip({ trend, label, onDark }: {
   label: string;
   onDark?: boolean;
 }) {
-  const { t } = useTheme();
+  const { t, mode } = useTheme();
+  const dark = mode === "dark";
   const tone = onDark
     ? trend === "down"
       ? { bg: "rgba(239,68,68,0.2)", color: "#fca5a5" }
       : { bg: "rgba(16,185,129,0.16)", color: "#6ee7b7" }
     : trend === "up"
-      ? { bg: "rgba(16,185,129,0.09)", color: "#059669" }
+      ? { bg: dark ? "rgba(16,185,129,0.16)" : "rgba(16,185,129,0.09)", color: dark ? "#34d399" : "#059669" }
       : trend === "down"
-        ? { bg: "rgba(239,68,68,0.08)", color: "#dc2626" }
+        ? { bg: dark ? "rgba(239,68,68,0.18)" : "rgba(239,68,68,0.08)", color: dark ? "#f87171" : "#dc2626" }
         : { bg: t.chipBg, color: t.subtle };
   return (
     <View style={[s.trendChip, { backgroundColor: tone.bg }]}>
@@ -103,12 +134,12 @@ export function CardHead({ title, sub, aside }: {
 // ─── Etiqueta mono uppercase (statLabel / navGroupLabel del web) ──
 export function MonoTag({ children, style, color }: {
   children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<TextStyle>;
   color?: string;
 }) {
   const { t } = useTheme();
   return (
-    <Text style={[s.monoTag, { color: color ?? t.subtle }, style as any]}>{children}</Text>
+    <Text style={[s.monoTag, { color: color ?? t.subtle }, style]}>{children}</Text>
   );
 }
 
@@ -158,7 +189,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange }:
 }) {
   const { t } = useTheme();
   return (
-    <View style={[s.segWrap, { backgroundColor: t.cardSolid, borderColor: t.line }]}>
+    <View style={[s.segWrap, { backgroundColor: t.cardSolid, borderColor: t.line }]} accessibilityRole="tablist">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -167,6 +198,8 @@ export function SegmentedControl<T extends string>({ options, value, onChange }:
             style={[s.segBtn, active && { backgroundColor: t.ink }]}
             onPress={() => onChange(o.value)}
             activeOpacity={0.7}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
           >
             <Text style={[s.segBtnText, { color: active ? t.cardSolid : t.muted }]}>{o.label}</Text>
           </TouchableOpacity>
@@ -184,19 +217,26 @@ export function ScreenHeader({ title, subtitle, crumb, onBack, rightAction }: {
   subtitle?: string;
   crumb?: string;
   onBack?: () => void;
-  rightAction?: { icon: IoniconName; onPress: () => void };
+  /** label es lo que dice el lector de pantalla; si falta, se deduce del ícono. */
+  rightAction?: { icon: IoniconName; onPress: () => void; label?: string };
 }) {
   const { t } = useTheme();
   return (
     <View style={[s.screenHeader, { borderBottomColor: t.line }]}>
       {onBack && (
-        <TouchableOpacity onPress={onBack} style={[s.headerBackBtn, { backgroundColor: t.chipBg }]}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={[s.headerBackBtn, { backgroundColor: t.chipBg }]}
+          hitSlop={ICON_HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        >
           <Ionicons name="arrow-back" size={19} color={t.ink} />
         </TouchableOpacity>
       )}
       <View style={{ flex: 1, minWidth: 0 }}>
         {crumb ? <Text style={[s.headerCrumb, { color: t.subtle }]}>{crumb}</Text> : null}
-        <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>{title}</Text>
+        <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1} accessibilityRole="header">{title}</Text>
         {subtitle ? <Text style={[s.headerSub, { color: t.muted }]} numberOfLines={1}>{subtitle}</Text> : null}
       </View>
       {rightAction && (
@@ -204,11 +244,46 @@ export function ScreenHeader({ title, subtitle, crumb, onBack, rightAction }: {
           onPress={rightAction.onPress}
           style={[s.headerActionBtn, { backgroundColor: t.chipBg, borderColor: t.line }]}
           activeOpacity={0.7}
+          hitSlop={ICON_HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel={iconLabel(rightAction.icon, rightAction.label)}
         >
           <Ionicons name={rightAction.icon} size={18} color={t.ink} />
         </TouchableOpacity>
       )}
     </View>
+  );
+}
+
+// ─── IconButton — botón redondo de solo ícono ─────────────────────
+// label es obligatorio: es lo único que el lector de pantalla puede decir.
+// Úsalo para editar/eliminar/cerrar/semana anterior en vez de armar un
+// TouchableOpacity con un Ionicons suelto.
+export function IconButton({ icon, label, onPress, color, size = 18, tone = "chip", disabled, style }: {
+  icon: IoniconName;
+  label: string;
+  onPress: () => void;
+  color?: string;
+  size?: number;
+  /** chip: fondo gris suave; plain: sin fondo (para filas y listas). */
+  tone?: "chip" | "plain";
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { t } = useTheme();
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.7}
+      hitSlop={ICON_HIT_SLOP}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      style={[s.iconBtn, tone === "chip" && { backgroundColor: t.chipBg }, disabled && { opacity: 0.4 }, style]}
+    >
+      <Ionicons name={icon} size={size} color={color ?? t.ink} />
+    </TouchableOpacity>
   );
 }
 
@@ -250,6 +325,7 @@ const s = StyleSheet.create({
   headerTitle:   { fontSize: 17, fontFamily: Fonts.bold, letterSpacing: -0.3 },
   headerSub:     { fontSize: 11.5, fontFamily: Fonts.regular, marginTop: 1 },
   headerActionBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  iconBtn:         { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
 
   tenantBadge:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1, alignSelf: "flex-start", maxWidth: 180 },
   tenantBadgeText: { fontSize: 12, fontFamily: Fonts.semibold, letterSpacing: -0.1 },
