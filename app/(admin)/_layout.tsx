@@ -1,31 +1,15 @@
-import { Stack, Redirect } from "expo-router";
-import { View, ActivityIndicator } from "react-native";
-import { Colors } from "@/constants/theme";
-import { useAuth } from "@/lib/auth";
-import { useSubscription } from "@/lib/subscription";
-import AccountBlocked from "@/components/AccountBlocked";
+import { Stack } from "expo-router";
+import { useGuardArea } from "@/lib/guards";
 
 // Stack de la sección admin: (tabs) son las 5 pestañas principales; el
 // resto de rutas se apilan encima como sub-pantallas, con el gesto de
 // deslizar-atrás nativo de iOS (gestureEnabled por defecto en el Stack).
 export default function AdminLayout() {
-  const { role, loading } = useAuth();
-  const { blocked } = useSubscription();
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cream2 }}>
-        <ActivityIndicator color={Colors.red} size="large" />
-      </View>
-    );
-  }
-
-  if (role !== "admin") return <Redirect href="/(auth)/login" />;
-
-  // Suscripción suspendida o cancelada: se reemplaza TODA el área admin, así
-  // que no queda ninguna pantalla accesible por deep link o por el historial
-  // del stack. `blocked` es false mientras carga, para no parpadear.
-  if (blocked) return <AccountBlocked />;
+  // Rol, suscripción y bloqueo: ver lib/guards.tsx. Suscripción suspendida o
+  // cancelada reemplaza TODA el área admin; /settings/* tiene el mismo guard
+  // en su propio layout (vive fuera de este grupo).
+  const bloqueo = useGuardArea("admin");
+  if (bloqueo) return bloqueo;
 
   return (
     <Stack

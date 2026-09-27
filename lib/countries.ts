@@ -2,6 +2,9 @@
 // que src/lib/countries.ts en el panel web — Colombia primero: sigue siendo
 // el mercado principal y el default histórico.
 
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+import { telefonoE164 } from "./format";
+
 export interface Country {
   iso2: string;
   name: string;
@@ -40,6 +43,7 @@ export const COUNTRIES: Country[] = [
 ];
 
 export const DEFAULT_COUNTRY_DIAL = "57";
+export const DEFAULT_COUNTRY_ISO = "CO";
 
 export function flagEmoji(iso2: string): string {
   return iso2
@@ -49,6 +53,11 @@ export function flagEmoji(iso2: string): string {
 
 export function countryByDial(dial: string): Country {
   return COUNTRIES.find((c) => c.dial === dial) ?? COUNTRIES[0];
+}
+
+export function countryByIso(iso2: string | null | undefined): Country {
+  const code = (iso2 ?? "").toUpperCase();
+  return COUNTRIES.find((c) => c.iso2 === code) ?? COUNTRIES[0];
 }
 
 // Combina el indicativo elegido con el número nacional en el formato que se
@@ -75,4 +84,80 @@ export function splitPhone(raw: string, knownDial?: string | null): { countryCod
     }
   }
   return { countryCode: DEFAULT_COUNTRY_DIAL, phone: digits };
+}
+
+/**
+ * Para precargar el formulario de edición: país (iso2), indicativo y número
+ * nacional. Primero pregunta a libphonenumber, que distingue +1 de EE. UU.,
+ * Canadá o República Dominicana; si no reconoce el número usa splitPhone.
+ */
+export function separarTelefono(raw: string | null | undefined, knownDial?: string | null): { iso2: string; dial: string; national: string } {
+  const e164 = telefonoE164(raw, { indicativo: knownDial ?? undefined });
+  const n = e164 ? parsePhoneNumberFromString(e164) : undefined;
+  if (n) {
+    const iso = n.country && COUNTRIES.some(c => c.iso2 === n.country) ? n.country : countryByDial(n.countryCallingCode).iso2;
+    return { iso2: iso, dial: n.countryCallingCode, national: n.nationalNumber };
+  }
+  const { countryCode, phone } = splitPhone(raw ?? "", knownDial);
+  return { iso2: countryByDial(countryCode).iso2, dial: countryCode, national: phone };
+}
+
+export type TelefonoCliente = {
+  /** Lo que va en clients.phone: indicativo + nacional, sin "+" (E.164 sin el "+"). */
+  phone: string;
+  /** Lo que va en clients.phone_country_code. */
+  countryCode: string;
+  /** false si libphonenumber no lo reconoce como número real de ese país. */
+  valido: boolean;
+};
+
+/**
+ * Normaliza lo que escribió el usuario para guardarlo en clients.phone.
+ *
+ * Antes se pegaba el indicativo a los dígitos tal cual (combinePhone), así que
+ * "0300…" o "57 300…" con Colombia elegida quedaban como 570300… o 5757300…,
+ * y como hay UNIQUE (tenant_id, phone) el mismo cliente podía existir dos veces.
+ * Ahora libphonenumber quita el prefijo nacional y el indicativo repetido. Si
+ * el usuario escribe "+52…" se respeta ese país aunque el selector diga otro.
+ * Devuelve null si no hay dígitos.
+ */
+export function telefonoParaGuardar(iso2: string, national: string): TelefonoCliente | null {
+  const bruto = (national ?? "").trim();
+  const digitos = bruto.replace(/\D/g, "");
+  if (!digitos) return null;
+  const pais = countryByIso(iso2);
+  const internacional = bruto.startsWith("+") || digitos.startsWith("00");
+  const n = internacional
+    ? parsePhoneNumberFromString(`+${digitos.replace(/^00/, "")}`)
+    : parsePhoneNumberFromString(bruto, pais.iso2 as CountryCode);
+  if (n && n.isValid()) {
+    return { phone: n.number.slice(1), countryCode: n.countryCallingCode, valido: true };
+  }
+  return { phone: internacional ? digitos.replace(/^00/, "") : combinePhone(pais.dial, digitos), countryCode: pais.dial, valido: false };
+}
+
+/**
+ * Formas en que el MISMO teléfono puede estar guardado en clients.phone. Hay
+ * clientes viejos con los 10 dígitos colombianos sin indicativo, otros con
+ * indicativo y algunos con "+" o espacios (reserva pública, WhatsApp, cargues).
+ * Sirve para buscar duplicados antes de crear un cliente (el UNIQUE solo
+ * detecta la forma exacta). Mismo criterio que phoneOrFilter del web.
+ */
+export function variantesTelefono(phone: string, countryCode?: string | null): string[] {
+  const digitos = (phone ?? "").replace(/\D/g, "");
+  const out = new Set<string>();
+  if (digitos) out.add(digitos);
+  if (phone && phone.trim() !== digitos) out.add(phone.trim());
+  const e164 = telefonoE164(phone, { indicativo: countryCode ?? undefined });
+  if (e164) {
+    out.add(e164.slice(1));
+    out.add(e164);
+    const n = parsePhoneNumberFromString(e164);
+    if (n) {
+      out.add(n.nationalNumber);
+      out.add(`${n.countryCallingCode}${n.nationalNumber}`);
+    }
+  }
+  if (digitos.length > 10) out.add(digitos.slice(-10));
+  return [...out].filter(v => v.replace(/\D/g, "").length >= 6);
 }

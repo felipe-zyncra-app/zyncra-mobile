@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { AppState } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth";
 
@@ -46,6 +47,13 @@ type SubscriptionCtx = {
   /** Cuenta bloqueada por falta de pago. Misma regla que el panel web. */
   blocked: boolean;
   loading: boolean;
+  /**
+   * true cuando ya hay un estado en el que confiar: la respuesta del servidor,
+   * el último estado conocido guardado en el teléfono, o se agotó la espera
+   * (entonces se falla abierto). Los layouts muestran un spinner hasta aquí,
+   * para no montar el Panel de una cuenta suspendida (ARQ-16).
+   */
+  resuelto: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -58,6 +66,7 @@ const DEFAULTS: SubscriptionCtx = {
   notice: null,
   blocked: false,
   loading: true,
+  resuelto: false,
   refresh: async () => {},
 };
 
@@ -65,6 +74,12 @@ const SubscriptionContext = createContext<SubscriptionCtx>(DEFAULTS);
 
 const daysFromNow = (iso: string) =>
   Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+
+type EstadoGuardado = { status: SubStatus; isPaid: boolean; trialEndsAt: string | null; periodEnd: string | null };
+
+const claveCache = (userId: string) => `zyncra_sub_${userId}`;
+/** Espera máxima por la primera respuesta antes de fallar abierto. */
+const ESPERA_MAX_MS = 4_000;
 
 export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
   const { session, tenantId } = useAuth();
@@ -77,27 +92,79 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [periodEnd, setPeriodEnd] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resuelto, setResuelto] = useState(false);
+  const userRef = useRef<string | null>(userId);
+  userRef.current = userId;
+  // true cuando ya respondió el servidor para esta cuenta: la caché del
+  // teléfono (que se lee en paralelo) no debe pisar un estado más nuevo.
+  const deServidor = useRef(false);
+
+  const aplicar = useCallback((e: EstadoGuardado) => {
+    setStatus(e.status);
+    setIsPaid(e.isPaid);
+    setTrialEndsAt(e.trialEndsAt);
+    setPeriodEnd(e.periodEnd);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase.rpc("my_subscription_state");
+    const { data, error } = await supabase.rpc("my_subscription_state");
+    if (userRef.current !== userId) return;   // cambió la cuenta mientras tanto
+    if (error) {
+      // Sin respuesta no se cambia nada: antes un error dejaba el estado en
+      // "trial" y una cuenta suspendida quedaba operativa. Se queda con lo
+      // último conocido (del servidor o del teléfono).
+      setResuelto(true);
+      return;
+    }
     const row = Array.isArray(data) ? data[0] : data;
 
     // Sin fila no se bloquea a nadie: es lo mismo que hace el panel web
     // (subData null ⇒ "trial"). Cubre los negocios anteriores al cobro.
-    setStatus((row?.status as SubStatus) ?? "trial");
-    setIsPaid(!!row?.is_paid);
-    setTrialEndsAt(row?.trial_ends_at ?? null);
-    setPeriodEnd(row?.current_period_end ?? null);
-  }, [userId]);
+    const e: EstadoGuardado = {
+      status: (row?.status as SubStatus) ?? "trial",
+      isPaid: !!row?.is_paid,
+      trialEndsAt: row?.trial_ends_at ?? null,
+      periodEnd: row?.current_period_end ?? null,
+    };
+    deServidor.current = true;
+    aplicar(e);
+    setResuelto(true);
+    AsyncStorage.setItem(claveCache(userId), JSON.stringify(e)).catch(() => {});
+  }, [userId, aplicar]);
 
+  // Al cambiar de cuenta se arranca de cero (nada del usuario anterior) y se
+  // toma primero el último estado conocido de ESTA cuenta, para que una
+  // suspendida se bloquee al instante aunque el servidor tarde.
   useEffect(() => {
+    aplicar({ status: "trial", isPaid: false, trialEndsAt: null, periodEnd: null });
+    setResuelto(false);
+    deServidor.current = false;
     if (!userId) {
       setLoading(false);
       return;
     }
+    let vigente = true;
     setLoading(true);
-    refresh().finally(() => setLoading(false));
+    AsyncStorage.getItem(claveCache(userId))
+      .then(txt => {
+        if (!vigente || !txt || deServidor.current) return;
+        try {
+          const e = JSON.parse(txt) as EstadoGuardado;
+          if (e && typeof e.status === "string") { aplicar(e); setResuelto(true); }
+        } catch { /* caché corrupta: se ignora */ }
+      })
+      .catch(() => {});
+    const espera = setTimeout(() => { if (vigente) setResuelto(true); }, ESPERA_MAX_MS);
+    return () => { vigente = false; clearTimeout(espera); };
+  }, [userId, aplicar]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let vigente = true;
+    setLoading(true);
+    refresh().finally(() => { if (vigente) setLoading(false); });
+    return () => { vigente = false; };
     // tenantId entra en las dependencias porque al registrarse el negocio se
     // crea DESPUÉS de la sesión: sin esto la primera lectura se quedaría con
     // el estado de un usuario que todavía no tenía suscripción.
@@ -126,12 +193,14 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
   // Espejo exacto de `showBlocked` en ZyncraSas_v1/src/app/admin/layout.tsx.
   // El guard de isPaid evita bloquear cuentas de cortesía o manuales.
-  // Mientras carga nunca bloquea: no queremos un parpadeo de "cuenta
-  // bloqueada" en cada arranque, y ante un fallo de red se falla abierto.
-  const blocked = !loading && isPaid && (status === "suspended" || status === "cancelled");
+  // Se bloquea en cuanto hay un estado en el que confiar (servidor o el
+  // último conocido en el teléfono); mientras no, los layouts esperan con
+  // un spinner. Si el servidor nunca respondió y no hay nada guardado, se
+  // falla abierto al agotar la espera.
+  const blocked = resuelto && isPaid && (status === "suspended" || status === "cancelled");
 
   let notice: SubscriptionNotice = null;
-  if (!loading && !blocked) {
+  if (resuelto && !blocked) {
     if (status === "trial" && trialDaysLeft !== null && trialDaysLeft <= WARNING_DAYS) {
       notice = { kind: "trial-ending", days: Math.max(0, trialDaysLeft) };
     } else if (isPaid && status === "overdue") {
@@ -146,7 +215,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
   return (
     <SubscriptionContext.Provider
-      value={{ status, isPaid, trialEndsAt, trialDaysLeft, daysToDue, notice, blocked, loading, refresh }}
+      value={{ status, isPaid, trialEndsAt, trialDaysLeft, daysToDue, notice, blocked, loading, resuelto, refresh }}
     >
       {children}
     </SubscriptionContext.Provider>

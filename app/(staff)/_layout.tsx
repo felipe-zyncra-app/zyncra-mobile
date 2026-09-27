@@ -1,10 +1,6 @@
-﻿import { Tabs, Redirect } from "expo-router";
-import { View, ActivityIndicator } from "react-native";
-import { Colors } from "@/constants/theme";
-import { useAuth } from "@/lib/auth";
+import { Tabs } from "expo-router";
 import { useStaffPermissions } from "@/lib/permissions";
-import { useSubscription } from "@/lib/subscription";
-import AccountBlocked from "@/components/AccountBlocked";
+import { useGuardArea } from "@/lib/guards";
 import FluidTabBar, { type TabItem } from "@/components/FluidTabBar";
 
 const TABS: TabItem[] = [
@@ -14,24 +10,14 @@ const TABS: TabItem[] = [
 ];
 
 export default function StaffLayout() {
-  const { role, loading } = useAuth();
   const perms = useStaffPermissions();
-  const { blocked } = useSubscription();
+  // El negocio sin pago al día bloquea también al equipo: si no, el dueño
+  // queda fuera pero sus colaboradores siguen agendando y cobrando. Un
+  // colaborador desactivado va a /sin-acceso (ver lib/guards.tsx).
+  const bloqueo = useGuardArea("staff");
   const visibleTabs = perms.clients_tab ? TABS : TABS.filter(t => t.name !== "clients");
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cream2 }}>
-        <ActivityIndicator color={Colors.red} size="large" />
-      </View>
-    );
-  }
-
-  if (role !== "staff") return <Redirect href="/(auth)/login" />;
-
-  // El negocio sin pago al día bloquea también al equipo: si no, el dueño
-  // queda fuera pero sus colaboradores siguen agendando y cobrando.
-  if (blocked) return <AccountBlocked />;
+  if (bloqueo) return bloqueo;
 
   return (
     <Tabs tabBar={(props) => <FluidTabBar {...props} tabs={visibleTabs} />} screenOptions={{ headerShown: false }}>

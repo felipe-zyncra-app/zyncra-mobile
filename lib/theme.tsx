@@ -17,7 +17,10 @@ const LIGHT = {
   cardSoftBorder: "rgba(20,15,30,0.08)",
   text:         "#14111C",
   muted:        "#564E66",
-  subtle:       "#8E879B",
+  // #736C82: 5:1 sobre blanco y 4,6:1 sobre el lienzo (AA). El #8E879B de
+  // antes daba 3,2:1 y las fechas y etiquetas pequeñas no se leían (CAL-24).
+  // Es el mismo valor de Colors.subtle en constants/theme.ts.
+  subtle:       "#736C82",
   border:       "rgba(20,15,30,0.08)",
   divider:      "rgba(20,15,30,0.08)",
   inputBg:      "#FFFFFF",
@@ -48,7 +51,9 @@ const DARK = {
   cardSoftBorder: "rgba(255,255,255,0.08)",
   text:         "#F0EFF4",
   muted:        "#9B95A8",
-  subtle:       "#6B6580",
+  // #8A849C: 5,4:1 sobre el fondo y 5:1 sobre las tarjetas (AA). El #6B6580
+  // de antes daba 3,3:1 sobre las tarjetas (CAL-24).
+  subtle:       "#8A849C",
   border:       "rgba(255,255,255,0.08)",
   divider:      "rgba(255,255,255,0.06)",
   inputBg:      "#16161F",

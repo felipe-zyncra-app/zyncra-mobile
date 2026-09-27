@@ -22,7 +22,7 @@ const TABS: { name: string; label: string; icon: IoniconName; iconFocused: Ionic
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <View style={s.wrapper}>
-      <View style={[s.bar, Shadow.md]}>
+      <View style={[s.bar, Shadow.md]} accessibilityRole="tablist">
         {state.routes.filter(r => TABS.some(t => t.name === r.name)).map((route) => {
           const focused = state.routes[state.index].name === route.name;
           const tab = TABS.find(t => t.name === route.name) ?? TABS[0];
@@ -33,6 +33,11 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               style={s.tab}
               onPress={() => navigation.navigate(route.name)}
               activeOpacity={0.7}
+              // Con el lector de pantalla se anuncia como pestaña y cuál está
+              // activa; antes solo leía el texto, sin rol ni estado (CAL-24).
+              accessibilityRole="tab"
+              accessibilityLabel={tab.label}
+              accessibilityState={{ selected: focused }}
             >
               <View style={[s.tabInner, focused && s.tabInnerActive]}>
                 {focused && (

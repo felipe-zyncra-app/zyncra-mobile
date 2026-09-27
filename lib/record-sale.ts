@@ -1,21 +1,36 @@
 import { supabase } from "./supabase";
 import { getActiveLocationId } from "./active-location";
+import { esErrorDeRed, mensajeError, nuevoId } from "./db";
+import { verificarContrasena } from "./auth";
 
 /**
  * Registro de un cobro desde el móvil — espejo del POS web
- * (src/app/admin/pos/page.tsx, handleCharge). Una venta son TRES filas:
+ * (src/app/admin/pos/page.tsx, handleCharge). Una venta son estas filas:
  *
- *   · pos_sales       → la venta: dashboards, "total gastado" del CRM, finanzas
- *   · pos_sale_items  → el detalle: la Caja web muestra los ítems de cada venta
- *   · cash_movements  → el ingreso en la caja abierta: Caja (web y móvil) suma
- *                       SOLO cash_movements, así que una venta sin movimiento
- *                       es invisible en el arqueo y el cierre nunca cuadra
- *
- * Antes el móvil insertaba únicamente pos_sales: los cobros hechos desde el
- * celular aparecían en el dashboard pero nunca en la Caja.
+ *   · pos_sales           → la venta: dashboards, "total gastado" del CRM, finanzas
+ *   · pos_sale_items      → el detalle: la Caja web muestra los ítems de cada venta
+ *   · cash_movements      → el ingreso en la caja abierta: Caja (web y móvil) suma
+ *                           SOLO cash_movements, así que una venta sin movimiento
+ *                           es invisible en el arqueo y el cierre nunca cuadra
+ *   · inventory_movements → salida de stock de los productos (un trigger AFTER
+ *                           INSERT descuenta products.stock_quantity)
  *
  * Igual que el web, exige caja abierta en la sede activa. Si no hay, devuelve
  * NO_CASH_SESSION sin tocar nada y el caller decide (aviso + ir a Caja).
+ *
+ * ATOMICIDAD SIN RPC (DIN-04 / CAL-06)
+ * Lo correcto es una función SQL transaccional; mientras no exista:
+ *   · el id de la venta lo genera el teléfono (`saleId`, uno por hoja de
+ *     cobro). Si se pierde la respuesta de un insert que sí entró, el
+ *     reintento con el MISMO id encuentra la venta y completa lo que falte en
+ *     vez de crear otra (sin doble ingreso ni doble salida de inventario);
+ *   · cada paso revisa su error; si uno falla, se deshace lo creado
+ *     (compensación) y se devuelve el error con un mensaje en español;
+ *   · dos llamadas simultáneas con el mismo saleId (doble toque) comparten la
+ *     misma operación;
+ *   · no se cobra dos veces una cita que ya tiene venta (DIN-06).
+ * El inventario va al final porque es lo único que no se deshace borrando: el
+ * trigger solo actúa al insertar.
  */
 
 export type OpenCashSession = { id: string; location_id: string | null };
@@ -24,6 +39,8 @@ export type OpenCashSession = { id: string; location_id: string | null };
  * Caja abierta con el mismo alcance que /admin/caja y el POS web: si hay sede
  * activa, la sesión tiene que ser de ESA sede; sin sede, cualquier abierta.
  * `locationId` undefined → se resuelve la sede activa; null → sin filtro de sede.
+ * Devuelve null si no hay caja abierta y LANZA si la consulta falla (antes un
+ * corte de red se leía como "la caja está cerrada").
  */
 export async function findOpenCashSession(
   tenantId: string,
@@ -35,7 +52,8 @@ export async function findOpenCashSession(
     .eq("tenant_id", tenantId)
     .is("closed_at", null);
   if (loc) q = q.eq("location_id", loc);
-  const { data } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
+  const { data, error } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
   return data ? { id: data.id, location_id: (data.location_id as string | null) ?? null } : null;
 }
 
@@ -53,6 +71,12 @@ export interface SaleItemInput {
 export interface PaymentLine { method: string; amount: number }
 
 export interface RecordSaleInput {
+  /**
+   * Clave de idempotencia = id de la venta. Generarla UNA vez al abrir la hoja
+   * de cobro (nuevoId() de lib/db) y reutilizarla en cada reintento. Si no
+   * viene se genera aquí, pero entonces un reintento no se reconoce.
+   */
+  saleId?: string;
   tenantId: string;
   total: number;
   /** Antes del descuento. Default: total. */
@@ -73,103 +97,451 @@ export interface RecordSaleInput {
   description?: string;
 }
 
+export type RecordSaleError = "NO_CASH_SESSION" | "SALE_FAILED" | "APPOINTMENT_FAILED" | "ALREADY_CHARGED";
+
 export type RecordSaleResult =
-  | { ok: true; saleId: string }
-  | { ok: false; error: "NO_CASH_SESSION" | "SALE_FAILED" | "APPOINTMENT_FAILED" };
+  | {
+      ok: true;
+      saleId: string;
+      /** true si la venta ya existía (reintento de un cobro que sí había entrado). */
+      yaExistia?: boolean;
+    }
+  | {
+      ok: false;
+      error: RecordSaleError;
+      /** Mensaje en español listo para mostrar. */
+      message: string;
+      /** ALREADY_CHARGED: la venta existente. APPOINTMENT_FAILED: la venta creada. */
+      saleId?: string;
+      /**
+       * true si quedó algo a medias que no se pudo deshacer (sin red). Reintentar
+       * con el MISMO saleId lo completa.
+       */
+      pendiente?: boolean;
+    };
 
-export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResult> {
-  const locationId = input.locationId ?? await getActiveLocationId(input.tenantId);
-  const session = await findOpenCashSession(input.tenantId, locationId);
-  if (!session) return { ok: false, error: "NO_CASH_SESSION" };
+const MSG_RED = "Revisa tu conexión e inténtalo de nuevo. Si el cobro alcanzó a guardarse, el reintento no lo duplica.";
 
-  const payments = input.payments && input.payments.length > 0 ? input.payments : null;
-  const paymentMethod = payments ? "mixto" : input.paymentMethod;
-  const saleLocation = locationId ?? session.location_id;
+const enVuelo = new Map<string, Promise<RecordSaleResult>>();
 
-  const { data: sale, error: saleErr } = await supabase.from("pos_sales").insert({
-    tenant_id: input.tenantId,
-    // En vista sin sede la venta hereda la sede de la caja abierta (igual que el web)
-    location_id: saleLocation,
-    client_id: input.clientId ?? null,
-    appointment_id: input.appointmentId ?? null,
-    subtotal: input.subtotal ?? input.total,
-    discount_type: input.discountType ?? null,
-    discount_value: input.discountValue ?? 0,
-    total: input.total,
-    payment_method: paymentMethod,
-    payments,
-    note: input.note ?? null,
-  }).select("id").single();
-  if (saleErr || !sale) return { ok: false, error: "SALE_FAILED" };
-
-  await supabase.from("pos_sale_items").insert(
-    input.items.map(i => ({
-      sale_id: sale.id,
-      service_id: i.service_id ?? null,
-      product_id: i.product_id ?? null,
-      item_type: i.item_type ?? "service",
-      name: i.name,
-      price: i.price,
-      quantity: i.quantity,
-    })),
-  );
-
-  // Productos vendidos → salida de inventario (el stock se recalcula desde los
-  // movimientos, igual que hace el POS web).
-  const productItems = input.items.filter(i => i.product_id);
-  if (productItems.length > 0) {
-    await supabase.from("inventory_movements").insert(
-      productItems.map(i => ({
-        tenant_id: input.tenantId,
-        product_id: i.product_id,
-        type: "sale",
-        quantity: -i.quantity,
-        reference: sale.id,
-        notes: `Venta POS${input.note ? ` · ${input.note}` : ""}`,
-        unit_cost: i.unit_cost ?? null,
-        ...(saleLocation ? { location_id: saleLocation } : {}),
-      })),
-    );
-  }
-
-  const description = input.description ?? `Venta POS${input.note ? ` · ${input.note}` : ""}`;
-  const movementBase = {
-    session_id: session.id,
-    tenant_id: input.tenantId,
-    type: "ingreso",
-    description,
-    category: "POS",
-    pos_sale_id: sale.id,
-  };
-  await supabase.from("cash_movements").insert(
-    payments
-      ? payments.map(p => ({ ...movementBase, amount: p.amount, payment_method: p.method }))
-      : [{ ...movementBase, amount: input.total, payment_method: input.paymentMethod }],
-  );
-
-  // La cita se marca al final: si no hay caja o la venta falla, la cita no
-  // queda "completada" sin cobro registrado.
-  if (input.appointmentId) {
-    const { error } = await supabase.from("appointments")
-      .update({ status: "completed" })
-      .eq("id", input.appointmentId);
-    if (error) return { ok: false, error: "APPOINTMENT_FAILED" };
-  }
-
-  return { ok: true, saleId: sale.id };
+export function recordSale(input: RecordSaleInput): Promise<RecordSaleResult> {
+  const saleId = input.saleId || nuevoId();
+  const previa = enVuelo.get(saleId);
+  if (previa) return previa;
+  const p = registrar({ ...input, saleId }).finally(() => enVuelo.delete(saleId));
+  enVuelo.set(saleId, p);
+  return p;
 }
 
-/**
- * Anula un cobro. cash_movements.pos_sale_id es ON DELETE SET NULL (no
- * cascade): sin borrarlo explícito quedaba un ingreso huérfano en la caja y el
- * arqueo seguía contando la venta anulada. pos_sale_items sí cascadea.
- */
-export async function voidSale(saleId: string, appointmentId?: string | null): Promise<{ ok: boolean }> {
-  await supabase.from("cash_movements").delete().eq("pos_sale_id", saleId);
-  const { error } = await supabase.from("pos_sales").delete().eq("id", saleId);
-  if (error) return { ok: false };
-  if (appointmentId) {
-    await supabase.from("appointments").update({ status: "confirmed" }).eq("id", appointmentId);
+function fallo(error: RecordSaleError, err: unknown, extra: { saleId?: string; pendiente?: boolean } = {}): RecordSaleResult {
+  const message = error === "SALE_FAILED"
+    ? (esErrorDeRed(err) ? MSG_RED : mensajeError(err, "No se pudo registrar el cobro"))
+    : mensajeError(err);
+  return { ok: false, error, message, ...extra };
+}
+
+async function contar(tabla: "pos_sale_items" | "cash_movements" | "inventory_movements", col: string, saleId: string, extra?: (q: any) => any): Promise<number> {
+  let q = supabase.from(tabla).select("id", { count: "exact", head: true }).eq(col, saleId);
+  if (extra) q = extra(q);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function ventaExiste(saleId: string): Promise<boolean> {
+  const { data, error } = await supabase.from("pos_sales").select("id").eq("id", saleId).maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/** Deshace lo creado. Devuelve false si no se pudo (queda pendiente para el reintento). */
+async function compensar(saleId: string, pasos: { movimientos?: boolean }): Promise<boolean> {
+  try {
+    if (pasos.movimientos) {
+      const { error } = await supabase.from("cash_movements").delete().eq("pos_sale_id", saleId);
+      if (error) return false;
+    }
+    // pos_sale_items cae en cascada con la venta.
+    const { error } = await supabase.from("pos_sales").delete().eq("id", saleId);
+    return !error;
+  } catch {
+    return false;
   }
-  return { ok: true };
+}
+
+async function registrar(input: RecordSaleInput & { saleId: string }): Promise<RecordSaleResult> {
+  const { saleId } = input;
+  const payments = input.payments && input.payments.length > 0 ? input.payments : null;
+  const paymentMethod = payments ? "mixto" : input.paymentMethod;
+
+  let session: OpenCashSession | null;
+  let locationId: string | null;
+  let existia = false;
+  try {
+    locationId = input.locationId ?? await getActiveLocationId(input.tenantId);
+    existia = await ventaExiste(saleId);
+
+    // Una cita ya cobrada (por otra hoja, otro dispositivo o el web) no se
+    // vuelve a cobrar: panel y comisiones contaban una venta y la Caja dos.
+    if (!existia && input.appointmentId) {
+      const { data: otra, error } = await supabase.from("pos_sales")
+        .select("id").eq("appointment_id", input.appointmentId).neq("id", saleId).limit(1);
+      if (error) throw error;
+      if (otra && otra.length > 0) {
+        // La cita pudo quedar sin marcar si aquel cobro falló al final.
+        await supabase.from("appointments").update({ status: "completed" })
+          .eq("id", input.appointmentId).in("status", ["pending", "confirmed"]);
+        return {
+          ok: false,
+          error: "ALREADY_CHARGED",
+          saleId: otra[0].id,
+          message: "Esta cita ya tiene un cobro registrado. Si hay que corregirlo, anúlalo desde el historial de cobros y vuelve a cobrar.",
+        };
+      }
+    }
+
+    session = await findOpenCashSession(input.tenantId, locationId);
+  } catch (e) {
+    return fallo("SALE_FAILED", e);
+  }
+  if (!session) {
+    return {
+      ok: false,
+      error: "NO_CASH_SESSION",
+      message: "La caja está cerrada. Abre la caja de esta sede antes de cobrar.",
+    };
+  }
+  const saleLocation = locationId ?? session.location_id;
+
+  // 1. La venta.
+  if (!existia) {
+    const { error } = await supabase.from("pos_sales").insert({
+      id: saleId,
+      tenant_id: input.tenantId,
+      // En vista sin sede la venta hereda la sede de la caja abierta (igual que el web)
+      location_id: saleLocation,
+      client_id: input.clientId ?? null,
+      appointment_id: input.appointmentId ?? null,
+      subtotal: input.subtotal ?? input.total,
+      discount_type: input.discountType ?? null,
+      discount_value: input.discountValue ?? 0,
+      total: input.total,
+      payment_method: paymentMethod,
+      payments,
+      note: input.note ?? null,
+    });
+    if (error) {
+      // ¿Entró aunque se perdió la respuesta, o un doble envío ganó la carrera?
+      let entro = false;
+      try { entro = await ventaExiste(saleId); } catch { entro = false; }
+      if (!entro) {
+        if ((error as { code?: string }).code === "23505" && input.appointmentId) {
+          // Índice único por cita (cuando exista): otro dispositivo la cobró.
+          return { ok: false, error: "ALREADY_CHARGED", message: "Esta cita ya tiene un cobro registrado." };
+        }
+        return fallo("SALE_FAILED", error);
+      }
+      existia = true;
+    }
+  }
+
+  // 2. Ítems (todo o nada: un solo insert).
+  try {
+    const yaHay = existia ? await contar("pos_sale_items", "sale_id", saleId) : 0;
+    if (yaHay === 0 && input.items.length > 0) {
+      const { error } = await supabase.from("pos_sale_items").insert(
+        input.items.map(i => ({
+          sale_id: saleId,
+          service_id: i.service_id ?? null,
+          product_id: i.product_id ?? null,
+          item_type: i.item_type ?? "service",
+          name: i.name,
+          price: i.price,
+          quantity: i.quantity,
+        })),
+      );
+      if (error && (await contar("pos_sale_items", "sale_id", saleId).catch(() => 0)) === 0) throw error;
+    }
+  } catch (e) {
+    const ok = await compensar(saleId, {});
+    return fallo("SALE_FAILED", e, { pendiente: !ok });
+  }
+
+  // 3. Ingreso en la caja abierta.
+  try {
+    const yaHay = existia ? await contar("cash_movements", "pos_sale_id", saleId) : 0;
+    if (yaHay === 0) {
+      const description = input.description ?? `Venta POS${input.note ? ` · ${input.note}` : ""}`;
+      const base = {
+        session_id: session.id,
+        tenant_id: input.tenantId,
+        type: "ingreso",
+        description,
+        category: "POS",
+        pos_sale_id: saleId,
+      };
+      const { error } = await supabase.from("cash_movements").insert(
+        payments
+          ? payments.map(p => ({ ...base, amount: p.amount, payment_method: p.method }))
+          : [{ ...base, amount: input.total, payment_method: input.paymentMethod }],
+      );
+      if (error && (await contar("cash_movements", "pos_sale_id", saleId).catch(() => 0)) === 0) throw error;
+    }
+  } catch (e) {
+    const ok = await compensar(saleId, { movimientos: true });
+    return fallo("SALE_FAILED", e, { pendiente: !ok });
+  }
+
+  // 4. Salida de inventario (al final: no se deshace borrando).
+  const productItems = input.items.filter(i => i.product_id);
+  if (productItems.length > 0) {
+    try {
+      const yaHay = existia
+        ? await contar("inventory_movements", "reference", saleId, q => q.eq("type", "sale"))
+        : 0;
+      if (yaHay === 0) {
+        const { error } = await supabase.from("inventory_movements").insert(
+          productItems.map(i => ({
+            tenant_id: input.tenantId,
+            product_id: i.product_id,
+            type: "sale",
+            quantity: -i.quantity,
+            reference: saleId,
+            notes: `Venta POS${input.note ? ` · ${input.note}` : ""}`,
+            unit_cost: i.unit_cost ?? null,
+            ...(saleLocation ? { location_id: saleLocation } : {}),
+          })),
+        );
+        if (error) {
+          const entro = await contar("inventory_movements", "reference", saleId, q => q.eq("type", "sale")).catch(() => -1);
+          if (entro === 0) throw error;
+          if (entro < 0) {
+            // No se sabe si entró: no se deshace la venta (podría descontar
+            // stock dos veces); el reintento con el mismo id lo aclara.
+            return fallo("SALE_FAILED", error, { saleId, pendiente: true });
+          }
+        }
+      }
+    } catch (e) {
+      const ok = await compensar(saleId, { movimientos: true });
+      return fallo("SALE_FAILED", e, { pendiente: !ok });
+    }
+  }
+
+  // 5. La cita se marca al final: si no hay caja o la venta falla, la cita no
+  // queda "completada" sin cobro registrado. .select() detecta 0 filas (RLS).
+  if (input.appointmentId) {
+    const { data, error } = await supabase.from("appointments")
+      .update({ status: "completed" })
+      .eq("id", input.appointmentId)
+      .select("id");
+    if (error || !data || data.length === 0) {
+      return {
+        ok: false,
+        error: "APPOINTMENT_FAILED",
+        saleId,
+        message: "El cobro quedó registrado en la caja, pero la cita no se marcó como completada. Revísala en la agenda.",
+      };
+    }
+  }
+
+  return { ok: true, saleId, ...(existia ? { yaExistia: true } : {}) };
+}
+
+// ─── Anular un cobro ──────────────────────────────────────────────────────────
+
+export type VoidSaleError = "NOT_ALLOWED" | "HAS_INVOICE" | "HAS_GIFT_CARD" | "NO_CASH_SESSION" | "FAILED";
+
+export type VoidSaleResult =
+  | {
+      ok: true;
+      /** Algo secundario no se pudo (stock o estado de la cita): mostrarlo como aviso. */
+      aviso?: string;
+    }
+  | { ok: false; error: VoidSaleError; message: string };
+
+type MovimientoCaja = {
+  id: string;
+  session_id: string;
+  tenant_id: string;
+  type: string;
+  amount: number;
+  description: string;
+  category: string | null;
+  payment_method: string | null;
+  created_at: string;
+  cash_sessions: { closed_at: string | null } | null;
+};
+
+/**
+ * Anula un cobro (DIN-08 / ESQ-20).
+ *
+ *  · Con `contrasena`, primero verifica la del usuario (el web la exige). La
+ *    UI debería pedirla; si no viene, se anula como antes.
+ *  · No anula ventas con factura electrónica vigente ni con bono redimido:
+ *    eso se revierte desde el panel web.
+ *  · Movimientos de una caja YA CERRADA no se borran (su arqueo ya se contó):
+ *    se registra un egreso "Anulación" en la caja abierta de hoy, que es de
+ *    donde sale el dinero devuelto.
+ *  · Movimientos de la caja abierta se borran (cash_movements.pos_sale_id es
+ *    SET NULL, no cascade: sin borrarlos quedaba un ingreso huérfano).
+ *  · Devuelve el stock con movimientos 'return' (borrar los 'sale' no repone:
+ *    el trigger solo actúa al insertar).
+ *  · Devuelve la cita a "confirmada" solo si no le queda otra venta.
+ */
+export async function voidSale(
+  saleId: string,
+  appointmentId?: string | null,
+  opciones: { contrasena?: string } = {},
+): Promise<VoidSaleResult> {
+  const falla = (e: unknown, ctx = "No se pudo anular el cobro"): VoidSaleResult =>
+    ({ ok: false, error: "FAILED", message: mensajeError(e, ctx) });
+
+  if (opciones.contrasena !== undefined) {
+    const v = await verificarContrasena(opciones.contrasena);
+    if (!v.ok) return { ok: false, error: "NOT_ALLOWED", message: v.mensaje ?? "La contraseña no es correcta." };
+  }
+
+  // 0. Leer todo antes de tocar nada.
+  const { data: sale, error: eSale } = await supabase.from("pos_sales")
+    .select("id, tenant_id, location_id, appointment_id, total")
+    .eq("id", saleId).maybeSingle();
+  if (eSale) return falla(eSale);
+  if (!sale) return { ok: true };   // ya estaba anulada: nada que hacer
+  const apptId = appointmentId ?? (sale.appointment_id as string | null) ?? null;
+
+  const [inv, gift, movs, stock] = await Promise.all([
+    supabase.from("invoices").select("id, credit_note_cufe").eq("pos_sale_id", saleId),
+    supabase.from("gift_card_transactions").select("id").eq("pos_sale_id", saleId).eq("type", "redencion"),
+    supabase.from("cash_movements")
+      .select("id, session_id, tenant_id, type, amount, description, category, payment_method, created_at, cash_sessions(closed_at)")
+      .eq("pos_sale_id", saleId),
+    supabase.from("inventory_movements")
+      .select("product_id, quantity, type, unit_cost, location_id")
+      .eq("reference", saleId),
+  ]);
+  const errLectura = inv.error || gift.error || movs.error || stock.error;
+  if (errLectura) return falla(errLectura);
+
+  if ((inv.data ?? []).some(f => !f.credit_note_cufe)) {
+    return {
+      ok: false,
+      error: "HAS_INVOICE",
+      message: "Este cobro tiene factura electrónica. Emite primero la nota crédito desde el panel web y luego anúlalo.",
+    };
+  }
+  if ((gift.data ?? []).length > 0) {
+    return {
+      ok: false,
+      error: "HAS_GIFT_CARD",
+      message: "Este cobro se pagó con un bono de regalo. Anúlalo desde el panel web para devolver el saldo del bono.",
+    };
+  }
+
+  const movimientos = (movs.data ?? []) as unknown as MovimientoCaja[];
+  const abiertos = movimientos.filter(m => !m.cash_sessions?.closed_at);
+  const cerrados = movimientos.filter(m => !!m.cash_sessions?.closed_at);
+
+  // 1. Caja ya cerrada → egreso en la caja abierta de hoy.
+  let egresosCreados: string[] = [];
+  if (cerrados.length > 0) {
+    let abierta: OpenCashSession | null;
+    try {
+      abierta = await findOpenCashSession(sale.tenant_id as string, (sale.location_id as string | null) ?? null);
+    } catch (e) {
+      return falla(e);
+    }
+    if (!abierta) {
+      return {
+        ok: false,
+        error: "NO_CASH_SESSION",
+        message: "Este cobro es de una caja ya cerrada. Abre la caja de hoy para registrar la devolución del dinero y vuelve a intentarlo.",
+      };
+    }
+    const filas = cerrados.map(m => ({
+      id: nuevoId(),
+      session_id: abierta!.id,
+      tenant_id: m.tenant_id,
+      type: m.type === "ingreso" ? "egreso" : "ingreso",
+      amount: m.amount,
+      payment_method: m.payment_method,
+      category: m.category ?? "POS",
+      description: `Anulación · ${m.description}`.slice(0, 500),
+      pos_sale_id: null,
+    }));
+    const { error } = await supabase.from("cash_movements").insert(filas);
+    if (error) return falla(error);
+    egresosCreados = filas.map(f => f.id);
+  }
+
+  const deshacerEgresos = async () => {
+    if (egresosCreados.length > 0) await supabase.from("cash_movements").delete().in("id", egresosCreados);
+  };
+
+  // 2. Borrar los ingresos de la caja abierta (por id: después de borrar la
+  //    venta quedarían con pos_sale_id null y ya no se podrían encontrar).
+  if (abiertos.length > 0) {
+    const { error } = await supabase.from("cash_movements").delete().in("id", abiertos.map(m => m.id));
+    if (error) {
+      await deshacerEgresos();
+      return falla(error);
+    }
+  }
+
+  // 3. Borrar la venta (los ítems caen en cascada).
+  const { data: borrada, error: eDel } = await supabase.from("pos_sales").delete().eq("id", saleId).select("id");
+  if (eDel || !borrada || borrada.length === 0) {
+    // Devolver la caja a como estaba.
+    if (abiertos.length > 0) {
+      await supabase.from("cash_movements").insert(abiertos.map(m => ({
+        id: m.id,
+        session_id: m.session_id,
+        tenant_id: m.tenant_id,
+        type: m.type,
+        amount: m.amount,
+        description: m.description,
+        category: m.category,
+        payment_method: m.payment_method,
+        created_at: m.created_at,
+        pos_sale_id: saleId,
+      })));
+    }
+    await deshacerEgresos();
+    return eDel
+      ? falla(eDel)
+      : { ok: false, error: "NOT_ALLOWED", message: "No tienes permiso para anular este cobro." };
+  }
+
+  const avisos: string[] = [];
+
+  // 4. Reponer stock de lo que salió por esta venta (si no se repuso ya).
+  const salidas = (stock.data ?? []).filter(m => m.type === "sale");
+  const yaRepuesto = (stock.data ?? []).some(m => m.type === "return");
+  if (salidas.length > 0 && !yaRepuesto) {
+    const { error } = await supabase.from("inventory_movements").insert(salidas.map(m => ({
+      tenant_id: sale.tenant_id,
+      product_id: m.product_id,
+      type: "return",
+      quantity: Math.abs(Number(m.quantity) || 0),
+      reference: saleId,
+      notes: "Anulación de venta POS",
+      unit_cost: m.unit_cost ?? null,
+      ...(m.location_id ? { location_id: m.location_id } : {}),
+    })));
+    if (error) avisos.push("No se pudo devolver el stock de los productos: ajústalo en Inventario.");
+  }
+
+  // 5. La cita vuelve a confirmada solo si no le queda otra venta.
+  if (apptId) {
+    const { data: otras, error } = await supabase.from("pos_sales").select("id").eq("appointment_id", apptId).limit(1);
+    if (!error && (otras ?? []).length === 0) {
+      const { error: eAppt } = await supabase.from("appointments")
+        .update({ status: "confirmed" }).eq("id", apptId).eq("status", "completed");
+      if (eAppt) avisos.push("La cita no volvió a quedar confirmada: revísala en la agenda.");
+    } else if (error) {
+      avisos.push("No se pudo revisar el estado de la cita: revísala en la agenda.");
+    }
+  }
+
+  return avisos.length > 0 ? { ok: true, aviso: `El cobro se anuló. ${avisos.join(" ")}` } : { ok: true };
 }

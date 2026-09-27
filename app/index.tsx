@@ -1,22 +1,15 @@
 import { Redirect } from "expo-router";
-import { View, ActivityIndicator } from "react-native";
-import { Colors } from "@/constants/theme";
-import { useTheme } from "@/lib/theme";
-import { useAuth } from "@/lib/auth";
+import { useAuth, RUTA_SIN_ACCESO } from "@/lib/auth";
+import { PantallaCargando } from "@/lib/guards";
 
 export default function Index() {
-  const { t } = useTheme();
-  const { session, role, loading } = useAuth();
+  const { session, estado, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.bg }}>
-        <ActivityIndicator color={Colors.red} size="large" />
-      </View>
-    );
-  }
-
+  if (loading) return <PantallaCargando />;
   if (!session) return <Redirect href="/(auth)/login" />;
-  if (role === "staff") return <Redirect href="/(staff)/agenda" />;
-  return <Redirect href="/(admin)/(tabs)" />;
+  if (estado === "staff") return <Redirect href="/(staff)/agenda" />;
+  if (estado === "admin") return <Redirect href="/(admin)/(tabs)" />;
+  // Sesión sin rol, colaborador desactivado o sin red: antes caía en (admin)
+  // con rol null y rebotaba al login con la sesión abierta.
+  return <Redirect href={RUTA_SIN_ACCESO} />;
 }

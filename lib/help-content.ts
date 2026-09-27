@@ -1,9 +1,24 @@
+/**
+ * Centro de ayuda de la APP (no del portal web).
+ *
+ * Antes era una copia de las guías del portal: hablaba de "menú lateral",
+ * "Negocio → Mi Marca", moneda, invitar admins de sede por correo, la URL
+ * del webhook y variables con llaves simples ({nombre}) que la app no
+ * reemplaza (COM-18). Aquí cada paso nombra pantallas y botones que existen
+ * en el teléfono: las pestañas de abajo (Panel, Agenda, Clientes, Cobros,
+ * Ajustes) y las entradas de Ajustes. lib/__tests__/help-content-test.ts
+ * revisa que los nombres de "Ajustes → …" sigan existiendo en el menú.
+ *
+ * Regla de tiendas (iOS 3.1.1): nada de precios, planes ni suscripción aquí.
+ */
+
 export type CategoryIconName =
   | "Zap" | "Calendar" | "Users" | "CreditCard" | "ChartBar" | "Chat" | "Palette";
 
 export interface HelpStep {
   title: string;
   body: string;
+  /** Sin capturas por ahora: las del portal no corresponden a la app. */
   image: string | null;
 }
 
@@ -24,98 +39,62 @@ export interface HelpCategory {
   articles: HelpArticle[];
 }
 
+const paso = (title: string, body: string): HelpStep => ({ title, body, image: null });
+
 export const HELP_CATEGORIES: HelpCategory[] = [
   {
     id: "primeros-pasos",
     label: "Primeros pasos",
-    description: "Configura tu negocio desde cero en pocos minutos.",
+    description: "Deja tu negocio listo para recibir citas.",
     iconName: "Zap",
     articles: [
       {
         slug: "configuracion-inicial",
-        title: "Configuración inicial del negocio",
-        description: "Completa los datos básicos para comenzar a recibir citas.",
+        title: "Configura los datos de tu negocio",
+        description: "Nombre, contacto, zona horaria y tu página de reservas.",
         category: "primeros-pasos",
         readMinutes: 3,
         steps: [
-          {
-            title: "Ingresa a Mi Marca",
-            body: "En el menú lateral, ve a Negocio → Mi Marca. Aquí puedes subir el logo, cambiar el nombre del negocio y definir el color principal.",
-            image: "/help/branding.png",
-          },
-          {
-            title: "Sube tu logo",
-            body: "Haz clic en el área de imagen y selecciona tu logo. Formatos aceptados: PNG o JPG. Tamaño recomendado: 400×400 px, máximo 2 MB.",
-            image: "/help/configuracion-inicial-step2.png",
-          },
-          {
-            title: "Define el color principal",
-            body: "Elige el color que representa tu marca. Aparecerá en los botones y encabezados de tu página pública de agendamiento.",
-            image: "/help/configuracion-inicial-step3.png",
-          },
-          {
-            title: "Guarda los cambios",
-            body: "Haz clic en Guardar. Los cambios se reflejan de inmediato en la página pública de reservas.",
-            image: "/help/configuracion-inicial-step4.png",
-          },
+          paso("Abre Info del negocio",
+            "Toca Ajustes (la última pestaña de abajo) → Info del negocio. Ahí están el nombre, el teléfono, la dirección y la zona horaria."),
+          paso("Revisa la zona horaria",
+            "La zona horaria decide qué cuenta como \"hoy\" en la Agenda, en Cobros y en los reportes. Si tu negocio no está en Colombia, elígela aquí antes de empezar."),
+          paso("Personaliza tu página de reservas",
+            "En Ajustes → Mi Tienda sube tu logo, escribe el mensaje de bienvenida y elige los colores. Toca Guardar cambios."),
+          paso("Comparte tu link",
+            "Tu link de reservas aparece arriba en Ajustes y en Mi Tienda. Tócalo para compartirlo por WhatsApp, Instagram o donde quieras."),
         ],
       },
       {
         slug: "primer-servicio",
-        title: "Cómo agregar tu primer servicio",
-        description: "Crea los servicios que ofrecerás para que los clientes puedan agendar.",
+        title: "Cómo agregar tus servicios",
+        description: "Crea el catálogo que tus clientes verán al reservar.",
         category: "primeros-pasos",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Servicios",
-            body: "En el menú lateral, dirígete a Negocio → Servicios.",
-            image: "/help/services.png",
-          },
-          {
-            title: "Haz clic en Añadir servicio",
-            body: "Encontrarás el botón en la esquina superior derecha de la pantalla.",
-            image: "/help/primer-servicio-step2.png",
-          },
-          {
-            title: "Completa los datos del servicio",
-            body: "Ingresa el nombre del servicio, la duración en minutos y el precio. El nombre es lo que verán tus clientes al agendar.",
-            image: "/help/primer-servicio-step3.png",
-          },
-          {
-            title: "Guarda el servicio",
-            body: "Haz clic en Crear servicio. El servicio ya estará disponible para asignarlo a profesionales y para el agendamiento público.",
-            image: "/help/primer-servicio-step4.png",
-          },
+          paso("Abre Servicios", "Ve a Ajustes → Servicios y toca + (arriba a la derecha)."),
+          paso("Completa los datos",
+            "Nombre, precio y duración en minutos son lo básico. El código es opcional: sirve para llamar el servicio por número en Cobros y en la Agenda. Las etiquetas ayudan a agruparlos."),
+          paso("Guarda",
+            "El servicio queda disponible para agendar, para cobrar y en tu página de reservas."),
+          paso("Si dejas de ofrecerlo, archívalo",
+            "Archivar lo saca de la agenda y de la reserva en línea, pero conserva su historial de citas y ventas. Un servicio que ya tiene citas no se puede borrar."),
         ],
       },
       {
         slug: "agregar-profesionales",
-        title: "Cómo agregar profesionales al equipo",
-        description: "Agrega a los miembros de tu equipo que atenderán las citas.",
+        title: "Cómo agregar a tu equipo",
+        description: "Los profesionales que atienden las citas.",
         category: "primeros-pasos",
-        readMinutes: 2,
+        readMinutes: 3,
         steps: [
-          {
-            title: "Ve a Equipo",
-            body: "En el menú lateral, dirígete a Negocio → Equipo.",
-            image: "/help/professionals.png",
-          },
-          {
-            title: "Haz clic en Añadir profesional",
-            body: "Completa el nombre completo y los datos de contacto del profesional.",
-            image: "/help/agregar-profesionales-step2.png",
-          },
-          {
-            title: "Completa los datos del profesional",
-            body: "Ingresa nombre completo y rol o especialidad. Puedes subir una foto de perfil opcional.",
-            image: "/help/agregar-profesionales-step3.png",
-          },
-          {
-            title: "Guarda y verifica",
-            body: "Haz clic en Añadir al equipo. El profesional aparecerá en el calendario y en la página pública de agendamiento, listo para recibir citas.",
-            image: "/help/agregar-profesionales-step4.png",
-          },
+          paso("Abre Equipo", "Ve a Ajustes → Equipo y toca +."),
+          paso("Completa los datos",
+            "Escribe el nombre, el cargo (por ejemplo Estilista) y sus días y horas de trabajo. Toca Agregar profesional."),
+          paso("Dale acceso a la app (opcional)",
+            "Abre de nuevo al profesional y, en Cuenta de acceso, escribe su correo y toca Crear cuenta de acceso. Podrá entrar a Zyncra y ver su agenda y sus clientes, según los permisos que le des."),
+          paso("Cuando alguien deja el equipo, desactívalo",
+            "Toca Desactivar profesional: deja de recibir citas, sale de la reserva en línea y pierde el acceso a la app. Sus citas, cobros y comisiones se conservan en los reportes, y puedes reactivarlo cuando quieras."),
         ],
       },
     ],
@@ -123,124 +102,68 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "calendario",
-    label: "Calendario & Citas",
-    description: "Gestiona citas, reagendamientos y disponibilidad.",
+    label: "Agenda y citas",
+    description: "Crea, mueve, cancela y cobra citas.",
     iconName: "Calendar",
     articles: [
       {
         slug: "crear-cita",
-        title: "Cómo crear una cita manualmente",
-        description: "Agrega citas directamente desde el panel sin esperar al cliente.",
+        title: "Cómo crear una cita",
+        description: "Agenda a un cliente desde el teléfono.",
         category: "calendario",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve al Calendario",
-            body: "En el menú lateral, haz clic en Panel → Calendario.",
-            image: "/help/calendar.png",
-          },
-          {
-            title: "Selecciona un horario disponible",
-            body: "Haz clic en el botón Nueva cita en la esquina superior derecha o toca una celda vacía del calendario.",
-            image: "/help/crear-cita-step2.png",
-          },
-          {
-            title: "Completa los datos de la cita",
-            body: "Selecciona el cliente (busca por nombre o teléfono), elige el servicio y el profesional. Confirma la fecha y hora.",
-            image: "/help/crear-cita-step3.png",
-          },
-          {
-            title: "Confirma y guarda",
-            body: "Haz clic en Guardar. Si el cliente tiene email registrado, recibirá un correo de confirmación automáticamente.",
-            image: "/help/crear-cita-step4.png",
-          },
+          paso("Abre la Agenda", "Toca la pestaña Agenda y elige el día."),
+          paso("Toca Nueva cita", "Es el botón + de la Agenda."),
+          paso("Sigue los pasos",
+            "Elige el profesional, luego el cliente (uno existente o Nuevo cliente con nombre y teléfono), el servicio y la hora libre."),
+          paso("Confirma",
+            "Revisa el resumen y toca Confirmar cita. Si la hora se cruza con otra cita o está fuera del horario, la app te avisa antes de guardar."),
         ],
       },
       {
         slug: "reagendar-cancelar",
-        title: "Cómo reagendar o cancelar una cita",
-        description: "Modifica o cancela citas existentes desde el calendario.",
+        title: "Cómo cambiar, cancelar o cobrar una cita",
+        description: "Todo lo que puedes hacer desde el detalle de una cita.",
         category: "calendario",
-        readMinutes: 2,
+        readMinutes: 3,
         steps: [
-          {
-            title: "Encuentra la cita en el calendario",
-            body: "En el Calendario, haz clic sobre la cita que deseas modificar. Se abrirá un panel con los detalles.",
-            image: "/help/calendar.png",
-          },
-          {
-            title: "Elige la acción: Reagendar o Cancelar",
-            body: "Verás los botones de acción en el panel lateral. Selecciona la que necesitas.",
-            image: "/help/reagendar-cancelar-step2.png",
-          },
-          {
-            title: "Para reagendar",
-            body: "Selecciona la nueva fecha y hora. El sistema verificará automáticamente que el horario esté disponible antes de confirmar.",
-            image: "/help/reagendar-cancelar-step3.png",
-          },
-          {
-            title: "Para cancelar",
-            body: "Cambia el estado a Cancelada en el desplegable y haz clic en Guardar cambios. La cita queda cancelada y el horario queda libre.",
-            image: "/help/reagendar-cancelar-step4.png",
-          },
+          paso("Abre la cita", "En la Agenda, toca la cita. Se abre su detalle."),
+          paso("Cóbrala al terminar",
+            "Toca Cobrar esta cita: el servicio y el cliente ya vienen cargados. Al cobrar, la cita queda Completada y el dinero entra en Cobros y en la caja."),
+          paso("Cambia la fecha o la hora", "Toca Editar, elige el nuevo horario y guarda."),
+          paso("Cancela o marca que no vino",
+            "Cambia el estado a Cancelada o No asistió. Una cita que ya se cobró no se puede devolver a Pendiente ni a Confirmada: primero anula el cobro en Cobros → Historial de cobros."),
         ],
       },
       {
         slug: "horarios-negocio",
-        title: "Cómo configurar los horarios del negocio",
-        description: "Define los días y horas en que tu negocio recibe citas.",
+        title: "Cómo configurar el horario de atención",
+        description: "Los días y horas en que se puede reservar.",
         category: "calendario",
-        readMinutes: 3,
+        readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Configuración",
-            body: "En el menú lateral, dirígete a Negocio → Configuración.",
-            image: "/help/settings.png",
-          },
-          {
-            title: "Encuentra la sección de Horarios",
-            body: "Desplázate hacia abajo hasta la sección Horarios de atención. Verás los siete días de la semana.",
-            image: "/help/horarios-negocio-step2.png",
-          },
-          {
-            title: "Activa los días y define las horas",
-            body: "Activa el interruptor de cada día en que atiendes. Luego configura la hora de apertura y la de cierre.",
-            image: "/help/horarios-negocio-step3.png",
-          },
-          {
-            title: "Guarda los cambios",
-            body: "Los horarios se aplican de inmediato al agendamiento público y al agente de WhatsApp.",
-            image: "/help/horarios-negocio-step4.png",
-          },
+          paso("Abre Horario de atención", "Ve a Ajustes → Horario de atención."),
+          paso("Activa los días y define las horas",
+            "Activa cada día que atiendes y pon la hora de apertura y de cierre. Si tienes almuerzo, agrega un descanso."),
+          paso("Elige el intervalo entre turnos",
+            "Define cada cuánto se ofrecen horas para reservar (por ejemplo, cada 30 minutos), contando desde la apertura."),
+          paso("Guarda", "El horario se aplica a la reserva en línea y a Hanna en WhatsApp."),
         ],
       },
       {
         slug: "link-agendamiento",
-        title: "Cómo compartir tu link de agendamiento",
-        description: "Obtén tu enlace público para que los clientes reserven en cualquier momento.",
+        title: "Cómo compartir tu link de reservas",
+        description: "Para que tus clientes reserven solos, a cualquier hora.",
         category: "calendario",
         readMinutes: 2,
         steps: [
-          {
-            title: "Encuentra tu link de reservas",
-            body: "Tu link tiene el formato zyncra.app/book/TU-SLUG. Lo encuentras en Configuración o en el panel principal.",
-            image: "/help/dashboard.png",
-          },
-          {
-            title: "Comparte el link donde estés",
-            body: "Compártelo por WhatsApp, en tu bio de Instagram, en Facebook, en tu firma de correo o en Google My Business.",
-            image: "/help/link-agendamiento-step2.png",
-          },
-          {
-            title: "El cliente agenda sin ayuda",
-            body: "El cliente elige servicio, profesional, fecha y hora disponible. Recibirás una notificación inmediata.",
-            image: "/help/link-agendamiento-step3.png",
-          },
-          {
-            title: "Confirmación automática al cliente",
-            body: "Activa las Notificaciones por correo en Configuración. Si el cliente ingresó su email, recibirá un correo de confirmación con todos los detalles.",
-            image: "/help/link-agendamiento-step4.png",
-          },
+          paso("Encuentra tu link",
+            "Está arriba en Ajustes y en Ajustes → Mi Tienda, con el botón para compartirlo o copiarlo. Tiene la forma zyncra.app/book/tu-negocio."),
+          paso("Compártelo donde estén tus clientes",
+            "En la bio de Instagram, en tu estado de WhatsApp, en Facebook o en tu perfil de Google."),
+          paso("El cliente reserva sin ayuda",
+            "Elige servicio, profesional, fecha y hora libre. La cita aparece en tu Agenda y te llega un aviso al teléfono si tienes activadas las notificaciones."),
         ],
       },
     ],
@@ -248,61 +171,49 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "clientes",
-    label: "Clientes & CRM",
-    description: "Administra tu base de clientes y su historial de atenciones.",
+    label: "Clientes",
+    description: "Tu base de clientes y su historial.",
     iconName: "Users",
     articles: [
       {
         slug: "agregar-cliente",
-        title: "Cómo agregar un cliente manualmente",
-        description: "Registra nuevos clientes directamente en tu base de datos.",
+        title: "Cómo agregar un cliente",
+        description: "Registra a un cliente con sus datos de contacto.",
         category: "clientes",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Clientes (CRM)",
-            body: "En el menú lateral, haz clic en Clientes → Clientes (CRM).",
-            image: "/help/clients.png",
-          },
-          {
-            title: "Haz clic en Nuevo cliente",
-            body: "El botón aparece en la esquina superior derecha de la pantalla.",
-            image: "/help/agregar-cliente-step2.png",
-          },
-          {
-            title: "Ingresa los datos del cliente",
-            body: "Completa nombre, número de teléfono y correo electrónico. El teléfono es el identificador principal que usa el agente de WhatsApp.",
-            image: "/help/agregar-cliente-step3.png",
-          },
-          {
-            title: "Guarda el cliente",
-            body: "Haz clic en Crear cliente. El cliente quedará disponible para citas del calendario y recibirá comunicaciones automáticas.",
-            image: "/help/agregar-cliente-step4.png",
-          },
+          paso("Abre Clientes", "Toca la pestaña Clientes y luego +."),
+          paso("Completa los datos",
+            "El nombre es obligatorio. En el teléfono elige el país con la bandera: así los enlaces de WhatsApp y las llamadas funcionan también con números de otros países."),
+          paso("Datos opcionales", "Correo, documento, dirección, cumpleaños y notas (preferencias, alergias…)."),
+          paso("Guarda", "Toca Crear cliente. Queda listo para agendarle citas y cobrarle."),
         ],
       },
       {
         slug: "historial-cliente",
         title: "Cómo ver el historial de un cliente",
-        description: "Consulta todas las citas y compras de un cliente específico.",
+        description: "Citas, asistencia y lo que ha gastado.",
         category: "clientes",
         readMinutes: 2,
         steps: [
-          {
-            title: "Busca al cliente",
-            body: "En la sección Clientes (CRM), usa la barra de búsqueda para encontrarlo por nombre o teléfono.",
-            image: "/help/clients.png",
-          },
-          {
-            title: "Abre el perfil del cliente",
-            body: "Usa la barra de búsqueda para encontrarlo. Haz clic en su nombre para ver el perfil detallado.",
-            image: "/help/historial-cliente-step2.png",
-          },
-          {
-            title: "Revisa el historial completo",
-            body: "Verás todas las citas pasadas y futuras, el total gastado, los servicios más frecuentes y las notas registradas.",
-            image: "/help/historial-cliente-step3.png",
-          },
+          paso("Búscalo", "En Clientes, escribe su nombre o teléfono en el buscador."),
+          paso("Abre su ficha", "Toca su nombre."),
+          paso("Revisa su historial",
+            "Verás cuántas citas tiene, cuántas completó, cuántas veces no asistió, cuánto ha gastado y sus notas. La etiqueta Nuevo, Recurrente, En riesgo o Perdido te dice hace cuánto no viene."),
+        ],
+      },
+      {
+        slug: "eliminar-cliente",
+        title: "Cómo editar o eliminar un cliente",
+        description: "Corregir datos y cuándo se puede borrar una ficha.",
+        category: "clientes",
+        readMinutes: 2,
+        steps: [
+          paso("Edita sus datos", "Abre la ficha del cliente, cambia lo que necesites y toca Guardar cambios."),
+          paso("Solo se eliminan clientes sin historial",
+            "Si el cliente tiene citas, cobros o historia clínica, su ficha no se puede eliminar: ese historial se conserva (la historia clínica, además, por obligación legal)."),
+          paso("Eliminar una ficha vacía",
+            "Si el cliente no tiene historial, toca el botón de eliminar en su ficha y confirma. No se puede deshacer."),
         ],
       },
     ],
@@ -310,100 +221,71 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "pos",
-    label: "POS & Caja",
-    description: "Registra ventas, maneja el efectivo y aplica descuentos.",
+    label: "Cobros y caja",
+    description: "Cobra citas y ventas, maneja la caja y el inventario.",
     iconName: "CreditCard",
     articles: [
       {
         slug: "hacer-venta",
-        title: "Cómo hacer una venta en el POS",
-        description: "Registra ventas de servicios y productos desde el punto de venta.",
+        title: "Cómo cobrar una cita o hacer una venta",
+        description: "Servicios, productos, descuentos y medios de pago.",
         category: "pos",
         readMinutes: 3,
         steps: [
-          {
-            title: "Ve al Sistema POS",
-            body: "En el menú lateral, dirígete a Ventas → Sistema POS.",
-            image: "/help/pos.png",
-          },
-          {
-            title: "Agrega ítems al carrito",
-            body: "Busca y agrega los servicios o productos vendidos. Puedes combinar servicios y productos del inventario en una misma venta.",
-            image: "/help/hacer-venta-step2.png",
-          },
-          {
-            title: "Aplica descuentos si aplica",
-            body: "En el panel del carrito puedes aplicar un descuento por monto fijo o por porcentaje sobre el total.",
-            image: "/help/hacer-venta-step3.png",
-          },
-          {
-            title: "Selecciona el método de pago",
-            body: "Elige entre efectivo, tarjeta, transferencia u otro método configurado. Si el pago es en efectivo, el sistema calcula el vuelto automáticamente.",
-            image: "/help/hacer-venta-step4.png",
-          },
-          {
-            title: "Confirma la venta",
-            body: "Haz clic en Cobrar. La venta queda registrada en el módulo financiero y el inventario se actualiza automáticamente.",
-            image: "/help/hacer-venta-step5.png",
-          },
+          paso("Abre Cobros",
+            "En la pestaña Cobros verás las citas del día pendientes de cobro. Toca Cobrar en la cita, o + para una venta directa sin cita."),
+          paso("Agrega lo que se vendió",
+            "Puedes sumar otro servicio, productos del inventario (descuentan stock) o un ítem libre, como una propina."),
+          paso("Aplica un descuento si toca", "En porcentaje o en valor fijo, sobre el total."),
+          paso("Elige el medio de pago",
+            "Efectivo, tarjeta, transferencia, Nequi, Daviplata o QR. Si el cliente paga con dos medios, usa Dividido."),
+          paso("Confirma el cobro",
+            "Toca Cobrar. La venta queda en Cobros y en la caja abierta, y la cita pasa a Completada. Una cita completada sin cobro aparece como por cobrar: no suma a tus ingresos."),
+        ],
+      },
+      {
+        slug: "anular-cobro",
+        title: "Cómo anular un cobro",
+        description: "Cuando un cobro se registró por error.",
+        category: "pos",
+        readMinutes: 2,
+        steps: [
+          paso("Abre el historial", "En Cobros, toca el ícono del reloj (Historial de cobros)."),
+          paso("Busca el cobro y anúlalo", "Toca Anular cobro en la venta y confirma."),
+          paso("Qué pasa después",
+            "La venta deja de contar en los ingresos y la cita vuelve a quedar por cobrar. Un cobro con factura electrónica o con bono no se puede anular desde aquí."),
         ],
       },
       {
         slug: "abrir-cerrar-caja",
-        title: "Cómo abrir y cerrar la caja del día",
-        description: "Gestiona el ciclo diario de caja con apertura, registro y cierre.",
+        title: "Cómo abrir y cerrar la caja",
+        description: "El ciclo diario del efectivo.",
         category: "pos",
         readMinutes: 3,
         steps: [
-          {
-            title: "Abre la caja al inicio del día",
-            body: "Ve a Ventas → Sistema de Caja y haz clic en Abrir caja. Ingresa el monto inicial en efectivo disponible.",
-            image: "/help/caja.png",
-          },
-          {
-            title: "Las ventas se asocian automáticamente",
-            body: "Todas las ventas del POS durante el día se asocian a la caja abierta, sin pasos adicionales.",
-            image: "/help/abrir-cerrar-caja-step2.png",
-          },
-          {
-            title: "Cierra la caja al final del día",
-            body: "Haz clic en Cerrar Caja. El sistema mostrará un resumen de ingresos desglosado por método de pago.",
-            image: "/help/abrir-cerrar-caja-step3.png",
-          },
-          {
-            title: "Registra el descuadre y agrega notas",
-            body: "Ingresa el monto físico contado en efectivo. Si hay diferencia, el sistema la registra como descuadre. El cierre queda guardado en el historial.",
-            image: "/help/abrir-cerrar-caja-step4.png",
-          },
+          paso("Abre la caja al empezar",
+            "Ve a Ajustes → Sistema de caja, escribe el fondo inicial (puede ser 0) y toca Abrir caja."),
+          paso("Los cobros se suman solos",
+            "Cada cobro en efectivo entra a la caja abierta. Para pagos o retiros que no son ventas, usa Registrar movimiento."),
+          paso("Cierra al final del día",
+            "Toca Cerrar caja y escribe el efectivo que contaste. La app muestra el fondo inicial, lo que entró en efectivo, los egresos y la diferencia (descuadre)."),
+          paso("Revisa cierres anteriores", "En la pestaña Historial de la caja están todas las sesiones cerradas."),
         ],
       },
       {
         slug: "inventario",
-        title: "Cómo gestionar el inventario de productos",
-        description: "Controla el stock de productos que vendes o usas en los servicios.",
+        title: "Cómo manejar el inventario",
+        description: "Productos, stock y alertas.",
         category: "pos",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Inventario",
-            body: "En el menú lateral, dirígete a Ventas → Inventario.",
-            image: "/help/inventario.png",
-          },
-          {
-            title: "Agrega productos",
-            body: "Haz clic en Nuevo producto e ingresa nombre, precio de costo, precio de venta y stock inicial.",
-            image: "/help/inventario-step2.png",
-          },
-          {
-            title: "Completa el formulario del producto",
-            body: "Ingresa nombre, SKU, precios de costo y venta, y el stock inicial. Puedes subir una foto del producto.",
-            image: "/help/inventario-step3.png",
-          },
-          {
-            title: "Monitorea el stock disponible",
-            body: "La columna Stock en la tabla se actualiza automáticamente con cada venta. Cuando cae por debajo del mínimo configurado, aparecerá una alerta.",
-            image: "/help/inventario-step4.png",
-          },
+          paso("Abre Inventario", "Ve a Ajustes → Inventario y toca Nuevo."),
+          paso("Crea el producto",
+            "Nombre, SKU o código, precio de costo, precio de venta, stock inicial y la alerta de mínimo."),
+          paso("Ajusta el stock",
+            "En la ficha del producto usa Ajustar stock para registrar una compra, un ajuste, una devolución o una cortesía."),
+          paso("Véndelo desde Cobros",
+            "Al agregarlo a un cobro, el stock se descuenta solo. Cuando baja del mínimo, el producto aparece con alerta."),
         ],
       },
     ],
@@ -411,61 +293,36 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "finanzas",
-    label: "Módulo Financiero",
-    description: "Reportes de ingresos, comisiones y análisis del negocio.",
+    label: "Reportes y comisiones",
+    description: "Ingresos, rendimiento y pagos al equipo.",
     iconName: "ChartBar",
     articles: [
       {
         slug: "resumen-financiero",
-        title: "Cómo ver el resumen financiero",
-        description: "Consulta ingresos, ventas y métricas clave en cualquier período.",
+        title: "Cómo ver tus ingresos",
+        description: "Reportes por semana, mes o año.",
         category: "finanzas",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve al Módulo Financiero",
-            body: "En el menú lateral, dirígete a Ventas → Módulo Financiero.",
-            image: "/help/finanzas.png",
-          },
-          {
-            title: "Filtra por período de tiempo",
-            body: "Usa los botones de período (Hoy, Esta semana, Este mes) o define un rango personalizado.",
-            image: "/help/resumen-financiero-step2.png",
-          },
-          {
-            title: "Analiza las métricas principales",
-            body: "Verás ingresos totales, número de citas completadas, ticket promedio y comparativa con el período anterior.",
-            image: "/help/resumen-financiero-step3.png",
-          },
-          {
-            title: "Revisa el desglose por servicio",
-            body: "Desplázate hacia abajo para ver cuáles servicios generaron más ingresos y cuáles tienen menor rendimiento.",
-            image: "/help/resumen-financiero-step4.png",
-          },
+          paso("Abre Reportes", "Ve a Ajustes → Reportes. Para ingresos contra egresos, usa Ajustes → Módulo financiero."),
+          paso("Elige el período", "Semana, Mes o Año, y muévete con las flechas a períodos anteriores."),
+          paso("Qué cuenta como ingreso",
+            "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen como por cobrar."),
+          paso("Revisa el detalle",
+            "Ingresos por día, los servicios más vendidos, el rendimiento de cada profesional y las horas con más movimiento."),
         ],
       },
       {
         slug: "comisiones-equipo",
-        title: "Cómo calcular las comisiones del equipo",
-        description: "Consulta cuánto le corresponde pagar a cada profesional por sus ventas.",
+        title: "Cómo calcular y pagar comisiones",
+        description: "Cuánto le corresponde a cada profesional.",
         category: "finanzas",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Comisiones",
-            body: "En el menú lateral, dirígete a Ventas → Comisiones.",
-            image: "/help/commissions.png",
-          },
-          {
-            title: "Selecciona el período a liquidar",
-            body: "Usa los botones Esta semana, Este mes o Rango personalizado para filtrar el período que quieres liquidar.",
-            image: "/help/comisiones-equipo-step2.png",
-          },
-          {
-            title: "Revisa el desglose por profesional",
-            body: "El sistema muestra el total de ventas de cada profesional y el monto de comisión calculado según el porcentaje configurado en su perfil.",
-            image: "/help/comisiones-equipo-step3.png",
-          },
+          paso("Abre Comisiones", "Ve a Ajustes → Comisiones."),
+          paso("Define la regla de cada profesional", "Elige el tipo de comisión y el valor, y guarda."),
+          paso("Elige el período", "La tabla muestra los ingresos y la comisión de cada profesional en ese período."),
+          paso("Liquida", "Toca Liquidar para registrar el pago. Queda en el historial de liquidaciones."),
         ],
       },
     ],
@@ -473,66 +330,92 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "whatsapp",
-    label: "WhatsApp & Agente IA",
-    description: "Automatiza reservas y envía campañas de marketing por WhatsApp.",
+    label: "WhatsApp, Hanna y reseñas",
+    description: "Chats, campañas, tu copiloto y las reseñas.",
     iconName: "Chat",
     articles: [
       {
         slug: "agente-whatsapp",
-        title: "Cómo funciona el agente de reservas por WhatsApp",
-        description: "Entiende cómo el agente IA atiende a tus clientes automáticamente.",
+        title: "Cómo funciona Hanna en tu WhatsApp",
+        description: "La asistente que responde y agenda por ti.",
         category: "whatsapp",
-        readMinutes: 4,
+        readMinutes: 3,
         steps: [
-          {
-            title: "¿Qué hace el agente?",
-            body: "El agente IA responde mensajes de WhatsApp las 24 horas. Identifica al cliente por su número, consulta disponibilidad y agenda citas sin que tengas que intervenir.",
-            image: "/help/whatsapp.png",
-          },
-          {
-            title: "Flujo de una reserva nueva",
-            body: "1) Cliente saluda → el agente le da la bienvenida y pregunta qué necesita. 2) Cliente menciona servicio y fecha → el agente muestra horarios disponibles. 3) Cliente elige un horario → el agente pregunta '¿Confirmas la cita?'. 4) Cliente responde 'sí' → la cita queda registrada.",
-            image: "/help/agente-whatsapp-step2.png",
-          },
-          {
-            title: "El agente nunca agenda sin confirmación",
-            body: "Por seguridad, el agente siempre pide confirmación explícita antes de crear o cancelar una cita. Si el cliente no confirma, le pregunta directamente.",
-            image: "/help/agente-whatsapp-step3.png",
-          },
-          {
-            title: "Verifica que el agente está activo",
-            body: "En la pestaña Bot IA, copia la URL del Webhook y asegúrate de que esté configurada en Meta. Luego envía un mensaje de prueba al número conectado.",
-            image: "/help/agente-whatsapp-step4.png",
-          },
+          paso("Qué hace Hanna",
+            "Responde los mensajes de WhatsApp de tus clientes a cualquier hora, consulta tu disponibilidad y agenda citas. Antes de crear o cancelar una cita, siempre le pide confirmación al cliente."),
+          paso("Conecta tu número",
+            "La conexión del número con Meta se hace una sola vez desde el portal web de Zyncra (zyncra.app), en Marketing → WhatsApp. En la app, Ajustes → Campañas WhatsApp → Conexión te muestra si el número está conectado."),
+          paso("Actívala o páusala",
+            "En esa misma pestaña Conexión, el interruptor Hanna responde en WhatsApp la enciende o la apaga para todos los chats."),
+          paso("Ajusta su personalidad",
+            "En Ajustes → Hanna IA puedes cambiar el saludo, el tono y darle instrucciones extra (por ejemplo, una promo del mes)."),
+        ],
+      },
+      {
+        slug: "bandeja-chats",
+        title: "Cómo responder desde la bandeja de WhatsApp",
+        description: "Tus conversaciones con clientes, en la app.",
+        category: "whatsapp",
+        readMinutes: 3,
+        steps: [
+          paso("Abre la bandeja",
+            "Ve a Ajustes → Bandeja de WhatsApp. Verás los chats del más reciente al más viejo, con los no leídos marcados. Puedes buscar por nombre o número."),
+          paso("Atiende tú un chat",
+            "Abre el chat y toca \"Hanna responde · toca para atender tú\". Hanna deja de responder en ese chat (aparece MANUAL) hasta que la reactives."),
+          paso("La ventana de 24 horas",
+            "WhatsApp solo deja escribir libremente hasta 24 horas después del último mensaje del cliente. Si pasó más tiempo, podrás responder cuando vuelva a escribirte."),
+          paso("Revisa las entregas",
+            "Una palomita es enviado, dos son entregado y en azul, leído. Si WhatsApp no pudo entregar un mensaje (por ejemplo, si el cliente bloqueó el número), la burbuja aparece en rojo con el motivo."),
         ],
       },
       {
         slug: "campanas-marketing",
-        title: "Cómo enviar campañas de marketing por WhatsApp",
-        description: "Envía mensajes masivos o segmentados a tu base de clientes.",
+        title: "Cómo enviar una campaña por WhatsApp",
+        description: "Un mensaje para todos tus clientes o solo para un grupo.",
         category: "whatsapp",
         readMinutes: 3,
         steps: [
-          {
-            title: "Ve a Marketing WhatsApp",
-            body: "En el menú lateral, dirígete a Marketing → Marketing WhatsApp.",
-            image: "/help/whatsapp.png",
-          },
-          {
-            title: "Crea una nueva campaña",
-            body: "En la pestaña Nueva Campaña, escribe el nombre, selecciona el segmento de clientes y redacta el mensaje.",
-            image: "/help/campanas-marketing-step2.png",
-          },
-          {
-            title: "Previsualiza el mensaje",
-            body: "Revisa el mensaje en el área de texto. Asegúrate de que el texto sea claro y no tenga errores antes de enviar.",
-            image: "/help/campanas-marketing-step3.png",
-          },
-          {
-            title: "Envía y monitorea",
-            body: "Haz clic en Iniciar campaña. Podrás ver el estado de entrega y las respuestas recibidas en el panel de conversaciones.",
-            image: "/help/campanas-marketing-step4.png",
-          },
+          paso("Abre Campañas WhatsApp", "Ve a Ajustes → Campañas WhatsApp, pestaña Campaña."),
+          paso("Arma la campaña",
+            "Ponle nombre, elige a quién va (todos, activos con cita en los últimos 90 días o inactivos) y escribe el mensaje. Usa {{nombre}} y {{negocio}}: se reemplazan por el nombre de cada cliente y el de tu negocio."),
+          paso("Envía uno por uno",
+            "Toca Iniciar campaña. Por cada cliente, Enviar abre WhatsApp con el mensaje listo y tú lo mandas desde tu teléfono. Los números inválidos aparecen marcados para que los corrijas en Clientes."),
+          paso("Finaliza",
+            "Toca Finalizar campaña para guardarla en el Historial con los envíos que hiciste. Si cierras sin finalizar, la app te pregunta si quieres guardarla."),
+          paso("Pídele ideas a Hanna",
+            "En Ajustes → Hanna IA, toca Generar campañas. Con Usar en campaña, el mensaje que te propone pasa directo a una campaña nueva."),
+        ],
+      },
+      {
+        slug: "copiloto-hanna",
+        title: "Cómo usar a Hanna como copiloto",
+        description: "Pregúntale por tu negocio desde cualquier pantalla.",
+        category: "whatsapp",
+        readMinutes: 2,
+        steps: [
+          paso("Abre el copiloto",
+            "Si ves el botón redondo de Hanna en la esquina de la pantalla, tócalo. Si no aparece, esta función no está disponible en tu cuenta."),
+          paso("Pregúntale lo que necesites",
+            "Por ejemplo: ¿cómo va mi día?, ¿cuántas citas tengo mañana? o ¿cuánto he vendido este mes?"),
+          paso("Pídele cambios",
+            "También puede cancelar una cita o cambiar el precio de un servicio. Antes de hacerlo te muestra un resumen con los botones Confirmar y Cancelar: nada cambia hasta que confirmes."),
+        ],
+      },
+      {
+        slug: "resenas",
+        title: "Cómo conseguir y moderar reseñas",
+        description: "Reseñas en Google y en tu página de reservas.",
+        category: "whatsapp",
+        readMinutes: 3,
+        steps: [
+          paso("Pega tu link de Google",
+            "Ve a Ajustes → Reseñas Google → Configuración. Copia el link para pedir reseñas desde business.google.com, pégalo y guarda. El mensaje puede usar {{nombre}} y {{link}}."),
+          paso("Pide la reseña",
+            "En Pedir reseña la app te sugiere a quién pedírsela: clientes que ya atendiste y a los que no les has pedido. Elige uno y toca WhatsApp o Copiar."),
+          paso("Marca quién reseñó",
+            "Google no avisa quién dejó reseña. En Historial toca la estrella de la solicitud para marcarla a mano."),
+          paso("Modera las reseñas de tu página",
+            "En Ajustes → Reseñas del negocio apruebas o rechazas lo que tus clientes escriben en tu link de reseñas. Solo las aprobadas se muestran en tu página de reservas."),
         ],
       },
     ],
@@ -540,124 +423,83 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "marca",
-    label: "Mi Marca & Config.",
-    description: "Personaliza la apariencia y los ajustes globales del sistema.",
+    label: "Mi Tienda y ajustes",
+    description: "Tu página de reservas y los ajustes del negocio.",
     iconName: "Palette",
     articles: [
       {
         slug: "logo-colores",
         title: "Cómo cambiar el logo y los colores",
-        description: "Personaliza la identidad visual de tu página pública de agendamiento.",
+        description: "La imagen de tu página pública de reservas.",
         category: "marca",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Mi Marca",
-            body: "En el menú lateral, dirígete a Negocio → Mi Marca.",
-            image: "/help/branding.png",
-          },
-          {
-            title: "Sube un nuevo logo",
-            body: "Haz clic sobre el área de imagen actual. Selecciona un archivo PNG o JPG de máximo 2 MB. Tamaño recomendado: 400×400 px.",
-            image: "/help/logo-colores-step2.png",
-          },
-          {
-            title: "Cambia el color principal",
-            body: "Usa el selector de color para definir el color de acento de tu marca. Aparece en los botones y encabezados de tu página pública.",
-            image: "/help/logo-colores-step3.png",
-          },
-          {
-            title: "Guarda y verifica",
-            body: "Haz clic en Guardar configuración. Los cambios se aplican en tiempo real. Abre tu link de agendamiento en otra pestaña para ver cómo quedó.",
-            image: "/help/logo-colores-step4.png",
-          },
+          paso("Abre Mi Tienda", "Ve a Ajustes → Mi Tienda."),
+          paso("Cambia el logo", "Toca el logo actual y elige una imagen de tu galería."),
+          paso("Elige los colores y el mensaje",
+            "El color primario y el secundario se usan en los botones y encabezados de tu página. Debajo puedes cambiar el mensaje de bienvenida."),
+          paso("Guarda", "Toca Guardar cambios. Abre tu link de reservas para ver cómo quedó."),
         ],
       },
       {
-        slug: "moneda-zona-horaria",
-        title: "Cómo configurar moneda y zona horaria",
-        description: "Ajusta la configuración regional para mostrar precios y horarios correctamente.",
+        slug: "zona-horaria",
+        title: "Cómo cambiar la zona horaria",
+        description: "Para que \"hoy\" sea el día de tu negocio.",
+        category: "marca",
+        readMinutes: 1,
+        steps: [
+          paso("Abre Info del negocio", "Ve a Ajustes → Info del negocio y toca Zona horaria."),
+          paso("Elige la zona de tu negocio",
+            "Todas las fechas de la app (agenda, cobros, caja y reportes) se calculan con esa zona, aunque tu teléfono esté en otra."),
+        ],
+      },
+      {
+        slug: "sedes",
+        title: "Cómo trabajar con varias sedes",
+        description: "Elegir en cuál sede estás; las sedes se crean en el portal web.",
         category: "marca",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Configuración",
-            body: "En el menú lateral, dirígete a Negocio → Configuración.",
-            image: "/help/settings.png",
-          },
-          {
-            title: "Ubica la sección Regional",
-            body: "Encuentra los campos de Moneda y Zona horaria en la sección de configuración regional.",
-            image: "/help/moneda-zona-horaria-step2.png",
-          },
-          {
-            title: "Selecciona los valores correctos",
-            body: "Elige la moneda de tu país (p.ej. COP para Colombia, USD para Estados Unidos) y tu zona horaria.",
-            image: "/help/moneda-zona-horaria-step3.png",
-          },
-          {
-            title: "Guarda los cambios",
-            body: "La moneda se usará en el POS, finanzas y facturas. La zona horaria afecta los horarios mostrados a los clientes al agendar.",
-            image: "/help/moneda-zona-horaria-step4.png",
-          },
+          paso("Abre Sedes", "Ve a Ajustes → Sedes para ver tus sedes y cambiar su foto. Para crear o renombrar sedes usa el portal web de Zyncra."),
+          paso("Elige la sede activa",
+            "La sede activa se asigna a las citas, cobros y caja que crees desde el teléfono, y el Panel, la Agenda y Cobros muestran esa sede."),
+          paso("Administradores de sede",
+            "Los administradores con acceso a una sola sede se invitan desde el portal web de Zyncra."),
         ],
       },
       {
-        slug: "admins-sede",
-        title: "Cómo gestionar administradores de sede",
-        description: "Invita a colaboradores con acceso restringido a una sede específica.",
-        category: "marca",
-        readMinutes: 3,
-        steps: [
-          {
-            title: "Ve a Sedes",
-            body: "En el menú lateral, dirígete a Negocio → Sedes.",
-            image: "/help/locations.png",
-          },
-          {
-            title: "Selecciona la sede",
-            body: "Haz clic en la sede para la que quieres asignar un administrador.",
-            image: "/help/admins-sede-step2.png",
-          },
-          {
-            title: "Invita al administrador",
-            body: "En la sección Admins de sede, ingresa el correo del colaborador y haz clic en Invitar.",
-            image: "/help/admins-sede-step3.png",
-          },
-          {
-            title: "El colaborador acepta la invitación",
-            body: "El colaborador recibirá un correo. Al aceptar, tendrá acceso al panel limitado solo a su sede: calendario, clientes y ventas, sin acceso a Configuración ni WhatsApp.",
-            image: "/help/admins-sede-step4.png",
-          },
-        ],
-      },
-      {
+        // Debe decir lo mismo que app/settings/reminders.tsx (AGE-19): la
+        // anticipación solo mueve el aviso en el teléfono del dueño; al
+        // cliente le escribe el servidor con horarios fijos.
         slug: "recordatorios",
-        title: "Cómo configurar recordatorios automáticos",
-        description: "Envía recordatorios de cita automáticos para reducir las ausencias.",
+        title: "Cómo funcionan los recordatorios de cita",
+        description: "Qué te llega a ti, qué le llega al cliente y qué puedes cambiar.",
         category: "marca",
         readMinutes: 2,
         steps: [
-          {
-            title: "Ve a Recordatorios",
-            body: "En el menú lateral, dirígete a Panel → Recordatorios.",
-            image: "/help/reminders.png",
-          },
-          {
-            title: "Activa los recordatorios",
-            body: "En la pestaña Configuración, activa el interruptor para habilitar el envío automático de recordatorios.",
-            image: "/help/recordatorios-step2.png",
-          },
-          {
-            title: "Configura el tiempo de anticipación",
-            body: "Selecciona con cuántas horas de anticipación se enviará el recordatorio: 1h, 2h, 4h, 12h, 24h o 48h antes de la cita.",
-            image: "/help/recordatorios-step3.png",
-          },
-          {
-            title: "Personaliza el mensaje",
-            body: "Edita el texto del recordatorio en el campo de texto. Puedes usar variables como {nombre}, {servicio} y {hora} para personalizarlo automáticamente.",
-            image: "/help/recordatorios-step4.png",
-          },
+          paso("Abre Recordatorios", "Ve a Ajustes → Recordatorios."),
+          paso("El aviso en tu teléfono",
+            "Elige cuánto antes de cada cita te avisamos en este teléfono: 1 h, 2 h, 6 h, 12 h, 1 día o 2 días. Esto no cambia lo que recibe el cliente."),
+          paso("El recordatorio al cliente",
+            "Lo envía Zyncra sin que hagas nada: un correo 24 horas y otro 2 horas antes de la cita, si el cliente tiene correo, y un WhatsApp 2 horas antes si conectaste tu WhatsApp y elegiste una plantilla aprobada en el portal web."),
+          paso("El mensaje para enviar a mano",
+            "La plantilla de esta pantalla es el texto que se usa cuando le mandas el recordatorio tú mismo por WhatsApp desde el portal web. Toca Nombre, Servicio, Fecha y Hora para insertar {{nombre}}, {{servicio}}, {{fecha}} y {{hora}}. Con llaves simples ({nombre}) no funcionan."),
+          paso("Guarda", "Toca Guardar configuración. La vista previa te muestra cómo se verá el mensaje."),
+        ],
+      },
+      {
+        slug: "cuenta",
+        title: "Tu cuenta, privacidad y cierre de sesión",
+        description: "Perfil, contraseña, privacidad y eliminar la cuenta.",
+        category: "marca",
+        readMinutes: 2,
+        steps: [
+          paso("Tu perfil", "En Ajustes → Mi perfil cambias tus datos personales y tu contraseña."),
+          paso("Privacidad", "En Ajustes → Política de privacidad ves cómo se tratan tus datos y los de tus clientes."),
+          paso("Cerrar sesión",
+            "Al final de Ajustes toca Cerrar sesión. Este teléfono deja de recibir las notificaciones del negocio."),
+          paso("Eliminar la cuenta",
+            "Al final de Ajustes, Eliminar mi cuenta borra tu cuenta de forma definitiva. Te pedirá confirmación."),
         ],
       },
     ],
