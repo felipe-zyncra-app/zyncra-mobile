@@ -135,6 +135,8 @@ export function ListRow({ icon, color, label, sub, onPress, right, last }: {
       onPress={onPress}
       activeOpacity={onPress ? 0.6 : 1}
       disabled={!onPress}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={sub ? `${label}. ${sub}` : label}
     >
       <View style={[s.listRowIcon, { backgroundColor: color + "14" }]}>
         <Ionicons name={icon} size={17} color={color} />

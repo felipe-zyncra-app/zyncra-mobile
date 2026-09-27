@@ -69,6 +69,10 @@ const DARK = {
   statusBar:    "light" as const,
 };
 
+/** Las dos paletas, para pintar vistas previas de un esquema que no es el activo
+ *  (el selector de tema de Ajustes muestra claro y oscuro a la vez). */
+export const PALETTES = { light: LIGHT, dark: DARK } as const;
+
 export type ThemeColors = Omit<typeof LIGHT, "blurTint" | "statusBar"> & {
   blurTint: "light" | "dark";
   statusBar: "dark" | "light";

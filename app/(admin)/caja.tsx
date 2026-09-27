@@ -198,7 +198,7 @@ export default function CajaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Ventas" title="Sistema de Caja" subtitle="Control de ingresos y egresos" onBack={() => router.back()} />
+      <ScreenHeader crumb="Dinero" title="Sistema de Caja" subtitle="Control de ingresos y egresos" onBack={() => router.back()} />
 
       {/* Tabs */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

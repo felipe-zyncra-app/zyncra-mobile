@@ -324,7 +324,7 @@ export default function ReportsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-      <ScreenHeader crumb="Panel" title="Reportes" subtitle="Análisis de rendimiento" onBack={() => router.back()} />
+      <ScreenHeader crumb="Dinero" title="Reportes" subtitle="Análisis de rendimiento" onBack={() => router.back()} />
 
       <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
         <SegmentedControl<Period>

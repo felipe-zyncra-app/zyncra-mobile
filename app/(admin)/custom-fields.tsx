@@ -373,7 +373,7 @@ export default function CustomFieldsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Negocio" title="Campos Personalizados" subtitle="Datos adicionales para clientes y citas" onBack={() => router.back()} />
+      <ScreenHeader crumb="Clientes" title="Campos Personalizados" subtitle="Datos adicionales para clientes y citas" onBack={() => router.back()} />
 
       {/* Tab bar */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

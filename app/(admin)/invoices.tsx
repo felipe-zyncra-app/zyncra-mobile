@@ -580,7 +580,7 @@ export default function InvoicesScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       {/* Header */}
-      <ScreenHeader crumb="Ventas" title="Factura Electrónica" subtitle="Emite facturas DIAN vía Factus" onBack={() => router.back()} />
+      <ScreenHeader crumb="Dinero" title="Factura Electrónica" subtitle="Emite facturas DIAN vía Factus" onBack={() => router.back()} />
 
       {/* Tab bar */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

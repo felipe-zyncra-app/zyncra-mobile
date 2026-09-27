@@ -1,94 +1,110 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { useState } from "react";
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Share, ActivityIndicator } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Config, authedFetch } from "@/lib/config";
 import Constants from "expo-constants";
-import { Colors, Fonts } from "@/constants/theme";
+import { Colors, Fonts, Gradients } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
-import { Card, MonoTag, SectionLabel, ListRow, TenantBadge, SegmentedControl } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
+import { Card, MonoTag, SectionLabel, ListRow } from "@/components/ui";
+import { ThemePicker } from "@/components/ThemePicker";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
-// Grupos espejando NAV_GROUPS del portal web (admin/layout.tsx):
-// Panel · Marketing · Ventas · Negocio · Cuenta
-const SECTIONS: {
-  title: string;
-  items: { icon: IoniconName; color: string; label: string; sub: string; route: string }[];
-}[] = [
+type Item = { icon: IoniconName; label: string; sub: string; route: string; color?: string };
+
+// Ordenado por lo que un dueño toca más desde el teléfono: primero lo que
+// define el negocio, luego el dinero, los clientes y el marketing. Apariencia
+// y cuenta van al final, como en los ajustes del propio teléfono.
+// Cada sección tiene UN color; `color` en el ítem solo para logos de marca.
+// El `crumb` de cada pantalla destino repite el nombre de su sección.
+const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
   {
-    title: "Soporte",
+    title: "Negocio",
+    // No Colors.blue: el #0027fe casi desaparece sobre la card oscura.
+    tint: "#3b82f6",
     items: [
-      { icon: "help-buoy-outline", color: Colors.blue, label: "Centro de ayuda", sub: "Guías paso a paso para usar Zyncra", route: "/(admin)/help" },
+      { icon: "business-outline",   label: "Info del negocio",    sub: "Nombre, contacto y zona horaria",  route: "/settings/business-info" },
+      { icon: "cut-outline",        label: "Servicios",           sub: "Tu catálogo, precios y duración",  route: "/settings/services" },
+      { icon: "time-outline",       label: "Horario de atención", sub: "Días y horas en que atiendes",     route: "/settings/schedule" },
+      { icon: "people-outline",     label: "Equipo",              sub: "Profesionales y permisos",         route: "/settings/team" },
+      { icon: "location-outline",   label: "Sedes",               sub: "Ubicaciones de tu negocio",        route: "/settings/locations" },
+      { icon: "storefront-outline", label: "Mi Tienda",           sub: "Tu página y link de reservas",     route: "/settings/store" },
     ],
   },
   {
-    title: "Panel",
+    title: "Dinero",
+    tint: Colors.success,
     items: [
-      { icon: "notifications-outline", color: Colors.success, label: "Recordatorios", sub: "Alertas automáticas a clientes",         route: "/settings/reminders" },
-      { icon: "bar-chart-outline",     color: Colors.red,     label: "Reportes",      sub: "Ingresos, servicios y rendimiento",      route: "/(admin)/reports" },
-    ],
-  },
-  {
-    title: "Marketing",
-    items: [
-      { icon: "sparkles-outline",     color: "#a855f7",     label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp",   route: "/(admin)/hanna" },
-      { icon: "logo-whatsapp",        color: "#25D366",     label: "Marketing WhatsApp",  sub: "Campañas y mensajes masivos",          route: "/(admin)/whatsapp" },
-      { icon: "chatbox-ellipses-outline", color: "#25D366", label: "Bandeja de WhatsApp", sub: "Conversaciones con tus clientes",      route: "/(admin)/inbox" },
-      { icon: "star-outline",         color: "#f59e0b",     label: "Reseñas Google",      sub: "Solicita reseñas a tus clientes",      route: "/(admin)/reviews-google" },
-      { icon: "chatbubbles-outline",  color: Colors.blue,   label: "Reseñas del negocio", sub: "Modera las opiniones de tu negocio",   route: "/(admin)/reviews-site" },
-    ],
-  },
-  {
-    title: "Ventas",
-    items: [
-      { icon: "stats-chart-outline",   color: Colors.red,     label: "Módulo Financiero",   sub: "Ingresos, egresos y balance",    route: "/(admin)/finanzas" },
-      { icon: "cube-outline",          color: "#8b5cf6",      label: "Inventario",          sub: "Productos, stock y valor",       route: "/(admin)/inventario" },
-      { icon: "wallet-outline",        color: Colors.success, label: "Sistema de Caja",     sub: "Control de ingresos y egresos",  route: "/(admin)/caja" },
-      { icon: "ribbon-outline",        color: "#f59e0b",      label: "Comisiones",          sub: "Paga a tu equipo de trabajo",    route: "/(admin)/commissions" },
-      { icon: "document-text-outline", color: Colors.blue,    label: "Factura Electrónica", sub: "Emite facturas DIAN vía Factus", route: "/(admin)/invoices" },
-    ],
-  },
-  {
-    title: "Compras",
-    items: [
-      { icon: "cart-outline", color: "#0ea5e9", label: "Proveedores", sub: "Catálogo mayorista y pedidos", route: "/(admin)/proveedores" },
+      { icon: "bar-chart-outline",     label: "Reportes",            sub: "Ingresos, servicios y rendimiento", route: "/(admin)/reports" },
+      { icon: "stats-chart-outline",   label: "Módulo financiero",   sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
+      { icon: "wallet-outline",        label: "Sistema de caja",     sub: "Apertura, cierre y movimientos",    route: "/(admin)/caja" },
+      { icon: "ribbon-outline",        label: "Comisiones",          sub: "Lo que le pagas a tu equipo",       route: "/(admin)/commissions" },
+      { icon: "document-text-outline", label: "Factura electrónica", sub: "Facturas DIAN vía Factus",          route: "/(admin)/invoices" },
     ],
   },
   {
     title: "Clientes",
+    tint: "#ec4899",
     items: [
-      { icon: "pulse-outline", color: "#0ea5e9", label: "Historias Clínicas", sub: "Fichas y evoluciones de pacientes", route: "/(admin)/clinical" },
-      { icon: "gift-outline",  color: "#ec4899", label: "Fidelización",       sub: "Premios y recompensas por visitas", route: "/(admin)/loyalty" },
+      { icon: "notifications-outline", label: "Recordatorios",         sub: "Avisos automáticos antes de la cita", route: "/settings/reminders" },
+      { icon: "gift-outline",          label: "Fidelización",          sub: "Premios por visitas",                 route: "/(admin)/loyalty" },
+      { icon: "pulse-outline",         label: "Historias clínicas",    sub: "Fichas y evoluciones",                route: "/(admin)/clinical" },
+      { icon: "options-outline",       label: "Campos personalizados", sub: "Datos extra de clientes y citas",     route: "/(admin)/custom-fields" },
     ],
   },
   {
-    title: "Negocio",
+    title: "Marketing",
+    tint: "#8b5cf6",
     items: [
-      { icon: "business-outline",   color: Colors.ink,   label: "Info del negocio",      sub: "Nombre, contacto y zona horaria",     route: "/settings/business-info" },
-      { icon: "storefront-outline", color: Colors.red,   label: "Mi Tienda",             sub: "Personalización y link de reservas",  route: "/settings/store" },
-      { icon: "time-outline",       color: "#f59e0b",    label: "Horario de atención",   sub: "Días y horas disponibles",            route: "/settings/schedule" },
-      { icon: "cut-outline",        color: "#8b5cf6",    label: "Servicios",             sub: "Gestiona tu catálogo de precios",     route: "/settings/services" },
-      { icon: "people-outline",     color: Colors.blue,  label: "Equipo",                sub: "Profesionales y permisos",            route: "/settings/team" },
-      { icon: "location-outline",   color: "#10b981",    label: "Sedes",                 sub: "Ubicaciones de tu negocio",           route: "/settings/locations" },
-      { icon: "options-outline",    color: "#8b5cf6",    label: "Campos Personalizados", sub: "Datos extra para clientes y citas",   route: "/(admin)/custom-fields" },
+      { icon: "chatbox-ellipses-outline", label: "Bandeja de WhatsApp", sub: "Conversaciones con tus clientes",  route: "/(admin)/inbox", color: "#25D366" },
+      { icon: "sparkles-outline",         label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp", route: "/(admin)/hanna" },
+      { icon: "megaphone-outline",        label: "Campañas WhatsApp",   sub: "Mensajes masivos a tus clientes",  route: "/(admin)/whatsapp" },
+      { icon: "star-outline",             label: "Reseñas Google",      sub: "Pide reseñas a tus clientes",       route: "/(admin)/reviews-google" },
+      { icon: "chatbubbles-outline",      label: "Reseñas del negocio", sub: "Modera lo que opinan de ti",       route: "/(admin)/reviews-site" },
     ],
   },
   {
-    title: "Cuenta",
+    title: "Inventario y compras",
+    tint: "#0ea5e9",
     items: [
-      { icon: "person-outline", color: "#6366f1",   label: "Mi perfil",          sub: "Datos personales y contraseña", route: "/settings/profile" },
+      { icon: "cube-outline", label: "Inventario",  sub: "Productos, stock y valor",     route: "/(admin)/inventario" },
+      { icon: "cart-outline", label: "Proveedores", sub: "Catálogo mayorista y pedidos", route: "/(admin)/proveedores" },
     ],
   },
 ];
 
+function initialsOf(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.slice(0, 2).map((w) => w[0]).join("");
+  return (letters || "Z").toUpperCase();
+}
+
 export default function SettingsScreen() {
   const router = useRouter();
-  const { mode, preference, t, setPreference } = useTheme();
-  const { tenant: tenantData } = useTenant();
+  const { t } = useTheme();
+  const { tenant } = useTenant();
+  const { session } = useAuth();
+  const [deleting, setDeleting] = useState(false);
+
+  const email = session?.user?.email ?? "";
+  const bookingLink = tenant?.slug ? `${Config.urls.booking}${tenant.slug}` : "";
+  const bookingShort = bookingLink.replace(/^https?:\/\/(www\.)?/, "");
+
+  const handleShare = async () => {
+    if (!bookingLink) return;
+    try {
+      await Share.share({ message: bookingLink });
+    } catch {
+      // El usuario cerró la hoja o el SO no pudo abrirla: nada que hacer.
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Seguro que quieres salir?", [
@@ -103,7 +119,24 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const deleteAccount = async () => {
+    setDeleting(true);
+    try {
+      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo eliminar la cuenta.");
+      }
+      await supabase.auth.signOut();
+      router.replace("/(auth)/login");
+    } catch (e: any) {
+      setDeleting(false);
+      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
+    }
+  };
+
   const handleDeleteAccount = () => {
+    if (deleting) return;
     Alert.alert(
       "Eliminar cuenta",
       "Se eliminará tu cuenta y todos los datos de tu negocio (clientes, citas, ventas, reportes). Esta acción no se puede deshacer.",
@@ -117,22 +150,7 @@ export default function SettingsScreen() {
               "Esta es tu última oportunidad para cancelar.",
               [
                 { text: "Cancelar", style: "cancel" },
-                {
-                  text: "Eliminar cuenta", style: "destructive",
-                  onPress: async () => {
-                    try {
-                      const res = await authedFetch(Config.edgeFunctions.deleteAccount, { method: "POST" });
-                      if (!res.ok) {
-                        const body = await res.json().catch(() => ({}));
-                        throw new Error(body.error || "No se pudo eliminar la cuenta.");
-                      }
-                      await supabase.auth.signOut();
-                      router.replace("/(auth)/login");
-                    } catch (e: any) {
-                      Alert.alert("Error", e.message || "No se pudo eliminar la cuenta. Intenta de nuevo.");
-                    }
-                  },
-                },
+                { text: "Eliminar cuenta", style: "destructive", onPress: deleteAccount },
               ]
             );
           },
@@ -141,101 +159,146 @@ export default function SettingsScreen() {
     );
   };
 
+  const accountItems: Item[] = [
+    { icon: "person-outline",    label: "Mi perfil",       sub: email || "Datos personales y contraseña", route: "/settings/profile" },
+    { icon: "help-buoy-outline", label: "Centro de ayuda", sub: "Guías paso a paso para usar Zyncra",     route: "/(admin)/help" },
+  ];
+
+  const renderSection = (title: string, tint: string, items: Item[], index: number) => (
+    <Animated.View key={title} entering={FadeInDown.delay(120 + index * 50).duration(400)} style={s.section}>
+      <SectionLabel>{title}</SectionLabel>
+      <Card>
+        {items.map((item, ii) => (
+          <ListRow
+            key={item.route}
+            icon={item.icon}
+            color={item.color ?? tint}
+            label={item.label}
+            sub={item.sub}
+            last={ii === items.length - 1}
+            onPress={() => router.push(item.route as any)}
+          />
+        ))}
+      </Card>
+    </Animated.View>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         {/* ── Header compacto ── */}
-        <Animated.View entering={FadeInDown.duration(350)} style={s.headerRow}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <MonoTag>Ajustes</MonoTag>
-            <Text style={[s.headerTitle, { color: t.ink }]}>Configura tu negocio</Text>
-          </View>
-          {tenantData && <TenantBadge name={tenantData.name} />}
+        <Animated.View entering={FadeInDown.duration(350)} style={s.header}>
+          <MonoTag>Ajustes</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]}>Configura tu negocio</Text>
         </Animated.View>
+
+        {/* ── Tarjeta del negocio: identidad + link de reservas ── */}
+        <Animated.View entering={FadeInDown.delay(60).duration(400)}>
+          <Card>
+            <Pressable
+              onPress={() => router.push("/settings/store" as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi Tienda`}
+              style={({ pressed }) => [s.bizRow, pressed && { opacity: 0.7 }]}
+            >
+              <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.bizAvatar}>
+                <Text style={s.bizInitials}>{initialsOf(tenant?.name ?? "")}</Text>
+              </LinearGradient>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[s.bizName, { color: t.ink }]} numberOfLines={1}>
+                  {tenant?.name ?? "Tu negocio"}
+                </Text>
+                <Text style={[s.bizLink, { color: t.subtle }]} numberOfLines={1}>
+                  {bookingShort || "Configura tu link de reservas"}
+                </Text>
+              </View>
+              {bookingLink ? (
+                <Pressable
+                  onPress={handleShare}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Compartir link de reservas"
+                  style={({ pressed }) => [s.shareBtn, { backgroundColor: t.chipBg, borderColor: t.line }, pressed && { opacity: 0.6 }]}
+                >
+                  <Ionicons name="share-outline" size={17} color={t.ink} />
+                </Pressable>
+              ) : (
+                <Ionicons name="chevron-forward" size={15} color={t.subtle} />
+              )}
+            </Pressable>
+          </Card>
+        </Animated.View>
+
+        {SECTIONS.map((sec, i) => renderSection(sec.title, sec.tint, sec.items, i))}
 
         {/* ── Apariencia ── */}
-        <Animated.View entering={FadeInDown.delay(60).duration(400)}>
+        <Animated.View entering={FadeInDown.delay(120 + SECTIONS.length * 50).duration(400)} style={s.section}>
           <SectionLabel>Apariencia</SectionLabel>
           <Card>
-            <ListRow
-              icon={preference === "system" ? "phone-portrait" : mode === "dark" ? "moon" : "sunny"}
-              color={preference === "system" ? Colors.blue : mode === "dark" ? "#6366f1" : "#f59e0b"}
-              label="Tema"
-              sub={
-                preference === "system"
-                  ? `Igual que tu dispositivo · ahora ${mode === "dark" ? "oscuro" : "claro"}`
-                  : preference === "dark" ? "Siempre oscuro" : "Siempre claro"
-              }
-              last
-            />
-            <View style={s.themePicker}>
-              <SegmentedControl
-                value={preference}
-                onChange={setPreference}
-                options={[
-                  { value: "system", label: "Automático" },
-                  { value: "light",  label: "Claro" },
-                  { value: "dark",   label: "Oscuro" },
-                ]}
-              />
-            </View>
+            <ThemePicker />
           </Card>
         </Animated.View>
 
-        {SECTIONS.map((sec, si) => (
-          <Animated.View key={sec.title} entering={FadeInDown.delay((si + 2) * 60).duration(400)} style={{ marginTop: 18 }}>
-            <SectionLabel>{sec.title}</SectionLabel>
-            <Card>
-              {sec.items.map((item, ii) => (
-                <ListRow
-                  key={item.route}
-                  icon={item.icon}
-                  color={item.color}
-                  label={item.label}
-                  sub={item.sub}
-                  last={ii === sec.items.length - 1}
-                  onPress={() => router.push(item.route as any)}
-                />
-              ))}
-            </Card>
-          </Animated.View>
-        ))}
+        {renderSection("Cuenta y soporte", "#6366f1", accountItems, SECTIONS.length + 1)}
 
         {/* ── Cerrar sesión ── */}
-        <Animated.View entering={FadeInDown.delay(520).duration(400)} style={{ marginTop: 18 }}>
-          <Card>
-            <TouchableOpacity style={s.logoutRow} onPress={handleLogout} activeOpacity={0.6}>
-              <View style={[s.logoutIcon, { backgroundColor: Colors.red + "12" }]}>
-                <Ionicons name="log-out-outline" size={17} color={Colors.red} />
-              </View>
-              <Text style={s.logoutText}>Cerrar sesión</Text>
-            </TouchableOpacity>
-          </Card>
+        <Animated.View entering={FadeInDown.delay(120 + (SECTIONS.length + 2) * 50).duration(400)} style={s.section}>
+          <Pressable
+            onPress={handleLogout}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              s.logoutBtn,
+              { backgroundColor: pressed ? Colors.red + "14" : t.cardSolid, borderColor: t.line },
+            ]}
+          >
+            <Ionicons name="log-out-outline" size={18} color={Colors.red} />
+            <Text style={s.logoutText}>Cerrar sesión</Text>
+          </Pressable>
+
+          {/* Apple 5.1.1(v): borrar la cuenta tiene que estar a la vista. Discreto, no escondido. */}
+          <Pressable
+            onPress={handleDeleteAccount}
+            disabled={deleting}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: deleting, busy: deleting }}
+            style={({ pressed }) => [s.deleteBtn, pressed && { opacity: 0.6 }]}
+          >
+            {deleting ? (
+              <ActivityIndicator size="small" color={t.subtle} />
+            ) : (
+              <Ionicons name="trash-outline" size={14} color={t.subtle} />
+            )}
+            <Text style={[s.deleteText, { color: t.subtle }]}>
+              {deleting ? "Eliminando cuenta…" : "Eliminar mi cuenta"}
+            </Text>
+          </Pressable>
         </Animated.View>
 
-        {/* ── Eliminar cuenta ── */}
-        <Animated.View entering={FadeInDown.delay(540).duration(400)} style={{ marginTop: 10 }}>
-          <TouchableOpacity style={s.deleteRow} onPress={handleDeleteAccount} activeOpacity={0.6}>
-            <Text style={[s.deleteText, { color: t.subtle }]}>Eliminar cuenta</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.delay(580).duration(400)} style={{ alignItems: "center", marginTop: 24 }}>
+        <View style={s.footerWrap}>
           <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v{Constants.expoConfig?.version ?? "1.0.0"} · Hecho en Colombia 🇨🇴</Text>
-        </Animated.View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  headerRow:   { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 20 },
-  themePicker: { paddingHorizontal: 16, paddingBottom: 14, marginTop: -4 },
+  header:      { marginBottom: 16 },
   headerTitle: { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
-  logoutRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
-  logoutIcon:  { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  logoutText:  { fontSize: 13.5, fontFamily: Fonts.semibold, color: Colors.red },
-  deleteRow:   { alignItems: "center", paddingVertical: 10 },
-  deleteText:  { fontSize: 12.5, fontFamily: Fonts.regular, textDecorationLine: "underline" },
+  section:     { marginTop: 20 },
+
+  bizRow:      { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
+  bizAvatar:   { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  bizInitials: { color: "#fff", fontSize: 17, fontFamily: Fonts.bold, letterSpacing: -0.3 },
+  bizName:     { fontSize: 16, fontFamily: Fonts.bold, letterSpacing: -0.3 },
+  bizLink:     { fontSize: 11, fontFamily: Fonts.mono, marginTop: 3 },
+  shareBtn:    { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+
+  logoutBtn:   { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 50, borderRadius: 14, borderWidth: 1 },
+  logoutText:  { fontSize: 14.5, fontFamily: Fonts.semibold, color: Colors.red },
+  deleteBtn:   { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 14, marginTop: 6 },
+  deleteText:  { fontSize: 12.5, fontFamily: Fonts.regular },
+  footerWrap:  { alignItems: "center", marginTop: 8 },
   footer:      { fontSize: 12, fontFamily: Fonts.regular },
 });

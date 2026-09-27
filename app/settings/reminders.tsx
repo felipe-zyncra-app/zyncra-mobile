@@ -103,7 +103,7 @@ export default function RemindersScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScreenHeader
-        crumb="Panel"
+        crumb="Clientes"
         title="Recordatorios"
         subtitle="Avisos automáticos para tus clientes"
         onBack={() => router.back()}
