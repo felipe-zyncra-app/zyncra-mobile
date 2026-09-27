@@ -103,3 +103,40 @@ export function zonaDelNegocio(settings: any): string {
   const z = settings?.timezone;
   return typeof z === "string" && z.length > 0 ? z : ZONA_POR_DEFECTO;
 }
+
+/**
+ * Zonas que puede elegir un negocio. Se limita a America Latina y Espana —
+ * que es a donde puede crecer Zyncra — en vez de ofrecer las ~400 de la base
+ * IANA: una lista larga es peor que una corta cuando el usuario ya sabe cual
+ * es la suya. Si algun dia hace falta otra, se agrega aqui.
+ *
+ * Las que tienen horario de verano van marcadas: no cambia nada en el codigo
+ * (el desfase se calcula por instante), pero ayuda a entender por que el
+ * mismo negocio puede ver un corte de dia distinto en enero y en julio.
+ */
+export const ZONAS_DISPONIBLES: { id: string; label: string; dst?: boolean }[] = [
+  { id: "America/Bogota",      label: "Colombia — Bogotá" },
+  { id: "America/Mexico_City", label: "México — Ciudad de México" },
+  { id: "America/Lima",        label: "Perú — Lima" },
+  { id: "America/Guayaquil",   label: "Ecuador — Guayaquil" },
+  { id: "America/Caracas",     label: "Venezuela — Caracas" },
+  { id: "America/Panama",      label: "Panamá" },
+  { id: "America/Costa_Rica",  label: "Costa Rica" },
+  { id: "America/Guatemala",   label: "Guatemala" },
+  { id: "America/El_Salvador", label: "El Salvador" },
+  { id: "America/Tegucigalpa", label: "Honduras" },
+  { id: "America/Managua",     label: "Nicaragua" },
+  { id: "America/Santo_Domingo", label: "República Dominicana" },
+  { id: "America/La_Paz",      label: "Bolivia — La Paz" },
+  { id: "America/Asuncion",    label: "Paraguay — Asunción", dst: true },
+  { id: "America/Santiago",    label: "Chile — Santiago",    dst: true },
+  { id: "America/Argentina/Buenos_Aires", label: "Argentina — Buenos Aires" },
+  { id: "America/Montevideo",  label: "Uruguay — Montevideo" },
+  { id: "America/Sao_Paulo",   label: "Brasil — São Paulo" },
+  { id: "Europe/Madrid",       label: "España — Madrid",     dst: true },
+];
+
+/** Etiqueta legible de una zona, o el id si no esta en la lista. */
+export function etiquetaZona(id: string): string {
+  return ZONAS_DISPONIBLES.find(z => z.id === id)?.label ?? id;
+}
