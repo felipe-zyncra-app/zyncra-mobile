@@ -225,13 +225,15 @@ export default function ReportsScreen() {
     const prevPosRev  = prevStandalone.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
     const prevRev  = prevApptRev + prevPosRev;
     const noShows  = cur.filter(a => a.status === "no_show").length;
-    // Denominador de inasistencia: citas que ya tuvieron desenlace. Se mantiene
-    // el criterio anterior (completed + confirmed) a proposito — cambiarlo aqui
-    // moveria una metrica que no es de dinero.
-    const done  = cur.filter(a => a.status === "completed" || a.status === "confirmed");
-    const totalFinished = done.length + noShows;
-    // Ticket promedio = ingreso / cobros reales, no / citas agendadas.
-    const paidCount = paid.length + standalone.length;
+    // Denominador de inasistencia: todas las citas del periodo menos las
+    // canceladas. Antes era (completed + confirmed + no_show), que dejaba
+    // fuera las pending y daba una tasa distinta a la del Panel para el mismo
+    // negocio. Ahora usa el mismo criterio que noShowRate en admin/page.tsx.
+    const totalFinished = cur.filter(a => a.status !== "cancelled").length;
+    // Ticket promedio = ingreso / cobros reales. Excluye los cobros en $0
+    // (cortesias): contarlos hunde el promedio sin que haya entrado plata.
+    // Mismo criterio que el Panel desde el commit 0550daa.
+    const paidCount = paid.filter((a: any) => priceOf(a) > 0).length + standalone.length;
 
     setRevenue(rev);
     setPrevRevenue(prevRev);
