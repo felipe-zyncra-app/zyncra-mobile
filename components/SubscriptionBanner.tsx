@@ -74,8 +74,12 @@ export default function SubscriptionBanner({ style }: { style?: StyleProp<ViewSt
       {canLinkToCheckout && (
         <TouchableOpacity
           style={[s.cta, { backgroundColor: tone }]}
-          onPress={() => Linking.openURL(Config.urls.billing)}
+          onPress={() => Linking.openURL(Config.urls.billing).catch(() => {})}
           activeOpacity={0.85}
+          // El botón mide ~32 pt de alto: el hitSlop lo lleva a los 44 pt mínimos.
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="link"
+          accessibilityLabel={notice.kind === "trial-ending" ? "Activar tu plan en el portal" : "Pagar en el portal"}
         >
           <Text style={s.ctaText}>{notice.kind === "trial-ending" ? "Activar" : "Pagar"}</Text>
         </TouchableOpacity>
