@@ -342,7 +342,11 @@ export default function DashboardScreen() {
     const active    = appts.filter(a => a.status !== "cancelled");
     const confirmed = appts.filter(a => a.status === "confirmed").length;
     const pending   = appts.filter(a => a.status === "pending").length;
-    const paidCount = appts.filter(a => isPaidStatus(a.status)).length + standaloneOf(pos).length;
+    // El divisor del ticket promedio excluye las citas cobradas en $0 —
+    // cortesias y demas. Contarlas hunde el promedio sin que haya entrado
+    // plata de por medio. Mismo criterio que avgTicket en admin/page.tsx.
+    const paidCount = appts.filter(a => isPaidStatus(a.status) && getPrice(a) > 0).length
+      + standaloneOf(pos).length;
 
     // Por cobrar: toda cita agendada sin cobrar. Es plata comprometida, no
     // ingreso — nunca entra en "Ingresos".
