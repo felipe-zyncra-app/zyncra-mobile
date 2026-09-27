@@ -180,6 +180,9 @@ export function Bars({ data, height = 150, accent = "brand" }: {
   const max = Math.max(...data.map(d => d.value), 1);
   const barH = height - 24;
   const grad: readonly [string, string] = accent === "green" ? ["#34d399", "#0d9488"] : ["#fb0f05", "#0027fe"];
+  // Las gráficas por hora ya no se recortan a 8–19 h (pueden tener 16+
+  // barras): con todas las etiquetas se montaban unas sobre otras.
+  const cada = Math.max(1, Math.ceil(data.length / 12));
 
   return (
     <View style={[s.barsWrap, { height }]}>
@@ -193,7 +196,7 @@ export function Bars({ data, height = 150, accent = "brand" }: {
             ) : (
               <View style={[s.bar, { height: h, backgroundColor: t.trackBg }]} />
             )}
-            <Text style={[s.barLabel, { color: t.subtle }]} numberOfLines={1}>{d.label}</Text>
+            <Text style={[s.barLabel, { color: t.subtle }]} numberOfLines={1}>{i % cada === 0 ? d.label : " "}</Text>
           </Animated.View>
         );
       })}
@@ -256,7 +259,12 @@ export function Donut({ data, fmt, centerLabel = "total", size = 132 }: {
       <View style={s.donutLegend}>
         {data.map((d, i) => (
           <TouchableOpacity key={i} style={[s.legendRow, { opacity: sel !== null && sel !== i ? 0.42 : 1 }]}
-            onPress={() => setSel(sel === i ? null : i)} activeOpacity={0.7}>
+            onPress={() => setSel(sel === i ? null : i)} activeOpacity={0.7}
+            // Los segmentos del SVG no son alcanzables con el lector de
+            // pantalla: la leyenda es la forma accesible de resaltarlos.
+            accessibilityRole="button"
+            accessibilityState={{ selected: sel === i }}
+            accessibilityLabel={`${d.label}, ${((d.value / total) * 100).toFixed(0)}%, ${fmt(d.value)}`}>
             <View style={[s.legendDot, { backgroundColor: d.color }]} />
             <Text style={[s.legendLabel, { color: t.muted }]} numberOfLines={1}>{d.label}</Text>
             <Text style={[s.legendPct, { color: t.subtle }]}>{((d.value / total) * 100).toFixed(0)}%</Text>

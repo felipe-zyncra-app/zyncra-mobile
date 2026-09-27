@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,18 +9,39 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Fonts, Gradients, MonoLabel, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
+import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
-import { diaLocalDe, ZONA_POR_DEFECTO } from "@/lib/tz";
+import {
+  diaLocalDe, horaLocalDe, hoyNegocio, sumarDias, listaDeDias, diaDeSemana,
+  rangoPersonalizado, fmtDia, esHoy,
+} from "@/lib/tz";
 import { supabase } from "@/lib/supabase";
-import { salePaymentLines, saleUsesMethod, type PaymentLine } from "@/lib/pos-payments";
+import { fmtMoneyFull, fmt12 } from "@/lib/format";
+import { mensajeError, revisar, traerTodo, traerTodoDetalle } from "@/lib/db";
+import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
+import { findOpenCashSession } from "@/lib/record-sale";
+import { getActiveLocationId } from "@/lib/active-location";
+import { type PaymentLine } from "@/lib/pos-payments";
+import { desglosePorMedio, lineasDePago, montoDe } from "@/lib/ingresos";
+import { agruparPorItem, nombreItem, totalesCaja, type TotalesCaja } from "@/lib/dinero";
+import { PAY_METHODS, methodCfg } from "@/components/ChargeSheet";
+import { SegmentedControl } from "@/components/ui";
+import ErrorState from "@/components/ErrorState";
+import { cargarListaSedes, nombreCorto, nombreSede, TODAS_LAS_SEDES, type SedeLite } from "@/components/SedeChip";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Tab = "resumen" | "caja" | "ventas" | "reportes" | "rentabilidad";
+type Periodo = "7" | "30" | "90";
+/** "sede": solo la sede activa (como el Panel y Reportes). "todas": el negocio entero (como el Finanzas web). */
+type Alcance = "sede" | "todas";
 
+/** La columna es `price` (DIN-01): `unit_price` no existe y tumbaba toda la consulta. */
 interface SaleItem {
   quantity: number;
-  unit_price: number;
+  price: number;
+  name: string | null;
+  item_type: string | null;
   services: { name: string } | null;
 }
 
@@ -32,6 +53,7 @@ interface Sale {
   payments: PaymentLine[] | null;
   created_at: string;
   client_id: string | null;
+  location_id: string | null;
   clients: { name: string } | null;
   pos_sale_items: SaleItem[];
 }
@@ -49,7 +71,36 @@ interface CashMovement {
   amount: number;
   description: string;
   created_at: string;
+  payment_method: string | null;
 }
+
+type Datos = {
+  /**
+   * Período con el que se cargaron `ventas`. Las etiquetas salen de aquí y no
+   * del filtro elegido: mientras recarga (o si la recarga falla) los números
+   * siguen siendo del período anterior y el rótulo no debe mentir.
+   */
+  periodo: Periodo;
+  /** Ventas del período elegido (días del negocio, hoy incluido), de TODAS las sedes. */
+  ventas: Sale[];
+  /** Ventas de los últimos DIAS_GRAFICO días, para el gráfico diario (todas las sedes). */
+  ventasGrafico: Sale[];
+  truncado: boolean;
+  /** Caja abierta de la sede ACTIVA: una caja es un cajón físico, nunca "todas". */
+  session: CashSession | null;
+  movements: CashMovement[];
+  /** Sede activa y sedes del negocio con las que se cargó (para filtrar y rotular). */
+  sedeActiva: string | null;
+  sedes: SedeLite[];
+};
+
+/** Datos ya filtrados por el alcance elegido, más el rótulo de la sede. */
+type Vista = Datos & {
+  /** Nombre de la sede activa (null = el negocio tiene una sola sede o ninguna). */
+  sede: string | null;
+  /** Qué se está sumando: la sede, "Todas las sedes" o null (no hace falta decirlo). */
+  alcanceLabel: string | null;
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -61,81 +112,90 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "rentabilidad", label: "Rentabilidad" },
 ];
 
-const PM_COLOR: Record<string, string> = {
-  efectivo: "#10b981", tarjeta: "#6366f1", nequi: "#0027fe", daviplata: "#f59e0b", qr: "#8b5cf6", mixto: "#64748b",
-};
+const DIAS_GRAFICO = 12;
+const MOVS_VISIBLES = 100;
+const LETRAS_DIA = ["L", "M", "M", "J", "V", "S", "D"];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+const fmt = fmtMoneyFull;
+
+function colorMetodo(pm: string, fallback: string): string {
+  return methodCfg(pm)?.color ?? fallback;
 }
 
-function startOfPeriod(period: "7" | "30" | "90"): string {
-  const d = new Date();
-  d.setDate(d.getDate() - parseInt(period));
-  return d.toISOString();
+function etiquetaMetodo(pm: string): string {
+  return methodCfg(pm)?.label ?? (pm.charAt(0).toUpperCase() + pm.slice(1));
 }
 
-function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-  const hhmm = d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
-  if (diffDays === 0) return `hoy ${hhmm}`;
-  if (diffDays === 1) return `ayer ${hhmm}`;
-  return `${d.getDate()} ${d.toLocaleString("es-CO", { month: "short" })} ${hhmm}`;
+/**
+ * "hoy 8:00 PM" / "ayer 8:00 PM" / "24 sep 8:00 PM" por día del negocio (TZ-08).
+ * Antes era por diferencia de 24 h: un cobro de anoche consultado en la
+ * mañana salía como "hoy".
+ */
+function fmtCuando(iso: string, timeZone: string): string {
+  const dia = diaLocalDe(iso, timeZone);
+  const hoy = hoyNegocio(timeZone);
+  const hora = fmt12(horaLocalDe(iso, timeZone));
+  if (dia === hoy) return `hoy ${hora}`;
+  if (dia === sumarDias(hoy, -1)) return `ayer ${hora}`;
+  return `${fmtDia(dia, "dia-mes")} ${hora}`;
 }
 
 function saleItemsLabel(items: SaleItem[]): string {
-  const names = items.map(i => i.services?.name).filter(Boolean) as string[];
-  return names.length === 0 ? "Sin servicios" : names.join(" · ");
+  const names = items.map(nombreItem).filter(Boolean);
+  return names.length === 0 ? "Sin ítems" : names.join(" · ");
 }
 
-function groupByDay(sales: Sale[], days: number, timeZone = ZONA_POR_DEFECTO): { label: string; pct: number }[] {
-  // Las cubetas y los cobros se fechan en la zona del negocio. Con UTC, un
-  // cobro de las 9 PM en Colombia caia en la barra del dia siguiente.
-  const buckets: Record<string, number> = {};
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    buckets[diaLocalDe(d, timeZone)] = 0;
-  }
+/** Barras de los últimos días, fechadas en la zona del negocio. */
+function groupByDay(sales: Sale[], hoy: string, timeZone: string): { label: string; pct: number }[] {
+  const dias = listaDeDias(sumarDias(hoy, -(DIAS_GRAFICO - 1)), hoy);
+  const buckets: Record<string, number> = Object.fromEntries(dias.map(d => [d, 0]));
   for (const s of sales) {
     const key = diaLocalDe(s.created_at, timeZone);
-    if (key in buckets) buckets[key] += s.total;
+    if (key in buckets) buckets[key] += Number(s.total) || 0;
   }
-  const entries = Object.entries(buckets);
-  const maxVal = Math.max(...entries.map(([, v]) => v), 1);
-  const dayLetters = ["D", "L", "M", "M", "J", "V", "S"];
-  return entries.map(([dateStr, val]) => ({
-    label: dayLetters[new Date(dateStr + "T12:00:00").getDay()],
-    pct: Math.round((val / maxVal) * 100),
+  const maxVal = Math.max(...dias.map(d => buckets[d]), 1);
+  return dias.map(d => ({ label: LETRAS_DIA[diaDeSemana(d) - 1], pct: Math.round((buckets[d] / maxVal) * 100) }));
+}
+
+/**
+ * Suma por medio de pago con desglosePorMedio (lib/ingresos.ts), la misma
+ * función del Panel: un pago dividido se reparte por método real (efectivo,
+ * nequi, ...) en vez de acumularse como "mixto". Colores y nombres del POS,
+ * para que coincidan con las etiquetas de cada venta en esta pantalla.
+ */
+function mediosDePago(sales: Sale[]): { key: string; label: string; value: number; color: string }[] {
+  return desglosePorMedio(sales).map(d => ({
+    ...d,
+    label: methodCfg(d.key)?.label ?? d.label,
+    color: methodCfg(d.key)?.color ?? d.color,
   }));
 }
 
-function groupByPaymentMethod(sales: Sale[]): Record<string, number> {
-  const result: Record<string, number> = {};
-  // Un pago dividido se reparte por método real (efectivo, nequi, ...) en vez
-  // de acumularse como un bucket "mixto".
-  for (const s of sales)
-    for (const l of salePaymentLines(s)) result[l.method] = (result[l.method] ?? 0) + l.amount;
-  return result;
+/** Total cobrado (D10: solo pos_sales, que es lo que entró a caja). */
+function totalCobrado(sales: Sale[]): number {
+  return sales.reduce((a, s) => a + montoDe(s), 0);
 }
 
-function groupByService(sales: Sale[]): { name: string; val: number; pct: number }[] {
-  const totals: Record<string, number> = {};
-  for (const sale of sales)
-    for (const item of sale.pos_sale_items) {
-      const name = item.services?.name ?? "Sin nombre";
-      totals[name] = (totals[name] ?? 0) + item.quantity * item.unit_price;
-    }
-  const sorted = Object.entries(totals)
-    .map(([name, val]) => ({ name, val }))
-    .sort((a, b) => b.val - a.val)
-    .slice(0, 6);
-  const maxVal = sorted[0]?.val ?? 1;
-  return sorted.map(s => ({ ...s, pct: Math.round((s.val / maxVal) * 100) }));
+/** Caja abierta de la sede activa con TODOS sus movimientos (DIN-07 / CAL-13 / ESQ-22). */
+async function cargarCaja(tenantId: string): Promise<{ session: CashSession | null; movements: CashMovement[] }> {
+  // findOpenCashSession filtra por la sede activa y toma la más reciente: con
+  // una caja abierta por sede, maybeSingle() sobre todas fallaba (PGRST116).
+  const abierta = await findOpenCashSession(tenantId);
+  if (!abierta) return { session: null, movements: [] };
+  const session = revisar(
+    await supabase.from("cash_sessions").select("id, opened_at, opening_amount, closing_amount").eq("id", abierta.id).single(),
+    "No se pudo cargar la caja abierta",
+  ) as CashSession;
+  const movements = await traerTodo<CashMovement>((d, h) =>
+    supabase.from("cash_movements")
+      .select("id, type, amount, description, created_at, payment_method")
+      .eq("session_id", abierta.id)
+      .order("created_at", { ascending: false }).order("id")
+      .range(d, h),
+  { contexto: "No se pudieron cargar los movimientos de la caja" });
+  return { session, movements };
 }
 
 // ── Loading ───────────────────────────────────────────────────────────────────
@@ -152,35 +212,31 @@ function LoadingView() {
 
 // ── Resumen ───────────────────────────────────────────────────────────────────
 
-function TabResumen({ sales, session, movements, period, loading }: {
-  sales: Sale[]; session: CashSession | null; movements: CashMovement[];
-  period: "7" | "30" | "90"; loading: boolean;
-}) {
+function TabResumen({ datos, caja }: { datos: Vista; caja: TotalesCaja }) {
   const { t } = useTheme();
   const { timezone } = useTenant();
-  if (loading) return <LoadingView />;
+  const sales = datos.ventas;
+  const period = datos.periodo;
 
-  const totalIngresos = sales.reduce((a, s) => a + s.total, 0);
+  const totalIngresos = totalCobrado(sales);
   const avgSale       = sales.length > 0 ? Math.round(totalIngresos / sales.length) : 0;
   const countSales    = sales.length;
-  const cajaIngresos  = movements.filter(m => m.type === "ingreso").reduce((a, m) => a + m.amount, 0);
-  const cajaEgresos   = movements.filter(m => m.type === "egreso").reduce((a, m) => a + m.amount, 0);
-  const cajaBalance   = session ? session.opening_amount + cajaIngresos - cajaEgresos : 0;
-  const barData       = groupByDay(sales, 12, timezone);
-  const pmTotals      = groupByPaymentMethod(sales);
-  const grandTotal    = Object.values(pmTotals).reduce((a, b) => a + b, 0) || 1;
+  const barData       = groupByDay(datos.ventasGrafico, hoyNegocio(timezone), timezone);
+  const medios        = mediosDePago(sales);
+  const grandTotal    = medios.reduce((a, m) => a + m.value, 0) || 1;
   const recentSales   = sales.slice(0, 4);
+  const subCaja       = !datos.session ? "sin caja abierta" : datos.sede ? `caja abierta de ${datos.sede}` : "caja abierta de la sede";
 
   const card = [s.card, { backgroundColor: t.bgAlt, borderColor: t.border }] as const;
 
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+    <>
       <Animated.View entering={FadeInDown.duration(320)} style={s.kpiGrid}>
         {[
-          { label: `Cobrado (${period}d)`, value: fmt(totalIngresos), sub: `${countSales} cobros en el POS` },
-          { label: "Promedio / venta",       value: fmt(avgSale),       sub: "por transacción"      },
-          { label: `Ventas (${period}d)`,    value: String(countSales), sub: "transacciones"        },
-          { label: "Caja actual", value: fmt(cajaBalance), sub: session ? "sesión activa" : "sin sesión" },
+          { label: `Cobrado (${period} días)`, value: fmt(totalIngresos), sub: `${countSales} cobros en el POS` },
+          { label: "Promedio / venta",         value: fmt(avgSale),       sub: "por transacción"      },
+          { label: `Ventas (${period} días)`,  value: String(countSales), sub: "transacciones"        },
+          { label: "Efectivo en caja", value: fmt(datos.session ? caja.efectivoEsperado : 0), sub: subCaja },
         ].map((k, i) => (
           <View key={i} style={[s.kpiCard, Shadow.sm, { backgroundColor: t.bgAlt, borderColor: t.border }]}>
             <Text style={[s.kpiLabel, { color: t.subtle }]}>{k.label}</Text>
@@ -189,17 +245,22 @@ function TabResumen({ sales, session, movements, period, loading }: {
           </View>
         ))}
       </Animated.View>
+      {datos.truncado && (
+        <Text style={[s.kpiSub, { color: t.muted, marginTop: -4, marginBottom: 12 }]}>
+          Hay más cobros de los que se pueden cargar en el teléfono: las cifras incluyen solo los más recientes. Consulta el período completo en el panel web.
+        </Text>
+      )}
 
       <Animated.View entering={FadeInDown.delay(60).duration(320)}>
         <View style={[...card, { marginBottom: 12 }]}>
           <Text style={[s.cardTitle, { color: t.text }]}>Ingresos diarios</Text>
-          <Text style={[s.cardSub, { color: t.subtle }]}>últimos 12 días</Text>
+          <Text style={[s.cardSub, { color: t.subtle }]}>últimos {DIAS_GRAFICO} días</Text>
           <View style={s.bars}>
             {barData.map((b, i) => (
               <View key={i} style={s.barCol}>
                 <View style={[s.barTrack, { backgroundColor: t.border }]}>
                   <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 1 }} end={{ x: 0, y: 0 }}
-                    style={[s.barFill, { height: `${b.pct || 2}%` as any }]} />
+                    style={[s.barFill, { height: `${b.pct || 2}%` }]} />
                 </View>
                 <Text style={[s.barLabel, { color: t.subtle }]}>{b.label}</Text>
               </View>
@@ -211,18 +272,9 @@ function TabResumen({ sales, session, movements, period, loading }: {
       <Animated.View entering={FadeInDown.delay(120).duration(320)}>
         <View style={[...card, { marginBottom: 12 }]}>
           <Text style={[s.cardTitle, { color: t.text }]}>Medios de pago</Text>
-          {Object.keys(pmTotals).length === 0
+          {medios.length === 0
             ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin ventas en el período.</Text>
-            : (Object.entries(pmTotals) as [string, number][]).map(([pm, val]) => (
-              <View key={pm} style={s.pmRow}>
-                <View style={[s.pmDot, { backgroundColor: PM_COLOR[pm] ?? Colors.dim }]} />
-                <Text style={[s.pmName, { color: t.text }]}>{pm.charAt(0).toUpperCase() + pm.slice(1)}</Text>
-                <View style={[s.pmBarTrack, { backgroundColor: t.border }]}>
-                  <View style={[s.pmBarFill, { width: `${Math.round(val / grandTotal * 100)}%` as any, backgroundColor: PM_COLOR[pm] ?? Colors.dim }]} />
-                </View>
-                <Text style={[s.pmVal, { color: t.muted }]}>{fmt(val)}</Text>
-              </View>
-            ))
+            : medios.map(m => <FilaMedio key={m.key} medio={m} grandTotal={grandTotal} />)
           }
         </View>
       </Animated.View>
@@ -232,81 +284,104 @@ function TabResumen({ sales, session, movements, period, loading }: {
           <Text style={[s.cardTitle, { color: t.text }]}>Últimas ventas</Text>
           {recentSales.length === 0
             ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin ventas registradas.</Text>
-            : recentSales.map((sale, i) => {
-              const pm = sale.payment_method;
-              return (
-                <View key={sale.id} style={[s.saleRow, i < recentSales.length - 1 && { borderBottomWidth: 1, borderColor: t.border }]}>
-                  <View style={[s.pmBadge, { backgroundColor: (PM_COLOR[pm] ?? Colors.dim) + "18" }]}>
-                    <Text style={[s.pmBadgeText, { color: PM_COLOR[pm] ?? Colors.dim }]}>{pm.slice(0, 3).toUpperCase()}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.saleName, { color: t.text }]}>{sale.clients?.name ?? "Cliente"}</Text>
-                    <Text style={[s.saleItems, { color: t.subtle }]}>{saleItemsLabel(sale.pos_sale_items)}</Text>
-                  </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={[s.saleTotal, { color: t.text }]}>{fmt(sale.total)}</Text>
-                    <Text style={[s.saleDate, { color: t.subtle }]}>{fmtTime(sale.created_at)}</Text>
-                  </View>
-                </View>
-              );
-            })
+            : recentSales.map((sale, i) => <FilaVenta key={sale.id} sale={sale} ultima={i === recentSales.length - 1} />)
           }
         </View>
       </Animated.View>
-    </ScrollView>
+    </>
+  );
+}
+
+function FilaMedio({ medio, grandTotal, style }: {
+  medio: { label: string; value: number; color: string }; grandTotal: number; style?: object;
+}) {
+  const { t } = useTheme();
+  return (
+    <View style={[s.pmRow, style]}>
+      <View style={[s.pmDot, { backgroundColor: medio.color }]} />
+      <Text style={[s.pmName, { color: t.text }]} numberOfLines={1}>{medio.label}</Text>
+      <View style={[s.pmBarTrack, { backgroundColor: t.border }]}>
+        <View style={[s.pmBarFill, { width: `${Math.round(medio.value / grandTotal * 100)}%`, backgroundColor: medio.color }]} />
+      </View>
+      <Text style={[s.pmVal, { color: t.muted }]}>{fmt(medio.value)}</Text>
+    </View>
+  );
+}
+
+function FilaVenta({ sale, ultima }: { sale: Sale; ultima: boolean }) {
+  const { t } = useTheme();
+  const { timezone } = useTenant();
+  const pm = sale.payment_method;
+  const color = colorMetodo(pm, t.subtle);
+  return (
+    <View style={[s.saleRow, !ultima && { borderBottomWidth: 1, borderColor: t.border }]}>
+      <View style={[s.pmBadge, { backgroundColor: color + "18" }]}>
+        <Text style={[s.pmBadgeText, { color }]}>{pm.slice(0, 3).toUpperCase()}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.saleName, { color: t.text }]}>{sale.clients?.name ?? "Venta directa"}</Text>
+        <Text style={[s.saleItems, { color: t.subtle }]} numberOfLines={1}>{saleItemsLabel(sale.pos_sale_items ?? [])}</Text>
+      </View>
+      <View style={{ alignItems: "flex-end" }}>
+        <Text style={[s.saleTotal, { color: t.text }]}>{fmt(Number(sale.total))}</Text>
+        <Text style={[s.saleDate, { color: t.subtle }]}>{fmtCuando(sale.created_at, timezone)}</Text>
+      </View>
+    </View>
   );
 }
 
 // ── Caja ─────────────────────────────────────────────────────────────────────
 
-function TabCaja({ session, movements, loading }: {
-  session: CashSession | null; movements: CashMovement[]; loading: boolean;
-}) {
+function TabCaja({ datos, caja }: { datos: Vista; caja: TotalesCaja }) {
   const { t } = useTheme();
-  if (loading) return <LoadingView />;
-
-  const cajaIngresos = movements.filter(m => m.type === "ingreso").reduce((a, m) => a + m.amount, 0);
-  const cajaEgresos  = movements.filter(m => m.type === "egreso").reduce((a, m) => a + m.amount, 0);
-  const balance      = session ? session.opening_amount + cajaIngresos - cajaEgresos : 0;
-  const openedTime   = session
-    ? new Date(session.opened_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })
-    : "";
-
-  const webAction = () => Alert.alert("Acción no disponible", "Usa el panel web para esta acción.");
+  const { timezone } = useTenant();
+  const router = useRouter();
+  const { session, movements } = datos;
+  const irACaja = () => router.push("/(admin)/caja");
 
   if (!session) {
     return (
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        <Animated.View entering={FadeInDown.duration(320)}>
-          <View style={[s.card, { alignItems: "center", paddingVertical: 36, backgroundColor: t.bgAlt, borderColor: t.border }]}>
-            <Ionicons name="lock-open-outline" size={36} color={t.subtle} />
-            <Text style={[s.cardTitle, { marginTop: 12, textAlign: "center", color: t.text }]}>Sin sesión activa</Text>
-            <Text style={[s.kpiSub, { textAlign: "center", marginTop: 4, color: t.muted }]}>
-              Abre una sesión desde el panel web para registrar movimientos.
-            </Text>
-          </View>
-        </Animated.View>
-      </ScrollView>
+      <Animated.View entering={FadeInDown.duration(320)}>
+        <View style={[s.card, { alignItems: "center", paddingVertical: 36, backgroundColor: t.bgAlt, borderColor: t.border }]}>
+          <Ionicons name="lock-open-outline" size={36} color={t.subtle} />
+          <Text style={[s.cardTitle, { marginTop: 12, textAlign: "center", color: t.text }]}>Sin caja abierta</Text>
+          <Text style={[s.kpiSub, { textAlign: "center", marginTop: 4, color: t.muted }]}>
+            {datos.sede ? `No hay una caja abierta en ${datos.sede}.` : "No hay una caja abierta en la sede activa."}
+          </Text>
+          <TouchableOpacity onPress={irACaja} style={s.cajaBtn} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={s.cajaBtnText}>Ir a Caja</Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
     );
   }
 
+  const diaApertura = diaLocalDe(session.opened_at, timezone);
+  const cuando = `${fmt12(horaLocalDe(session.opened_at, timezone))} · ${esHoy(diaApertura, timezone) ? "hoy" : fmtDia(diaApertura, "dia-mes")}`;
+  const visibles = movements.slice(0, MOVS_VISIBLES);
+
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+    <>
       <Animated.View entering={FadeInDown.duration(320)}>
         <LinearGradient colors={Gradients.ink} style={[s.sessionCard, { marginBottom: 12 }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.sessionAccent} />
           <View style={s.sessionHeader}>
             <View style={s.sessionDot} />
-            <Text style={s.sessionStatus}>Sesión en curso</Text>
-            <Text style={s.sessionTime}>desde {openedTime} · hoy</Text>
+            <Text style={s.sessionStatus} numberOfLines={1}>{datos.sede ? `Caja de ${datos.sede}` : "Sesión en curso"}</Text>
+            <Text style={s.sessionTime}>desde {cuando}</Text>
           </View>
-          <Text style={s.sessionBalance}>{fmt(balance)}</Text>
-          <Text style={s.sessionBalanceLabel}>saldo en caja</Text>
+          <Text style={s.sessionBalance}>{fmt(caja.efectivoEsperado)}</Text>
+          <Text style={s.sessionBalanceLabel}>efectivo en caja</Text>
+          {caja.ingresosElectronicos > 0 && (
+            <Text style={[s.sessionBalanceLabel, { textTransform: "none", letterSpacing: 0 }]}>
+              + {fmt(caja.ingresosElectronicos)} en pagos electrónicos
+            </Text>
+          )}
           <View style={s.sessionBreakdown}>
             {[
-              { label: "Apertura", val: fmt(session.opening_amount), color: "rgba(255,255,255,0.6)" },
-              { label: "Ingresos", val: fmt(cajaIngresos),           color: "#10b981"               },
-              { label: "Egresos",  val: `−${fmt(cajaEgresos)}`,      color: "#ef4444"               },
+              { label: "Apertura", val: fmt(Number(session.opening_amount)), color: "rgba(255,255,255,0.6)" },
+              { label: "Ingresos", val: fmt(caja.ingresos),                  color: "#10b981"               },
+              { label: "Egresos",  val: `−${fmt(caja.egresos)}`,             color: "#ef4444"               },
             ].map(item => (
               <View key={item.label} style={s.sessionItem}>
                 <Text style={[s.sessionItemLabel, { color: "rgba(255,255,255,0.4)" }]}>{item.label}</Text>
@@ -320,11 +395,12 @@ function TabCaja({ session, movements, loading }: {
       <Animated.View entering={FadeInDown.delay(60).duration(320)}>
         <View style={[s.quickRow, { marginBottom: 12 }]}>
           {[
-            { icon: "add-circle-outline"    as const, label: "Ingreso",      color: "#10b981"  },
-            { icon: "remove-circle-outline" as const, label: "Egreso",       color: "#ef4444"  },
-            { icon: "lock-closed-outline"   as const, label: "Cerrar caja",  color: t.subtle   },
+            { icon: "add-circle-outline"    as const, label: "Ingreso",     color: "#10b981" },
+            { icon: "remove-circle-outline" as const, label: "Egreso",      color: "#ef4444" },
+            { icon: "lock-closed-outline"   as const, label: "Cerrar caja", color: t.subtle  },
           ].map((a, i) => (
-            <TouchableOpacity key={i} style={[s.quickBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} activeOpacity={0.7} onPress={webAction}>
+            <TouchableOpacity key={i} style={[s.quickBtn, { backgroundColor: t.bgAlt, borderColor: t.border }]} activeOpacity={0.7}
+              onPress={irACaja} accessibilityRole="button" accessibilityLabel={`${a.label}: abrir Caja`}>
               <View style={[s.quickIcon, { backgroundColor: a.color + "18" }]}>
                 <Ionicons name={a.icon} size={20} color={a.color} />
               </View>
@@ -337,57 +413,64 @@ function TabCaja({ session, movements, loading }: {
       <Animated.View entering={FadeInDown.delay(120).duration(320)}>
         <View style={[s.card, { marginBottom: 16, backgroundColor: t.bgAlt, borderColor: t.border }]}>
           <Text style={[s.cardTitle, { color: t.text }]}>Movimientos de la sesión</Text>
-          {movements.length === 0
+          {movements.length > MOVS_VISIBLES && (
+            <Text style={[s.cardSub, { color: t.subtle, marginBottom: 4 }]}>
+              Se muestran los {MOVS_VISIBLES} más recientes de {movements.length}. El saldo incluye todos.
+            </Text>
+          )}
+          {visibles.length === 0
             ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin movimientos registrados.</Text>
-            : movements.map((m, i) => (
-              <View key={m.id} style={[s.moveRow, i < movements.length - 1 && { borderBottomWidth: 1, borderColor: t.border }]}>
-                <View style={[s.moveIcon, { backgroundColor: (m.type === "ingreso" ? "#10b981" : "#ef4444") + "18" }]}>
-                  <Ionicons name={m.type === "ingreso" ? "arrow-down-outline" : "arrow-up-outline"} size={16}
-                    color={m.type === "ingreso" ? "#10b981" : "#ef4444"} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.movDesc, { color: t.text }]}>{m.description}</Text>
-                  <Text style={[s.movTime, { color: t.subtle }]}>
-                    {new Date(m.created_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+            : visibles.map((m, i) => {
+              const color = m.type === "ingreso" ? "#10b981" : "#ef4444";
+              return (
+                <View key={m.id} style={[s.moveRow, i < visibles.length - 1 && { borderBottomWidth: 1, borderColor: t.border }]}>
+                  <View style={[s.moveIcon, { backgroundColor: color + "18" }]}>
+                    <Ionicons name={m.type === "ingreso" ? "arrow-down-outline" : "arrow-up-outline"} size={16} color={color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.movDesc, { color: t.text }]}>{m.description}</Text>
+                    <Text style={[s.movTime, { color: t.subtle }]}>
+                      {fmt12(horaLocalDe(m.created_at, timezone))}
+                      {m.payment_method && m.payment_method !== "efectivo" ? ` · ${etiquetaMetodo(m.payment_method)}` : ""}
+                    </Text>
+                  </View>
+                  <Text style={[s.movAmount, { color }]}>
+                    {m.type === "ingreso" ? "+" : "−"}{fmt(Number(m.amount))}
                   </Text>
                 </View>
-                <Text style={[s.movAmount, { color: m.type === "ingreso" ? "#10b981" : "#ef4444" }]}>
-                  {m.type === "ingreso" ? "+" : "−"}{fmt(m.amount)}
-                </Text>
-              </View>
-            ))
+              );
+            })
           }
         </View>
       </Animated.View>
-    </ScrollView>
+    </>
   );
 }
 
 // ── Ventas ────────────────────────────────────────────────────────────────────
 
-function TabVentas({ sales, period, onPeriodChange, loading }: {
-  sales: Sale[]; period: "7" | "30" | "90";
-  onPeriodChange: (p: "7" | "30" | "90") => void; loading: boolean;
+function TabVentas({ sales, period, onPeriodChange }: {
+  sales: Sale[]; period: Periodo; onPeriodChange: (p: Periodo) => void;
 }) {
   const { t, mode } = useTheme();
   const [pmFilter, setPmFilter] = useState("todos");
-  if (loading) return <LoadingView />;
 
   // Una venta dividida aparece bajo CADA método que la compone.
-  const filtered = pmFilter === "todos" ? sales : sales.filter(s => saleUsesMethod(s, pmFilter));
-  const total    = filtered.reduce((a, s) => a + s.total, 0);
+  const filtered = pmFilter === "todos" ? sales : sales.filter(s => lineasDePago(s).some(l => l.method === pmFilter));
+  const total    = totalCobrado(filtered);
+  // Los filtros salen de los métodos del POS (antes faltaba "transferencia").
+  const filtros  = [{ key: "todos", label: "Todos", color: mode === "dark" ? Colors.red : Colors.ink }, ...PAY_METHODS];
 
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+    <>
       <Animated.View entering={FadeInDown.duration(320)} style={{ marginBottom: 10 }}>
         <View style={[s.filterPills, { backgroundColor: t.border }]}>
           {(["7", "30", "90"] as const).map(d => (
             <TouchableOpacity key={d} activeOpacity={0.7}
               style={[s.pill, period === d && { backgroundColor: mode === "dark" ? Colors.red : Colors.ink }]}
-              onPress={() => onPeriodChange(d)}>
-              <Text style={[s.pillText, { color: period === d ? Colors.white : t.muted }]}>
-                {d === "7" ? "7 días" : d === "30" ? "30 días" : "90 días"}
-              </Text>
+              onPress={() => onPeriodChange(d)}
+              accessibilityRole="button" accessibilityState={{ selected: period === d }}>
+              <Text style={[s.pillText, { color: period === d ? Colors.white : t.muted }]}>{d} días</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -396,17 +479,20 @@ function TabVentas({ sales, period, onPeriodChange, loading }: {
       <Animated.View entering={FadeInDown.delay(40).duration(320)}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={s.filterPillsH}>
-            {["todos", "efectivo", "nequi", "daviplata", "tarjeta", "qr"].map(pm => (
-              <TouchableOpacity key={pm} activeOpacity={0.7}
-                style={[s.pmPill, { backgroundColor: t.bgAlt, borderColor: t.border },
-                  pmFilter === pm && { backgroundColor: (PM_COLOR[pm] ?? Colors.ink) + "20", borderColor: PM_COLOR[pm] ?? Colors.ink }]}
-                onPress={() => setPmFilter(pm)}>
-                <Text style={[s.pmPillText, { color: t.muted },
-                  pmFilter === pm && { color: PM_COLOR[pm] ?? Colors.ink, fontFamily: Fonts.bold }]}>
-                  {pm.charAt(0).toUpperCase() + pm.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {filtros.map(pm => {
+              const activo = pmFilter === pm.key;
+              return (
+                <TouchableOpacity key={pm.key} activeOpacity={0.7}
+                  style={[s.pmPill, { backgroundColor: t.bgAlt, borderColor: t.border },
+                    activo && { backgroundColor: pm.color + "20", borderColor: pm.color }]}
+                  onPress={() => setPmFilter(pm.key)}
+                  accessibilityRole="button" accessibilityState={{ selected: activo }}>
+                  <Text style={[s.pmPillText, { color: t.muted }, activo && { color: pm.color, fontFamily: Fonts.bold }]}>
+                    {pm.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </ScrollView>
       </Animated.View>
@@ -420,46 +506,50 @@ function TabVentas({ sales, period, onPeriodChange, loading }: {
         <View style={[s.card, { marginBottom: 16, backgroundColor: t.bgAlt, borderColor: t.border }]}>
           {filtered.length === 0
             ? <Text style={[s.kpiSub, { textAlign: "center", paddingVertical: 20, color: t.muted }]}>Sin ventas para los filtros seleccionados.</Text>
-            : filtered.map((sale, i) => {
-              const pm = sale.payment_method;
-              return (
-                <View key={sale.id} style={[s.saleRow, i < filtered.length - 1 && { borderBottomWidth: 1, borderColor: t.border }]}>
-                  <View style={[s.pmBadge, { backgroundColor: (PM_COLOR[pm] ?? Colors.dim) + "18" }]}>
-                    <Text style={[s.pmBadgeText, { color: PM_COLOR[pm] ?? Colors.dim }]}>{pm.slice(0, 3).toUpperCase()}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.saleName, { color: t.text }]}>{sale.clients?.name ?? "Cliente"}</Text>
-                    <Text style={[s.saleItems, { color: t.subtle }]}>{saleItemsLabel(sale.pos_sale_items)}</Text>
-                  </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={[s.saleTotal, { color: t.text }]}>{fmt(sale.total)}</Text>
-                    <Text style={[s.saleDate, { color: t.subtle }]}>{fmtTime(sale.created_at)}</Text>
-                  </View>
-                </View>
-              );
-            })
+            : filtered.map((sale, i) => <FilaVenta key={sale.id} sale={sale} ultima={i === filtered.length - 1} />)
           }
         </View>
       </Animated.View>
-    </ScrollView>
+    </>
   );
 }
 
 // ── Reportes ──────────────────────────────────────────────────────────────────
 
-function TabReportes({ sales, loading }: { sales: Sale[]; loading: boolean }) {
+function RankingItems({ items }: { items: ReturnType<typeof agruparPorItem> }) {
   const { t } = useTheme();
-  if (loading) return <LoadingView />;
+  return (
+    <>
+      {items.map((svc, i) => (
+        <View key={`${svc.esProducto ? "p" : "s"}-${svc.name}`} style={[s.serviceRow, i < items.length - 1 && { marginBottom: 14 }]}>
+          <View style={s.serviceTop}>
+            <Text style={[s.serviceName, { color: t.text }]} numberOfLines={1}>
+              {svc.name}{svc.esProducto ? <Text style={{ color: t.subtle, fontFamily: Fonts.regular }}> · producto</Text> : null}
+            </Text>
+            <Text style={[s.serviceVal, { color: t.text }]}>{fmt(svc.val)}</Text>
+          </View>
+          <View style={[s.serviceTrack, { backgroundColor: t.border }]}>
+            <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={[s.serviceFill, { width: `${svc.pct}%` }]} />
+          </View>
+        </View>
+      ))}
+    </>
+  );
+}
 
-  const totalIngresos = sales.reduce((a, s) => a + s.total, 0);
+function TabReportes({ sales }: { sales: Sale[] }) {
+  const { t } = useTheme();
+
+  const totalIngresos = totalCobrado(sales);
   const avgTicket     = sales.length > 0 ? Math.round(totalIngresos / sales.length) : 0;
   const uniqueClients = new Set(sales.map(s => s.client_id).filter(Boolean)).size;
-  const topServices   = groupByService(sales);
-  const pmTotals      = groupByPaymentMethod(sales);
-  const grandTotal    = Object.values(pmTotals).reduce((a, b) => a + b, 0) || 1;
+  const topItems      = agruparPorItem(sales);
+  const medios        = mediosDePago(sales);
+  const grandTotal    = medios.reduce((a, m) => a + m.value, 0) || 1;
 
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+    <>
       <Animated.View entering={FadeInDown.duration(320)} style={s.kpiGrid}>
         {[
           { label: "Cobrado en el período", value: fmt(totalIngresos) },
@@ -478,21 +568,10 @@ function TabReportes({ sales, loading }: { sales: Sale[]; loading: boolean }) {
 
       <Animated.View entering={FadeInDown.delay(60).duration(320)}>
         <View style={[s.card, { marginBottom: 12, backgroundColor: t.bgAlt, borderColor: t.border }]}>
-          <Text style={[s.cardTitle, { color: t.text }]}>Servicios más vendidos</Text>
-          {topServices.length === 0
-            ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin datos de servicios en el período.</Text>
-            : topServices.map((svc, i) => (
-              <View key={i} style={[s.serviceRow, i < topServices.length - 1 && { marginBottom: 14 }]}>
-                <View style={s.serviceTop}>
-                  <Text style={[s.serviceName, { color: t.text }]}>{svc.name}</Text>
-                  <Text style={[s.serviceVal, { color: t.text }]}>{fmt(svc.val)}</Text>
-                </View>
-                <View style={[s.serviceTrack, { backgroundColor: t.border }]}>
-                  <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={[s.serviceFill, { width: `${svc.pct}%` as any }]} />
-                </View>
-              </View>
-            ))
+          <Text style={[s.cardTitle, { color: t.text }]}>Lo más vendido</Text>
+          {topItems.length === 0
+            ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin ventas en el período.</Text>
+            : <RankingItems items={topItems} />
           }
         </View>
       </Animated.View>
@@ -500,36 +579,25 @@ function TabReportes({ sales, loading }: { sales: Sale[]; loading: boolean }) {
       <Animated.View entering={FadeInDown.delay(120).duration(320)}>
         <View style={[s.card, { marginBottom: 16, backgroundColor: t.bgAlt, borderColor: t.border }]}>
           <Text style={[s.cardTitle, { color: t.text }]}>Desglose por método</Text>
-          {Object.keys(pmTotals).length === 0
+          {medios.length === 0
             ? <Text style={[s.kpiSub, { marginTop: 8, color: t.muted }]}>Sin ventas en el período.</Text>
-            : (Object.entries(pmTotals) as [string, number][]).map(([pm, val]) => (
-              <View key={pm} style={[s.pmRow, { marginBottom: 10 }]}>
-                <View style={[s.pmDot, { backgroundColor: PM_COLOR[pm] ?? Colors.dim }]} />
-                <Text style={[s.pmName, { color: t.text }]}>{pm.charAt(0).toUpperCase() + pm.slice(1)}</Text>
-                <View style={[s.pmBarTrack, { backgroundColor: t.border }]}>
-                  <View style={[s.pmBarFill, { width: `${Math.round(val / grandTotal * 100)}%` as any, backgroundColor: PM_COLOR[pm] ?? Colors.dim }]} />
-                </View>
-                <Text style={[s.pmVal, { color: t.muted }]}>{fmt(val)}</Text>
-              </View>
-            ))
+            : medios.map(m => <FilaMedio key={m.key} medio={m} grandTotal={grandTotal} style={{ marginBottom: 10 }} />)
           }
         </View>
       </Animated.View>
-    </ScrollView>
+    </>
   );
 }
 
 // ── Rentabilidad ──────────────────────────────────────────────────────────────
 
-function TabRentabilidad({ sales, loading }: { sales: Sale[]; loading: boolean }) {
+function TabRentabilidad({ sales }: { sales: Sale[] }) {
   const { t } = useTheme();
-  if (loading) return <LoadingView />;
-
-  const ingresos    = sales.reduce((a, s) => a + s.total, 0);
-  const topServices = groupByService(sales);
+  const ingresos = totalCobrado(sales);
+  const topItems = agruparPorItem(sales);
 
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+    <>
       <Animated.View entering={FadeInDown.duration(320)}>
         <LinearGradient colors={Gradients.ink} style={[s.sessionCard, { marginBottom: 12 }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.sessionAccent} />
@@ -560,26 +628,15 @@ function TabRentabilidad({ sales, loading }: { sales: Sale[]; loading: boolean }
         </View>
       </Animated.View>
 
-      {topServices.length > 0 && (
+      {topItems.length > 0 && (
         <Animated.View entering={FadeInDown.delay(120).duration(320)}>
           <View style={[s.card, { marginBottom: 16, backgroundColor: t.bgAlt, borderColor: t.border }]}>
-            <Text style={[s.cardTitle, { color: t.text }]}>Ingresos por servicio</Text>
-            {topServices.map((svc, i) => (
-              <View key={i} style={[s.serviceRow, i < topServices.length - 1 && { marginBottom: 14 }]}>
-                <View style={s.serviceTop}>
-                  <Text style={[s.serviceName, { color: t.text }]}>{svc.name}</Text>
-                  <Text style={[s.serviceVal, { color: t.text }]}>{fmt(svc.val)}</Text>
-                </View>
-                <View style={[s.serviceTrack, { backgroundColor: t.border }]}>
-                  <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={[s.serviceFill, { width: `${svc.pct}%` as any }]} />
-                </View>
-              </View>
-            ))}
+            <Text style={[s.cardTitle, { color: t.text }]}>Ingresos por servicio y producto</Text>
+            <RankingItems items={topItems} />
           </View>
         </Animated.View>
       )}
-    </ScrollView>
+    </>
   );
 }
 
@@ -588,55 +645,126 @@ function TabRentabilidad({ sales, loading }: { sales: Sale[]; loading: boolean }
 export default function FinanzasScreen() {
   const router = useRouter();
   const { t, mode } = useTheme();
-  const [tab, setTab]           = useState<Tab>("resumen");
-  const [period, setPeriod]     = useState<"7" | "30" | "90">("30");
-  const [tenantId, setTenantId] = useState<string | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [sales, setSales]       = useState<Sale[]>([]);
-  const [session, setSession]   = useState<CashSession | null>(null);
-  const [movements, setMovements] = useState<CashMovement[]>([]);
+  // tenantId de la sesión (antes se buscaba aparte por owner_id).
+  const { tenantId } = useAuth();
+  const { timezone, ready } = useTenant();
+  const guard = useGuardRespuestas();
+  const [tab, setTab]         = useState<Tab>("resumen");
+  const [period, setPeriod]   = useState<Periodo>("30");
+  // Por defecto la sede activa: así las cifras cuadran con el Panel y
+  // Reportes (DIN-12). "Todas" suma el negocio entero, como el Finanzas web.
+  const [alcance, setAlcance] = useState<Alcance>("sede");
+  const [datos, setDatos]     = useState<Datos | null>(null);
+  const [error, setError]     = useState<unknown>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      supabase.from("tenants").select("id").eq("owner_id", user.id).single()
-        .then(({ data }) => { if (data?.id) setTenantId(data.id); });
-    });
-  }, []);
-
-  useEffect(() => {
-    if (tenantId) loadData(tenantId, period);
-  }, [tenantId, period]);
-
-  async function loadData(tid: string, p: "7" | "30" | "90") {
-    setLoading(true);
-    const startDate = startOfPeriod(p);
-
-    const [salesRes, sessionRes] = await Promise.all([
-      supabase
-        .from("pos_sales")
-        .select("id, total, payment_method, payments, created_at, client_id, clients(name), pos_sale_items(quantity, unit_price, services(name))")
-        .eq("tenant_id", tid).gte("created_at", startDate)
-        .order("created_at", { ascending: false }).limit(500),
-      supabase
-        .from("cash_sessions")
-        .select("id, opened_at, closing_amount, opening_amount")
-        .eq("tenant_id", tid).is("closed_at", null).maybeSingle(),
-    ]);
-
-    setSales((salesRes.data ?? []) as unknown as Sale[]);
-    const activeSession = sessionRes.data as CashSession | null;
-    setSession(activeSession);
-
-    if (activeSession?.id) {
-      const { data: movData } = await supabase
-        .from("cash_movements").select("id, type, amount, description, created_at")
-        .eq("session_id", activeSession.id).order("created_at", { ascending: false }).limit(100);
-      setMovements((movData ?? []) as CashMovement[]);
-    } else {
-      setMovements([]);
+  const { recargar, cargando } = useRecarga(async () => {
+    if (!tenantId) return;
+    const turno = guard.nuevo();
+    // Período = N días del NEGOCIO con hoy incluido (TZ-08), no una ventana
+    // móvil de N×24 h. Se traen al menos los días del gráfico.
+    const hoy = hoyNegocio(timezone);
+    const dias = Number(period);
+    const desdePeriodo = sumarDias(hoy, -(dias - 1));
+    const r = rangoPersonalizado(sumarDias(hoy, -(Math.max(dias, DIAS_GRAFICO) - 1)), hoy, timezone);
+    try {
+      const loc = await getActiveLocationId(tenantId);
+      const [ventasRes, cajaRes, sedes] = await Promise.all([
+        // Paginado: el servidor corta en 1000 filas (antes limit(500) en silencio).
+        // Se traen todas las sedes y el alcance se aplica en memoria: cambiar
+        // entre "esta sede" y "todas" no vuelve a consultar.
+        traerTodoDetalle((d, h) =>
+          supabase
+            .from("pos_sales")
+            .select("id, total, payment_method, payments, created_at, client_id, location_id, clients(name), pos_sale_items(quantity, price, name, item_type, services(name))")
+            .eq("tenant_id", tenantId)
+            .gte("created_at", r.desdeUTC)
+            .lte("created_at", r.hastaUTC)
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(d, h),
+        { contexto: "No se pudieron cargar las ventas" }),
+        cargarCaja(tenantId),
+        cargarListaSedes(tenantId, loc),
+      ]);
+      if (!turno.vigente()) return;
+      const todas = ventasRes.filas as unknown as Sale[];
+      setDatos({
+        periodo: period,
+        ventas: todas.filter(v => diaLocalDe(v.created_at, timezone) >= desdePeriodo),
+        ventasGrafico: todas,
+        truncado: ventasRes.truncado,
+        session: cajaRes.session,
+        movements: cajaRes.movements,
+        sedeActiva: loc,
+        sedes,
+      });
+      setError(null);
+    } catch (e) {
+      if (turno.vigente()) setError(e);
     }
-    setLoading(false);
+  }, [tenantId, timezone, period], { timeZone: timezone, habilitado: !!tenantId && ready });
+
+  const caja = useMemo(
+    () => totalesCaja(datos?.movements ?? [], datos?.session?.opening_amount),
+    [datos],
+  );
+
+  // Alcance por sede. Solo se filtra si el negocio tiene más de una: con una
+  // sola, la sede ES el negocio y así no se esconden los cobros viejos que se
+  // guardaron sin sede. Con varias, "esta sede" usa la misma regla que el
+  // Panel y Reportes (location_id = sede activa).
+  const vista = useMemo<Vista | null>(() => {
+    if (!datos) return null;
+    const sede = nombreSede(datos.sedes, datos.sedeActiva);
+    const filtrar = !!sede && alcance === "sede";
+    const deAlcance = (vs: Sale[]) => (filtrar ? vs.filter(v => v.location_id === datos.sedeActiva) : vs);
+    return {
+      ...datos,
+      ventas: deAlcance(datos.ventas),
+      ventasGrafico: deAlcance(datos.ventasGrafico),
+      sede,
+      alcanceLabel: !sede ? null : filtrar ? sede : TODAS_LAS_SEDES,
+    };
+  }, [datos, alcance]);
+
+  const onRefresh = async () => { setRefreshing(true); await recargar(); setRefreshing(false); };
+
+  let contenido: ReactNode;
+  if (error && !vista) {
+    contenido = <ErrorState error={error} onRetry={recargar} />;
+  } else if (!vista) {
+    contenido = <LoadingView />;
+  } else {
+    contenido = (
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}>
+        {error ? (
+          <TouchableOpacity onPress={recargar} style={s.errorBanner} activeOpacity={0.8} accessibilityRole="button">
+            <Ionicons name="cloud-offline-outline" size={16} color={Colors.red} />
+            <Text style={s.errorBannerText}>{mensajeError(error)} Toca para reintentar.</Text>
+          </TouchableOpacity>
+        ) : null}
+        {/* La caja es siempre la de la sede activa; el resto se puede ver por sede o de todas. */}
+        {vista.sede && tab !== "caja" ? (
+          <View style={{ marginBottom: 12, alignSelf: "flex-start" }}>
+            <SegmentedControl<Alcance>
+              options={[
+                { value: "sede", label: nombreCorto(vista.sede) },
+                { value: "todas", label: TODAS_LAS_SEDES },
+              ]}
+              value={alcance}
+              onChange={setAlcance}
+            />
+          </View>
+        ) : null}
+        {tab === "resumen"      && <TabResumen datos={vista} caja={caja} />}
+        {tab === "caja"         && <TabCaja datos={vista} caja={caja} />}
+        {tab === "ventas"       && <TabVentas sales={vista.ventas} period={period} onPeriodChange={setPeriod} />}
+        {tab === "reportes"     && <TabReportes sales={vista.ventas} />}
+        {tab === "rentabilidad" && <TabRentabilidad sales={vista.ventas} />}
+      </ScrollView>
+    );
   }
 
   return (
@@ -647,18 +775,28 @@ export default function FinanzasScreen() {
         <View style={s.headerBlob1} />
         <View style={s.headerBlob2} />
         <View style={s.headerTopRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}
+            accessibilityRole="button" accessibilityLabel="Volver" hitSlop={8}>
             <Ionicons name="chevron-back" size={20} color="white" />
           </TouchableOpacity>
           <View style={s.headerIconBox}>
             <Ionicons name="bar-chart-outline" size={15} color="white" />
           </View>
           <Text style={s.headerLabel}>HUB FINANCIERO</Text>
+          {cargando && vista ? <ActivityIndicator color="rgba(255,255,255,.7)" size="small" style={{ marginLeft: "auto" }} /> : null}
         </View>
         <Text style={s.headerTitle}>Finanzas</Text>
+        {/* Qué se está sumando (DIN-12): solo si el negocio tiene varias sedes. */}
+        {vista?.alcanceLabel ? (
+          <View style={s.headerSede}>
+            <Ionicons name="location-outline" size={12} color="rgba(255,255,255,.7)" />
+            <Text style={s.headerSedeText} numberOfLines={1}>
+              {tab === "caja" && vista.sede ? `Caja de ${vista.sede}` : vista.alcanceLabel}
+            </Text>
+          </View>
+        ) : null}
       </LinearGradient>
 
-      {/* Tab bar */}
       <ScrollView
         horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.tabBar}
@@ -672,23 +810,16 @@ export default function FinanzasScreen() {
               style={[s.tabBtn, active && { backgroundColor: mode === "dark" ? Colors.red : Colors.ink }]}
               onPress={() => setTab(tb.id)}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
             >
-              <Text style={[s.tabBtnText, { color: active ? Colors.white : t.muted }]}>
-                {tb.label}
-              </Text>
+              <Text style={[s.tabBtnText, { color: active ? Colors.white : t.muted }]}>{tb.label}</Text>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
 
-      {/* Content */}
-      <View style={[s.content, { backgroundColor: t.bg }]}>
-        {tab === "resumen"      && <TabResumen sales={sales} session={session} movements={movements} period={period} loading={loading} />}
-        {tab === "caja"         && <TabCaja session={session} movements={movements} loading={loading} />}
-        {tab === "ventas"       && <TabVentas sales={sales} period={period} onPeriodChange={p => setPeriod(p)} loading={loading} />}
-        {tab === "reportes"     && <TabReportes sales={sales} loading={loading} />}
-        {tab === "rentabilidad" && <TabRentabilidad sales={sales} loading={loading} />}
-      </View>
+      <View style={[s.content, { backgroundColor: t.bg }]}>{contenido}</View>
     </SafeAreaView>
   );
 }
@@ -704,13 +835,18 @@ const s = StyleSheet.create({
   headerIconBox:{ width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
   headerLabel:  { fontSize: 14, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.8)" },
   headerTitle:  { fontSize: 22, fontFamily: Fonts.bold, color: "white", letterSpacing: -0.5, marginBottom: 4, zIndex: 1 },
+  headerSede:   { flexDirection: "row", alignItems: "center", gap: 5, zIndex: 1 },
+  headerSedeText: { fontSize: 12, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.75)", flexShrink: 1 },
 
-  tabBarScroll: { borderBottomWidth: 1, flexShrink: 0 },
+  tabBarScroll: { borderBottomWidth: 1, flexShrink: 0, flexGrow: 0 },
   tabBar:       { flexDirection: "row", padding: 6, gap: 4, alignItems: "center" },
   tabBtn:       { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   tabBtnText:   { fontSize: 13, fontFamily: Fonts.semibold },
 
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+
+  errorBanner:    { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(251,15,5,0.08)" },
+  errorBannerText:{ flex: 1, fontSize: 12.5, fontFamily: Fonts.semibold, color: Colors.red },
 
   kpiGrid:  { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 12 },
   kpiCard:  { flex: 1, minWidth: "45%", borderRadius: Radius.md, borderWidth: 1, padding: 14 },
@@ -721,6 +857,8 @@ const s = StyleSheet.create({
   card:      { borderRadius: Radius.lg, borderWidth: 1, padding: 16, ...Shadow.sm },
   cardTitle: { fontSize: 14, fontFamily: Fonts.bold, marginBottom: 4 },
   cardSub:   { fontSize: 11, fontFamily: Fonts.regular, marginBottom: 12 },
+  cajaBtn:   { marginTop: 16, backgroundColor: Colors.red, borderRadius: Radius.full, paddingHorizontal: 22, paddingVertical: 11 },
+  cajaBtnText: { fontSize: 13, fontFamily: Fonts.bold, color: "white" },
 
   bars:     { flexDirection: "row", alignItems: "flex-end", height: 80, gap: 4, marginTop: 8 },
   barCol:   { flex: 1, alignItems: "center", gap: 4 },
@@ -730,10 +868,10 @@ const s = StyleSheet.create({
 
   pmRow:      { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   pmDot:      { width: 8, height: 8, borderRadius: 4 },
-  pmName:     { fontSize: 12, fontFamily: Fonts.semibold, width: 72 },
+  pmName:     { fontSize: 12, fontFamily: Fonts.semibold, width: 86 },
   pmBarTrack: { flex: 1, height: 6, borderRadius: 3, overflow: "hidden" },
   pmBarFill:  { height: "100%", borderRadius: 3 },
-  pmVal:      { fontSize: 11, fontFamily: Fonts.mono, width: 80, textAlign: "right" },
+  pmVal:      { fontSize: 11, fontFamily: Fonts.mono, width: 84, textAlign: "right" },
 
   saleRow:     { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
   pmBadge:     { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
@@ -778,7 +916,7 @@ const s = StyleSheet.create({
   summaryBold:  { fontFamily: Fonts.bold },
 
   serviceRow:   { marginBottom: 0 },
-  serviceTop:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  serviceTop:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 },
   serviceName:  { fontSize: 13, fontFamily: Fonts.semibold, flex: 1 },
   serviceVal:   { fontSize: 13, fontFamily: Fonts.bold, fontVariant: ["tabular-nums"] },
   serviceTrack: { height: 5, borderRadius: 4, overflow: "hidden" },

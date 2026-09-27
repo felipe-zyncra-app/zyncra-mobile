@@ -1,100 +1,227 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import {
-  View, Text, ScrollView, StyleSheet,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl,
 } from "react-native";
-import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useTenant } from "@/lib/tenant";
-import { inicioDelDiaUTC, finDelDiaUTC, diaLocalDe } from "@/lib/tz";
+import { getActiveLocationId } from "@/lib/active-location";
+import {
+  diaLocalDe, hoyNegocio, listaDeDias, mesDe, rangoDePeriodo, rangoAnterior,
+  rangoIncluyeHoy, moverReferencia, etiquetaRango,
+  type Periodo, type RangoNegocio,
+} from "@/lib/tz";
+import { mensajeError, revisar, traerTodo } from "@/lib/db";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
+import { cobradoDe, estaCobrada, montoDe, precioDeLista, rangoDeHoras, horaDe, type VentaResumen } from "@/lib/ingresos";
 import { Colors, Fonts, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoney, pct } from "@/lib/format";
-import { ScreenHeader, SegmentedControl, Card, CardHead, MonoTag, TrendChip, useCountUp } from "@/components/ui";
+import ErrorState from "@/components/ErrorState";
+import { ScreenHeader, SegmentedControl, Card, CardHead, MonoTag, TrendChip, IconButton, useCountUp } from "@/components/ui";
 import { AreaChart, Bars, RankBars, ChartEmpty } from "@/components/charts";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
-type Period = "week" | "month" | "year";
+type Period = Extract<Periodo, "semana" | "mes" | "anio">;
 
-function getRange(period: Period): { start: string; end: string } {
-  const now = new Date();
-  if (period === "week") {
-    const day = now.getDay();
-    const diff = (day === 0 ? -6 : 1) - day;
-    const mon = new Date(now); mon.setDate(now.getDate() + diff);
-    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    return { start: mon.toISOString().slice(0, 10), end: sun.toISOString().slice(0, 10) };
-  }
-  if (period === "month") {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-    return { start, end };
-  }
-  return {
-    start: new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10),
-    end:   new Date(now.getFullYear(), 11, 31).toISOString().slice(0, 10),
-  };
-}
+const LETRAS_SEMANA = ["L", "M", "X", "J", "V", "S", "D"];
+const MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
-function getPrevRange(period: Period): { start: string; end: string } {
-  const now = new Date();
-  if (period === "week") {
-    const day  = now.getDay();
-    const diff = (day === 0 ? -6 : 1) - day;
-    const mon  = new Date(now); mon.setDate(now.getDate() + diff - 7);
-    const sun  = new Date(mon); sun.setDate(mon.getDate() + 6);
-    return { start: mon.toISOString().slice(0, 10), end: sun.toISOString().slice(0, 10) };
-  }
-  if (period === "month") {
-    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
-    const end   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
-    return { start, end };
-  }
-  return {
-    start: new Date(now.getFullYear() - 1, 0, 1).toISOString().slice(0, 10),
-    end:   new Date(now.getFullYear() - 1, 11, 31).toISOString().slice(0, 10),
-  };
-}
+type CitaReporte = {
+  id: string;
+  appointment_date: string;
+  appointment_time: string | null;
+  status: string;
+  services: { name: string; price?: number | string | null } | null;
+  appointment_services: { price: number | string | null }[] | null;
+  professionals: { name: string } | null;
+  clients: { id: string; created_at: string | null } | null;
+  pos_sales: VentaResumen[] | null;
+};
+type CitaPrevia = { id: string; status: string; pos_sales: VentaResumen[] | null };
+type VentaSuelta = VentaResumen & { id: string; created_at: string };
 
-// Generates day-by-day or month-by-month labels + slots depending on period
-function buildSlots(period: Period): string[] {
-  const now = new Date();
-  if (period === "week") {
-    return ["L", "M", "X", "J", "V", "S", "D"];
-  }
-  if (period === "month") {
-    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    return Array.from({ length: days }, (_, i) => String(i + 1));
-  }
-  return ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-}
+type Reporte = {
+  /** Rango para el que se calculó (para no mostrar datos de otro periodo). */
+  clave: string;
+  sede: string | null;
+  revenue: number;
+  prevRevenue: number;
+  apptCount: number;
+  prevCount: number;
+  avgTicket: number;
+  noShowRate: number;
+  newClients: number;
+  /** Completadas sin venta del periodo: por cobrar, no ingreso (D10 / DIN-05). */
+  sinCobroCount: number;
+  /** Su precio de lista (servicio + adicionales): lo que falta cobrar. */
+  sinCobroMonto: number;
+  slots: { label: string; value: number }[];
+  topServices: { name: string; count: number }[];
+  staffPerf: { name: string; count: number; revenue: number }[];
+  hourly: { label: string; value: number; hour: number }[];
+};
 
-function buildSlotDates(period: Period): string[] {
-  const { start } = getRange(period);
-  const now = new Date();
-  if (period === "week") {
-    const base = new Date(start);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base); d.setDate(base.getDate() + i);
-      return d.toISOString().slice(0, 10);
+const claveDe = (r: RangoNegocio) => `${r.periodo}|${r.desde}|${r.hasta}|${r.timeZone}`;
+
+async function cargarReporte(tenantId: string, r: RangoNegocio): Promise<Reporte> {
+  const prev = rangoAnterior(r);
+  const tz = r.timeZone;
+  // Misma sede que el Panel y que el web (DIN-12): antes Reportes sumaba todas
+  // las sedes y el mismo mes daba otra cifra que el Panel.
+  const loc = await getActiveLocationId(tenantId);
+
+  const [cur, prv, sueltas, sueltasPrev, sedes] = await Promise.all([
+    // Paginado: el servidor corta en 1000 filas y "Año" las pasaba (CAL-05).
+    traerTodo<CitaReporte>((d, h) => {
+      let q = supabase.from("appointments")
+        .select("id, appointment_date, appointment_time, status, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
+        .eq("tenant_id", tenantId)
+        .gte("appointment_date", r.desde)
+        .lte("appointment_date", r.hasta);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("appointment_date").order("id").range(d, h)
+        .overrideTypes<CitaReporte[], { merge: false }>();
+    }, { contexto: "No se pudieron cargar las citas del periodo" }),
+    traerTodo<CitaPrevia>((d, h) => {
+      let q = supabase.from("appointments")
+        .select("id, status, pos_sales(total)")
+        .eq("tenant_id", tenantId)
+        .gte("appointment_date", prev.desde)
+        .lte("appointment_date", prev.hasta);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("appointment_date").order("id").range(d, h)
+        .overrideTypes<CitaPrevia[], { merge: false }>();
+    }, { contexto: "No se pudieron cargar las citas del periodo anterior" }),
+    // Ventas de mostrador. Fronteras en la zona del negocio (lib/tz.ts).
+    traerTodo<VentaSuelta>((d, h) => {
+      let q = supabase.from("pos_sales").select("id, total, created_at")
+        .eq("tenant_id", tenantId).is("appointment_id", null)
+        .gte("created_at", r.desdeUTC).lte("created_at", r.hastaUTC);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("created_at").order("id").range(d, h);
+    }, { contexto: "No se pudieron cargar las ventas del periodo" }),
+    traerTodo<VentaSuelta>((d, h) => {
+      let q = supabase.from("pos_sales").select("id, total, created_at")
+        .eq("tenant_id", tenantId).is("appointment_id", null)
+        .gte("created_at", prev.desdeUTC).lte("created_at", prev.hastaUTC);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("created_at").order("id").range(d, h);
+    }, { contexto: "No se pudieron cargar las ventas del periodo anterior" }),
+    loc
+      ? supabase.from("locations").select("id, name").eq("tenant_id", tenantId).eq("is_active", true)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+  ]);
+  const listaSedes = revisar(sedes, "No se pudieron cargar las sedes") ?? [];
+  // Solo se nombra la sede si hay más de una: con una sola es el negocio entero.
+  const sede = listaSedes.length > 1 ? (listaSedes.find(x => x.id === loc)?.name ?? "Sede activa") : null;
+
+  // Memoria en la zona del negocio (la otra mitad del problema).
+  const ventas = sueltas
+    .map(v => ({ v, dia: diaLocalDe(v.created_at, tz) }))
+    .filter(x => x.dia >= r.desde && x.dia <= r.hasta);
+  const ventasPrev = sueltasPrev
+    .map(v => ({ v, dia: diaLocalDe(v.created_at, tz) }))
+    .filter(x => x.dia >= prev.desde && x.dia <= prev.hasta);
+
+  // Ingreso = solo lo cobrado (D10): citas con venta (valoradas por lo que se
+  // cobró, sin caer al precio de lista) + ventas de mostrador.
+  const cobradas     = cur.filter(estaCobrada);
+  const cobradasPrev = prv.filter(estaCobrada);
+  const revenue     = cobradas.reduce((s, a) => s + cobradoDe(a), 0) + ventas.reduce((s, x) => s + montoDe(x.v), 0);
+  const prevRevenue = cobradasPrev.reduce((s, a) => s + cobradoDe(a), 0) + ventasPrev.reduce((s, x) => s + montoDe(x.v), 0);
+
+  const activas = cur.filter(a => a.status !== "cancelled");
+  // Denominador de inasistencia: todas las citas del periodo menos las
+  // canceladas (mismo criterio que noShowRate en admin/page.tsx).
+  const noShows = cur.filter(a => a.status === "no_show").length;
+  // Ticket promedio = ingreso / cobros reales, sin los cobros en $0 (cortesías).
+  const paidCount = cobradas.filter(a => cobradoDe(a) > 0).length + ventas.length;
+
+  // Completadas sin venta: NO se valoran a precio de lista como ingreso (antes
+  // marcar "Completada" inventaba plata: DIN-05). Se cuentan aparte como por
+  // cobrar, para que no desaparezcan del reporte sin explicación.
+  const sinCobro = cur.filter(a => a.status === "completed" && !estaCobrada(a));
+
+  // Clientes nuevos: comparar el DÍA del negocio en que se creó el cliente.
+  // Comparar el timestamp con la fecha dejaba fuera el último día (TZ-05).
+  const creados = new Map<string, string>();
+  cur.forEach(a => { if (a.clients?.id && a.clients.created_at) creados.set(a.clients.id, a.clients.created_at); });
+  const newClients = Array.from(creados.values())
+    .map(c => diaLocalDe(c, tz))
+    .filter(d => d >= r.desde && d <= r.hasta).length;
+
+  // Ingresos por franja: días del rango (o meses del año) como cadenas, sin
+  // new Date(y, m, d).toISOString(), que en UTC+ corría todo un día (TZ-02).
+  let slots: { label: string; value: number }[];
+  if (r.periodo === "anio") {
+    const y = r.desde.slice(0, 4);
+    slots = MESES_CORTOS.map((label, i) => {
+      const mes = `${y}-${String(i + 1).padStart(2, "0")}`;
+      return {
+        label,
+        value: cobradas.filter(a => mesDe(a.appointment_date) === mes).reduce((s, a) => s + cobradoDe(a), 0)
+             + ventas.filter(x => mesDe(x.dia) === mes).reduce((s, x) => s + montoDe(x.v), 0),
+      };
     });
+  } else {
+    slots = listaDeDias(r.desde, r.hasta).map((dia, i) => ({
+      label: r.periodo === "semana" ? LETRAS_SEMANA[i] ?? "" : String(Number(dia.slice(8, 10))),
+      value: cobradas.filter(a => a.appointment_date === dia).reduce((s, a) => s + cobradoDe(a), 0)
+           + ventas.filter(x => x.dia === dia).reduce((s, x) => s + montoDe(x.v), 0),
+    }));
   }
-  if (period === "month") {
-    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const base = new Date(now.getFullYear(), now.getMonth(), 1);
-    return Array.from({ length: days }, (_, i) => {
-      const d = new Date(base); d.setDate(base.getDate() + i);
-      return d.toISOString().slice(0, 10);
-    });
-  }
-  return Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), i, 1);
-    return d.toISOString().slice(0, 7);
+
+  const svcMap = new Map<string, number>();
+  activas.forEach(a => {
+    const sn = a.services?.name ?? "Sin servicio";
+    svcMap.set(sn, (svcMap.get(sn) ?? 0) + 1);
   });
+  const topServices = Array.from(svcMap.entries())
+    .sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([name, count]) => ({ name, count }));
+
+  const staffMap = new Map<string, { count: number; revenue: number }>();
+  cobradas.forEach(a => {
+    const sn = a.professionals?.name ?? "Sin profesional";
+    const p2 = staffMap.get(sn) ?? { count: 0, revenue: 0 };
+    staffMap.set(sn, { count: p2.count + 1, revenue: p2.revenue + cobradoDe(a) });
+  });
+  const staffPerf = Array.from(staffMap.entries())
+    .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)
+    .map(([name, v]) => ({ name, ...v }));
+
+  // Horas: 7–19 h ampliado con las que tengan citas (antes se recortaba y la
+  // hora pico de las 20 h no tenía barra: TZ-09).
+  const horas = activas.map(a => horaDe(a.appointment_time));
+  const hourly = rangoDeHoras(horas, 7, 19).map(h => ({
+    hour: h,
+    label: `${h}h`,
+    value: horas.filter(x => x === h).length,
+  }));
+
+  return {
+    clave: claveDe(r),
+    sede,
+    revenue,
+    prevRevenue,
+    apptCount: activas.length,
+    prevCount: prv.filter(a => a.status !== "cancelled").length,
+    avgTicket: paidCount > 0 ? revenue / paidCount : 0,
+    noShowRate: activas.length > 0 ? (noShows / activas.length) * 100 : 0,
+    newClients,
+    sinCobroCount: sinCobro.length,
+    sinCobroMonto: sinCobro.reduce((s, a) => s + precioDeLista(a), 0),
+    slots,
+    topServices,
+    staffPerf,
+    hourly,
+  };
 }
 
 // ─── KPI card (patrón MetricCard del web) ─────────────────────────────────────
@@ -141,248 +268,159 @@ const kpi = StyleSheet.create({
 export default function ReportsScreen() {
   const router = useRouter();
   const { t } = useTheme();
-  const [period, setPeriod] = useState<Period>("month");
   const { tenantId } = useAuth();
-  const { timezone } = useTenant();
-  const [loading, setLoading]   = useState(true);
+  const { timezone, ready } = useTenant();
+  const guard = useGuardRespuestas();
+  const [period, setPeriod] = useState<Period>("mes");
+  // Día de referencia del periodo que se mira. null = el periodo actual, así
+  // la pantalla sigue a "hoy" si cambia el día (o la semana) con la app abierta.
+  const [ref, setRef] = useState<string | null>(null);
+  const [datos, setDatos] = useState<Reporte | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // KPIs
-  const [revenue, setRevenue]         = useState(0);
-  const [prevRevenue, setPrevRevenue] = useState(0);
-  const [apptCount, setApptCount]     = useState(0);
-  const [prevCount, setPrevCount]     = useState(0);
-  const [avgTicket, setAvgTicket]     = useState(0);
-  const [noShowRate, setNoShowRate]   = useState(0);
-  const [newClients, setNewClients]   = useState(0);
-
-  // Charts
-  const [revenueSlots, setRevenueSlots] = useState<number[]>([]);
-  const [slotLabels, setSlotLabels]     = useState<string[]>([]);
-
-  // Rankings
-  const [topServices, setTopServices] = useState<{ name: string; count: number }[]>([]);
-  const [staffPerf, setStaffPerf]     = useState<{ name: string; count: number; revenue: number }[]>([]);
-  const [hourly, setHourly]           = useState<{ hour: number; count: number }[]>([]);
-
-  useEffect(() => {
+  const { hoy, recargar } = useRecarga(async () => {
     if (!tenantId) return;
-    let cancelled = false;
-    load().then(() => { if (cancelled) return; });
-    return () => { cancelled = true; };
-  }, [tenantId, period]);
-
-  const load = useCallback(async () => {
-    if (!tenantId) return;
-    setLoading(true);
-    const { start, end }         = getRange(period);
-    const { start: ps, end: pe } = getPrevRange(period);
-
-    const [curRes, prevRes, posRes, prevPosRes] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, services(name, price), professionals(name), clients(id, created_at)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", start)
-        .lte("appointment_date", end),
-      supabase.from("appointments")
-        .select("id, status, services(price)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", ps)
-        .lte("appointment_date", pe),
-      supabase.from("pos_sales").select("total, created_at, appointment_id").eq("tenant_id", tenantId)
-        .gte("created_at", inicioDelDiaUTC(start, timezone)).lte("created_at", finDelDiaUTC(end, timezone)).limit(5000),
-      supabase.from("pos_sales").select("total, appointment_id").eq("tenant_id", tenantId)
-        .gte("created_at", inicioDelDiaUTC(ps, timezone)).lte("created_at", finDelDiaUTC(pe, timezone)).limit(5000),
-    ]);
-
-    const cur: any[]  = curRes.data  ?? [];
-    const prev: any[] = prevRes.data ?? [];
-    const posData: any[] = posRes.data ?? [];
-    const prevPosData: any[] = prevPosRes.data ?? [];
-
-    // El total realmente cobrado vive en pos_sales; se adjunta a la cita para
-    // que priceOf() lo prefiera sobre el precio de lista del servicio.
-    const completedIds = [...cur, ...prev].filter(a => a.status === "completed").map((a: any) => a.id).filter(Boolean);
-    const paidMap: Record<string, number> = {};
-    if (completedIds.length > 0) {
-      const { data: paidRows } = await supabase
-        .from("pos_sales").select("appointment_id, total").in("appointment_id", completedIds);
-      (paidRows ?? []).forEach((r: any) => { if (r.appointment_id) paidMap[r.appointment_id] = Number(r.total); });
+    const turno = guard.nuevo();
+    try {
+      const r = rangoDePeriodo(period, timezone, ref ?? hoyNegocio(timezone));
+      const rep = await cargarReporte(tenantId, r);
+      if (!turno.vigente()) return;
+      setDatos(rep);
+      setError(null);
+    } catch (e) {
+      if (turno.vigente()) setError(e);
     }
-    const priceOf = (a: any): number =>
-      paidMap[a.id] !== undefined ? paidMap[a.id] : Number(a.services?.price ?? 0);
+  }, [tenantId, timezone, period, ref], { timeZone: timezone, habilitado: !!tenantId && ready });
 
-    // KPIs
-    // Ingreso = solo lo cobrado. "confirmed" es una cita agendada sin cobrar
-    // (el POS la pasa a "completed" al cobrarla), asi que no es ingreso.
-    const paid = cur.filter(a => a.status === "completed");
-    const prevPaid = prev.filter(a => a.status === "completed");
-    // Solo ventas de mostrador: el cobro de una cita ya va contado via priceOf.
-    const standalone     = posData.filter((p: any) => !p.appointment_id);
-    const prevStandalone = prevPosData.filter((p: any) => !p.appointment_id);
+  const r = rangoDePeriodo(period, timezone, ref ?? hoy);
+  const actual = rangoIncluyeHoy(r);
+  const d = datos && datos.clave === claveDe(r) ? datos : null;
 
-    const apptRev  = paid.reduce((s: number, a: any) => s + priceOf(a), 0);
-    const posRev   = standalone.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    const rev      = apptRev + posRev;
-    const prevApptRev = prevPaid.reduce((s: number, a: any) => s + priceOf(a), 0);
-    const prevPosRev  = prevStandalone.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    const prevRev  = prevApptRev + prevPosRev;
-    const noShows  = cur.filter(a => a.status === "no_show").length;
-    // Denominador de inasistencia: todas las citas del periodo menos las
-    // canceladas. Antes era (completed + confirmed + no_show), que dejaba
-    // fuera las pending y daba una tasa distinta a la del Panel para el mismo
-    // negocio. Ahora usa el mismo criterio que noShowRate en admin/page.tsx.
-    const totalFinished = cur.filter(a => a.status !== "cancelled").length;
-    // Ticket promedio = ingreso / cobros reales. Excluye los cobros en $0
-    // (cortesias): contarlos hunde el promedio sin que haya entrado plata.
-    // Mismo criterio que el Panel desde el commit 0550daa.
-    const paidCount = paid.filter((a: any) => priceOf(a) > 0).length + standalone.length;
+  const cambiarPeriodo = (p: Period) => { setPeriod(p); setRef(null); };
+  const mover = (pasos: number) => {
+    const nueva = moverReferencia(period, r.desde, pasos);
+    // Volver al periodo de hoy lo deja en "actual" (sigue al cambio de día).
+    setRef(rangoIncluyeHoy(rangoDePeriodo(period, timezone, nueva)) ? null : nueva);
+  };
 
-    setRevenue(rev);
-    setPrevRevenue(prevRev);
-    setApptCount(cur.filter(a => a.status !== "cancelled").length);
-    setPrevCount(prev.filter(a => a.status !== "cancelled").length);
-    setAvgTicket(paidCount > 0 ? rev / paidCount : 0);
-    setNoShowRate(totalFinished > 0 ? (noShows / totalFinished) * 100 : 0);
+  const onRefresh = async () => { setRefreshing(true); await recargar(); setRefreshing(false); };
 
-    // New clients (created within the range)
-    const uniqueClients = new Map<string, string>();
-    cur.forEach((a: any) => { if (a.clients?.id) uniqueClients.set(a.clients.id, a.clients.created_at); });
-    const newC = Array.from(uniqueClients.values()).filter(d => d >= start && d <= end).length;
-    setNewClients(newC);
+  const revTrend   = d && d.prevRevenue > 0 ? ((d.revenue - d.prevRevenue) / d.prevRevenue) * 100 : 0;
+  const countTrend = d && d.prevCount   > 0 ? ((d.apptCount - d.prevCount) / d.prevCount) * 100   : 0;
+  const peak = d ? d.hourly.reduce((a, b) => (b.value > a.value ? b : a), { hour: 0, value: 0, label: "" }) : null;
 
-    // Revenue by slot
-    const dates = buildSlotDates(period);
-    const labels = buildSlots(period);
-    const slotRev = dates.map(slotKey => {
-      const apptMatches = paid.filter((a: any) => {
-        if (period === "year") return a.appointment_date?.startsWith(slotKey);
-        return a.appointment_date === slotKey;
-      });
-      const posMatches = standalone.filter((p: any) => {
-        const local = diaLocalDe(p.created_at ?? "", timezone);
-        const d = period === "year" ? local.slice(0, 7) : local;
-        return d === slotKey;
-      });
-      return apptMatches.reduce((s: number, a: any) => s + priceOf(a), 0)
-           + posMatches.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    });
-    setRevenueSlots(slotRev);
-    setSlotLabels(labels);
-
-    // Top services
-    const svcMap = new Map<string, number>();
-    cur.filter(a => a.status !== "cancelled").forEach((a: any) => {
-      const sn = a.services?.name ?? "Sin servicio";
-      svcMap.set(sn, (svcMap.get(sn) ?? 0) + 1);
-    });
-    const top5 = Array.from(svcMap.entries())
-      .sort((a, b) => b[1] - a[1]).slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
-    setTopServices(top5);
-
-    // Staff performance
-    const staffMap = new Map<string, { count: number; revenue: number }>();
-    paid.forEach((a: any) => {
-      const sn = (a.professionals as any)?.name ?? "Sin profesional";
-      const prev2 = staffMap.get(sn) ?? { count: 0, revenue: 0 };
-      staffMap.set(sn, { count: prev2.count + 1, revenue: prev2.revenue + priceOf(a) });
-    });
-    const sp = Array.from(staffMap.entries())
-      .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)
-      .map(([name, v]) => ({ name, ...v }));
-    setStaffPerf(sp);
-
-    // Hourly distribution
-    const hourMap = new Map<number, number>();
-    cur.filter(a => a.status !== "cancelled").forEach((a: any) => {
-      const h = parseInt((a.appointment_time ?? "00:00").slice(0, 2));
-      hourMap.set(h, (hourMap.get(h) ?? 0) + 1);
-    });
-    const hrs = Array.from(hourMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([hour, count]) => ({ hour, count }));
-    setHourly(hrs);
-
-    setLoading(false);
-    setRefreshing(false);
-  }, [tenantId, period]);
-
-  const onRefresh = () => { setRefreshing(true); load(); };
-
-  const revTrend   = prevRevenue > 0 ? ((revenue - prevRevenue) / prevRevenue) * 100 : 0;
-  const countTrend = prevCount   > 0 ? ((apptCount - prevCount) / prevCount) * 100   : 0;
-
-  const peakHour  = hourly.reduce((a, b) => b.count > a.count ? b : a, { hour: 0, count: 0 });
-  const hourlyBars = Array.from({ length: 13 }, (_, i) => {
-    const h = i + 7;
-    return { label: `${h}h`, value: hourly.find(x => x.hour === h)?.count ?? 0 };
-  });
-
-  const periodLabel = period === "week" ? "esta semana" : period === "month" ? "este mes" : "este año";
-  const periodTag   = period === "week" ? "Semana" : period === "month" ? "Mes" : "Año";
+  const periodLabel = actual
+    ? (period === "semana" ? "esta semana" : period === "mes" ? "este mes" : "este año")
+    : etiquetaRango(r);
+  const periodTag = period === "semana" ? "Semana" : period === "mes" ? "Mes" : "Año";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-      <ScreenHeader crumb="Dinero" title="Reportes" subtitle="Análisis de rendimiento" onBack={() => router.back()} />
+      <ScreenHeader
+        crumb="Dinero"
+        title="Reportes"
+        subtitle={d?.sede ? `Sede ${d.sede} · solo lo cobrado` : "Análisis de rendimiento · solo lo cobrado"}
+        onBack={() => router.back()}
+      />
 
-      <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 12, gap: 10 }}>
         <SegmentedControl<Period>
           options={[
-            { value: "week", label: "Semana" },
-            { value: "month", label: "Mes" },
-            { value: "year", label: "Año" },
+            { value: "semana", label: "Semana" },
+            { value: "mes", label: "Mes" },
+            { value: "anio", label: "Año" },
           ]}
           value={period}
-          onChange={setPeriod}
+          onChange={cambiarPeriodo}
         />
+        <View style={s.navRow}>
+          <IconButton icon="chevron-back" label="Periodo anterior" onPress={() => mover(-1)} />
+          <TouchableOpacity
+            style={{ flex: 1, alignItems: "center" }}
+            onPress={() => setRef(null)}
+            disabled={actual}
+            accessibilityRole="button"
+            accessibilityLabel={actual ? etiquetaRango(r) : `${etiquetaRango(r)}. Volver al periodo actual`}
+          >
+            <Text style={[s.navLabel, { color: t.ink }]}>{etiquetaRango(r)}</Text>
+            {!actual ? <Text style={[s.navHint, { color: Colors.red }]}>Volver a hoy</Text> : null}
+          </TouchableOpacity>
+          <IconButton icon="chevron-forward" label="Periodo siguiente" onPress={() => mover(1)} disabled={actual} />
+        </View>
       </View>
 
-      {loading && !refreshing ? (
+      {error && !d ? (
+        <ErrorState error={error} onRetry={recargar} />
+      ) : !d ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 110, gap: 14 }}
+          contentContainerStyle={{ padding: 20, paddingTop: 12, paddingBottom: 110, gap: 14 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         >
+          {error ? (
+            <TouchableOpacity
+              onPress={recargar}
+              activeOpacity={0.8}
+              style={[s.staleBanner, { backgroundColor: t.cardSolid, borderColor: "rgba(251,15,5,0.32)" }]}
+              accessibilityRole="button"
+              accessibilityLabel="No se pudo actualizar. Reintentar"
+            >
+              <Ionicons name="alert-circle-outline" size={16} color={Colors.red} />
+              <Text style={[s.staleText, { color: t.ink }]} numberOfLines={2}>No se pudo actualizar: {mensajeError(error)}</Text>
+              <Text style={s.staleRetry}>Reintentar</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* KPIs */}
           <View style={s.kpiRow}>
             <KpiCard
-              label="Ingresos" raw={revenue} fmt={fmtMoney} icon="cash-outline"
+              label="Ingresos" raw={d.revenue} fmt={fmtMoney} icon="cash-outline"
               trend={revTrend > 0 ? "up" : revTrend < 0 ? "down" : "neutral"}
-              trendVal={prevRevenue > 0 ? `${revTrend > 0 ? "+" : ""}${pct(revTrend)}` : undefined}
-              sub={prevRevenue > 0 ? "vs anterior" : undefined}
+              trendVal={d.prevRevenue > 0 ? `${revTrend > 0 ? "+" : ""}${pct(revTrend)}` : undefined}
+              sub={d.prevRevenue > 0 ? "vs anterior" : undefined}
               delay={0}
             />
             <KpiCard
-              label="Citas" raw={apptCount} fmt={v => String(Math.round(v))} icon="calendar-outline"
+              label="Citas" raw={d.apptCount} fmt={v => String(Math.round(v))} icon="calendar-outline"
               trend={countTrend > 0 ? "up" : countTrend < 0 ? "down" : "neutral"}
-              trendVal={prevCount > 0 ? `${countTrend > 0 ? "+" : ""}${pct(countTrend)}` : undefined}
-              sub={prevCount > 0 ? "vs anterior" : undefined}
+              trendVal={d.prevCount > 0 ? `${countTrend > 0 ? "+" : ""}${pct(countTrend)}` : undefined}
+              sub={d.prevCount > 0 ? "vs anterior" : undefined}
               delay={60}
             />
           </View>
           <View style={s.kpiRow}>
-            <KpiCard label="Ticket promedio" raw={avgTicket} fmt={fmtMoney} icon="pricetag-outline" delay={120} />
-            <KpiCard label="No asistió" raw={noShowRate} fmt={v => pct(v)} icon="person-remove-outline" alert={noShowRate > 15} delay={180} />
-            <KpiCard label="Nuevos" raw={newClients} fmt={v => String(Math.round(v))} icon="person-add-outline" delay={240} />
+            <KpiCard label="Ticket promedio" raw={d.avgTicket} fmt={fmtMoney} icon="pricetag-outline" delay={120} />
+            <KpiCard label="No asistió" raw={d.noShowRate} fmt={v => pct(v)} icon="person-remove-outline" alert={d.noShowRate > 15} delay={180} />
+            <KpiCard label="Nuevos" raw={d.newClients} fmt={v => String(Math.round(v))} icon="person-add-outline" delay={240} />
           </View>
+
+          {d.sinCobroCount > 0 ? (
+            <View
+              style={[s.aviso, { backgroundColor: t.cardSolid, borderColor: "rgba(217,119,6,0.35)" }]}
+              accessible
+              accessibilityRole="text"
+            >
+              <Ionicons name="wallet-outline" size={16} color="#d97706" />
+              <Text style={[s.avisoText, { color: t.ink }]}>
+                {d.sinCobroCount} cita{d.sinCobroCount !== 1 ? "s" : ""} completada{d.sinCobroCount !== 1 ? "s" : ""} sin cobro
+                {d.sinCobroMonto > 0 ? ` · ${fmtMoney(d.sinCobroMonto)} por cobrar` : ""}. No suman en los ingresos hasta que se cobren.
+              </Text>
+            </View>
+          ) : null}
 
           {/* Evolución de ingresos */}
           <Card delay={280}>
             <CardHead
-              title={period === "year" ? "Ingresos por mes" : "Ingresos por día"}
+              title={period === "anio" ? "Ingresos por mes" : "Ingresos por día"}
               sub={`Resumen ${periodLabel}`}
               aside={periodTag}
             />
             <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 }}>
-              <AreaChart
-                data={revenueSlots.map((v, i) => ({ label: slotLabels[i], value: v }))}
-                fmt={fmtMoney}
-                height={180}
-              />
+              <AreaChart data={d.slots} fmt={fmtMoney} height={180} />
             </View>
           </Card>
 
@@ -391,9 +429,9 @@ export default function ReportsScreen() {
             <CardHead title="Top 5 servicios" sub="Los más solicitados del período" />
             <View style={{ padding: 18 }}>
               <RankBars
-                items={topServices.map(svc => ({
+                items={d.topServices.map(svc => ({
                   label: svc.name, value: svc.count,
-                  sub: apptCount > 0 ? `${((svc.count / apptCount) * 100).toFixed(0)}%` : undefined,
+                  sub: d.apptCount > 0 ? `${((svc.count / d.apptCount) * 100).toFixed(0)}%` : undefined,
                 }))}
                 fmt={v => String(Math.round(v))}
               />
@@ -402,10 +440,10 @@ export default function ReportsScreen() {
 
           {/* Rendimiento del equipo */}
           <Card delay={380}>
-            <CardHead title="Rendimiento del equipo" sub="Por ingresos del período" />
+            <CardHead title="Rendimiento del equipo" sub="Por lo cobrado en el período" />
             <View style={{ padding: 18 }}>
               <RankBars
-                items={staffPerf.map(p => ({
+                items={d.staffPerf.map(p => ({
                   label: p.name, value: p.revenue,
                   sub: `${p.count} cita${p.count !== 1 ? "s" : ""}`,
                 }))}
@@ -418,17 +456,17 @@ export default function ReportsScreen() {
           <Card delay={430}>
             <CardHead
               title="Horarios más activos"
-              sub={peakHour.count > 0 ? `Pico: ${peakHour.hour}:00 – ${peakHour.hour + 1}:00` : "Distribución de la agenda"}
+              sub={peak && peak.value > 0 ? `Pico: ${peak.hour}:00 – ${peak.hour + 1}:00` : "Distribución de la agenda"}
             />
             <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 14 }}>
-              {hourlyBars.some(h => h.value > 0)
-                ? <Bars data={hourlyBars} accent="green" height={120} />
+              {d.hourly.some(h => h.value > 0)
+                ? <Bars data={d.hourly} accent="green" height={120} />
                 : <ChartEmpty msg={`Sin citas ${periodLabel}.`} />}
             </View>
           </Card>
 
           {/* Empty state */}
-          {!loading && revenue === 0 && apptCount === 0 && (
+          {d.revenue === 0 && d.apptCount === 0 && (
             <Card delay={0}>
               <ChartEmpty msg={`Sin datos ${periodLabel}. Los reportes aparecerán cuando haya citas registradas.`} />
             </Card>
@@ -440,5 +478,13 @@ export default function ReportsScreen() {
 }
 
 const s = StyleSheet.create({
-  kpiRow: { flexDirection: "row", gap: 10 },
+  kpiRow:   { flexDirection: "row", gap: 10 },
+  navRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
+  navLabel: { fontSize: 14, fontFamily: Fonts.semibold, textTransform: "capitalize" },
+  navHint:  { fontSize: 11, fontFamily: Fonts.semibold, marginTop: 1 },
+  staleBanner: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  staleText:   { flex: 1, fontSize: 12, fontFamily: Fonts.regular },
+  staleRetry:  { fontSize: 12, fontFamily: Fonts.bold, color: Colors.red },
+  aviso:       { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  avisoText:   { flex: 1, fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17 },
 });
