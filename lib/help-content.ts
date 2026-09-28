@@ -263,6 +263,24 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
       },
       {
+        // Debe decir lo mismo que lib/porCobrar.ts y app/(admin)/por-cobrar.tsx.
+        slug: "por-cobrar",
+        title: "Qué es Por cobrar en el Panel",
+        description: "De qué citas es esa cifra y cómo dejarla al día.",
+        category: "pos",
+        readMinutes: 2,
+        steps: [
+          paso("Toca la tarjeta",
+            "En el Panel, toca la tarjeta Por cobrar. Se abre la lista de las citas que suman esa cifra, con la fecha, la hora, el cliente, los servicios, el profesional y el valor."),
+          paso("Qué incluye",
+            "Las citas pendientes, confirmadas o completadas que todavía no tienen cobro, de cualquier fecha: no depende de Hoy, 7 días o 30 días. Se cuentan a su precio (servicio más adicionales) y no suman a tus ingresos hasta que las cobres. Si tienes varias sedes, ves las de la sede activa."),
+          paso("Vencidas",
+            "Son citas que ya pasaron y nadie cobró. Toca Cobrar si el cliente pagó, o márcala como No asistió o Cancelada: en los tres casos sale de la lista."),
+          paso("Hoy y próximas",
+            "Las de hoy se cobran desde ahí mismo. Al tocar una próxima se abre la Agenda en ese día con su detalle."),
+        ],
+      },
+      {
         slug: "anular-cobro",
         title: "Cómo anular un cobro",
         description: "Cuando un cobro se registró por error.",
@@ -326,7 +344,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Abre Reportes", "Ve a Ajustes → Reportes. Para ingresos contra egresos, usa Ajustes → Módulo financiero."),
           paso("Elige el período", "Semana, Mes o Año, y muévete con las flechas a períodos anteriores."),
           paso("Qué cuenta como ingreso",
-            "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen como por cobrar."),
+            "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen en Por cobrar. En el Panel, toca esa tarjeta para ver cuáles son."),
           paso("Revisa el detalle",
             "Ingresos por día, los servicios más vendidos, el rendimiento de cada profesional y las horas con más movimiento."),
         ],
