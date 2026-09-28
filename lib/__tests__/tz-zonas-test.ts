@@ -310,6 +310,7 @@ describe("mostrar días sin parsearlos como UTC", () => {
     expect(tz.fmtDia("2026-09-26", "dia-mes")).toBe("26 sep");
     expect(tz.fmtDia("2026-09-26", "semana-dia")).toBe("sáb 26");
     expect(tz.fmtDia("2026-09-27", "semana-dia")).toBe("dom 27");
+    expect(tz.fmtDia("2026-10-03", "semana-dia-mes")).toBe("sáb 3 oct");
     expect(tz.fmtDia("2026-09-26", "largo")).toBe("sábado 26 de septiembre");
     expect(tz.fmtDia("2026-09-26", "completo")).toBe("sábado 26 de septiembre de 2026");
     expect(tz.fmtDia("2026-09-26", "mes-anio")).toBe("septiembre 2026");

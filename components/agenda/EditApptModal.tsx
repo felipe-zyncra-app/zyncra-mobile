@@ -238,7 +238,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
         id: appt.id,
         date: selectedDay,
         time: `${selectedTime}:00`,
-        clientName: selectedClient?.name ?? appt.clients?.name ?? "Cliente",
+        clientName: selectedClient?.name ?? appt.clients?.name ?? null,
         serviceName: selectedService.name,
         status: appt.status,
       }, timezone).catch(() => {});

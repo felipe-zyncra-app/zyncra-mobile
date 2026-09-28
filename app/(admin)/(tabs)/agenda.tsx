@@ -5,7 +5,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
@@ -206,6 +206,31 @@ export default function AgendaScreen() {
 
   // Datos del día seleccionado (nunca los de otro día bajo este encabezado).
   const vigentes = datos && datos.dia === selected ? datos : null;
+
+  // Desde la campana del Panel: /agenda?fecha=YYYY-MM-DD&cita=<id> abre ese
+  // día y, cuando carga, el detalle de la cita. Los parámetros se consumen
+  // (se borran) para que volver a tocar el mismo aviso funcione otra vez.
+  const params = useLocalSearchParams<{ fecha?: string; cita?: string }>();
+  // La navegación de ESTA pantalla: router.setParams tocaría la ruta enfocada.
+  const navigation = useNavigation<{ setParams: (p: { fecha?: string; cita?: string }) => void }>();
+  const citaPorAbrir = useRef<{ dia: string; id: string } | null>(null);
+  useEffect(() => {
+    const fecha = typeof params.fecha === "string" ? params.fecha : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return;
+    const cita = typeof params.cita === "string" ? params.cita : "";
+    citaPorAbrir.current = cita ? { dia: fecha, id: cita } : null;
+    setSelected(fecha);
+    setSemana(inicioDeSemana(fecha));
+    navigation.setParams({ fecha: undefined, cita: undefined });
+  }, [params.fecha, params.cita, navigation]);
+  useEffect(() => {
+    const pedida = citaPorAbrir.current;
+    if (!pedida || !vigentes || vigentes.dia !== pedida.dia) return;
+    citaPorAbrir.current = null;
+    // Si la cita no está (otra sede), se queda en el día.
+    const cita = vigentes.citas.find(c => c.id === pedida.id);
+    if (cita) setDetailAppt(cita);
+  }, [vigentes]);
   const profesionales = vigentes?.profesionales ?? datos?.profesionales ?? [];
   const citas = vigentes?.citas ?? [];
   const visibles = filterProId ? citas.filter(a => a.professional_id === filterProId) : citas;
@@ -287,8 +312,8 @@ export default function AgendaScreen() {
       id: appt.id,
       date: appt.appointment_date,
       time: appt.appointment_time,
-      clientName: appt.clients?.name ?? "Cliente",
-      serviceName: appt.services?.name ?? "Servicio",
+      clientName: appt.clients?.name ?? null,
+      serviceName: appt.services?.name ?? null,
       status,
     }, timezone).catch(() => {});
 

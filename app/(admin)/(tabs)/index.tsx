@@ -27,6 +27,7 @@ import { refreshAllReminders } from "@/lib/notifications";
 import NewApptModal from "@/components/NewApptModal";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
 import ErrorState from "@/components/ErrorState";
+import CampanaAvisos from "@/components/CampanaAvisos";
 import { Card, CardHead, MonoTag, TrendChip, TenantBadge, SegmentedControl, useCountUp } from "@/components/ui";
 import { Spark, AreaChart, Bars, Donut, RankBars, ChartEmpty } from "@/components/charts";
 
@@ -542,7 +543,11 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            <TenantBadge name={tenantName} />
+            {/* Campana de avisos al lado del nombre del negocio (como el portal). */}
+            <View style={s.headerAside}>
+              <TenantBadge name={tenantName} style={s.tenantBadge} />
+              <CampanaAvisos />
+            </View>
           </View>
 
           <View style={s.controlsRow}>
@@ -767,6 +772,9 @@ export default function DashboardScreen() {
 
 const s = StyleSheet.create({
   headerRow:   { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  headerAside: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "58%" },
+  // Con la campana al lado el nombre se corta antes, para no apretar el saludo.
+  tenantBadge: { alignSelf: "center", flexShrink: 1, maxWidth: 150 },
   greeting:    { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
   date:        { fontSize: 15.5, fontFamily: Fonts.serifItalic, marginTop: 2, textTransform: "capitalize" },
   sedeChip:    { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: 8 },

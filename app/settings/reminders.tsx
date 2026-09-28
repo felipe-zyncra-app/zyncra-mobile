@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, ActivityIndicator, Alert,
+  TextInput, KeyboardAvoidingView, ActivityIndicator, Alert, Switch,
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,7 +14,9 @@ import { Colors, Fonts, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { mensajeError, revisar } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
-import { refreshAllReminders } from "@/lib/notifications";
+import { activarAvisosDeCita, avisosDeCitaActivos, refreshAllReminders } from "@/lib/notifications";
+import { textoRecordatorioCita } from "@/lib/avisos";
+import { hoyNegocio, instanteDe, sumarDias } from "@/lib/tz";
 import { ScreenHeader } from "@/components/ui";
 import ErrorState from "@/components/ErrorState";
 
@@ -39,6 +41,18 @@ const VARIABLES = [
 const DEFAULT_TEMPLATE =
   "¡Hola {{nombre}}! Te recordamos tu cita de {{servicio}} el {{fecha}} a las {{hora}}. ¡Te esperamos!";
 
+/**
+ * Ejemplo del aviso que suena en este teléfono con la anticipación elegida:
+ * una cita a las 3:00 PM del día que corresponde, con el mismo texto que
+ * programa lib/notifications.
+ */
+function ejemploAviso(horas: number, timeZone: string): string {
+  const dias = horas >= 24 ? Math.round(horas / 24) : 0;
+  const dia = sumarDias(hoyNegocio(timeZone), dias);
+  const disparo = new Date(instanteDe(dia, "15:00", timeZone).getTime() - horas * 60 * 60 * 1000);
+  return textoRecordatorioCita({ date: dia, time: "15:00", clientName: "Juan", serviceName: "Corte" }, disparo, timeZone).body;
+}
+
 function previewText(tmpl: string) {
   return tmpl
     .replace(/\{\{nombre\}\}/g, "Juan García")
@@ -51,8 +65,12 @@ function previewText(tmpl: string) {
 /**
  * Recordatorios: dice la verdad sobre a quién le llega cada aviso (AGE-19).
  *
- *  · hours_before solo mueve la notificación LOCAL en el teléfono del dueño
- *    (lib/notifications). No cambia nada de lo que recibe el cliente.
+ *  · El aviso por cita es una notificación LOCAL para el negocio en este
+ *    teléfono ("Recuerda: mañana a las 3:00 PM tienes una cita con Juan para
+ *    Corte."). Se enciende o apaga POR DISPOSITIVO con el interruptor (se
+ *    aplica al instante, sin Guardar).
+ *  · hours_before solo mueve ese aviso local, en todos los teléfonos del
+ *    dueño. No cambia nada de lo que recibe el cliente.
  *  · Al cliente le escribe el servidor (cron del web) con horarios fijos:
  *    correo 24 h y 2 h antes (si el cliente tiene correo) y WhatsApp 2 h
  *    antes solo si el negocio conectó WhatsApp y eligió una plantilla
@@ -76,6 +94,20 @@ export default function RemindersScreen() {
   const [editado, setEditado]       = useState(false);
   const [saving, setSaving]         = useState(false);
   const [savedOk, setSavedOk]       = useState(false);
+  // Interruptor de ESTE teléfono (AsyncStorage). Encendido por defecto.
+  const [avisosTelefono, setAvisosTelefono] = useState(true);
+
+  useEffect(() => {
+    let vigente = true;
+    avisosDeCitaActivos().then(v => { if (vigente) setAvisosTelefono(v); }).catch(() => {});
+    return () => { vigente = false; };
+  }, []);
+
+  const cambiarAvisosTelefono = (activo: boolean) => {
+    setAvisosTelefono(activo);
+    // Apagado cancela los avisos ya programados; encendido los vuelve a programar.
+    activarAvisosDeCita(activo, tenantId, timezone).catch(() => {});
+  };
 
   const { recargar } = useRecarga(async () => {
     if (!tenantId || editado) return;
@@ -121,6 +153,7 @@ export default function RemindersScreen() {
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 2000);
       // Los avisos ya programados en este teléfono pasan a la nueva anticipación.
+      // Si están apagados en este teléfono, no programa nada.
       refreshAllReminders(tenantId, timezone).catch(() => {});
     } catch (e) {
       Alert.alert("No se guardó", mensajeError(e));
@@ -162,14 +195,30 @@ export default function RemindersScreen() {
           >
             {/* ── Aviso en el teléfono del dueño ── */}
             <Animated.View entering={FadeInDown.delay(0).duration(340)}>
-              <Text style={s.sectionLabel}>Aviso en este teléfono</Text>
+              <Text style={s.sectionLabel}>Avisos para ti en este teléfono</Text>
               <View style={[s.card, Shadow.sm]}>
-                <View style={s.cardTitleRow}>
+                <View style={s.switchRow}>
                   <View style={[s.cardIcon, { backgroundColor: "#f59e0b18" }]}>
                     <Ionicons name="alarm-outline" size={16} color="#f59e0b" />
                   </View>
-                  <Text style={s.cardTitle}>¿Cuánto antes te avisamos de cada cita?</Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.cardTitle}>Avisarme en este teléfono antes de cada cita</Text>
+                    <Text style={s.switchSub}>
+                      {avisosTelefono ? "Encendido en este teléfono" : "Apagado: este teléfono no te avisará de tus citas"}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={avisosTelefono}
+                    onValueChange={cambiarAvisosTelefono}
+                    trackColor={{ false: t.lineStrong, true: Colors.red + "aa" }}
+                    thumbColor={avisosTelefono ? Colors.red : t.subtle}
+                    accessibilityLabel="Avisarme en este teléfono antes de cada cita"
+                  />
                 </View>
+
+                <View style={[s.divider, { backgroundColor: t.line }]} />
+
+                <Text style={[s.subTitle, !avisosTelefono && { color: t.subtle }]}>¿Cuánto tiempo antes?</Text>
                 <View style={s.hoursRow}>
                   {HOUR_OPTIONS.map(opt => {
                     const active = hours === opt.value;
@@ -180,6 +229,7 @@ export default function RemindersScreen() {
                         onPress={() => { setEditado(true); setHours(opt.value); }}
                         activeOpacity={0.75}
                         accessibilityRole="button"
+                        accessibilityLabel={`${opt.label} antes`}
                         accessibilityState={{ selected: active }}
                       >
                         <Text style={active ? s.hourLabelActive : s.hourLabel}>{opt.label}</Text>
@@ -187,8 +237,19 @@ export default function RemindersScreen() {
                     );
                   })}
                 </View>
+
+                {avisosTelefono ? (
+                  <View style={[s.ejemplo, { backgroundColor: t.chipBg, borderColor: t.line }]}>
+                    <Text style={s.ejemploTitulo}>Recordatorio de cita</Text>
+                    <Text style={s.ejemploTexto}>{ejemploAviso(hours, timezone)}</Text>
+                  </View>
+                ) : null}
+
                 <Text style={s.help}>
-                  Es una notificación para ti, en los teléfonos donde entras a Zyncra como dueño. Tus clientes no la reciben.
+                  Estos avisos le llegan al negocio, en este teléfono: tus clientes no los ven. El recordatorio a tu cliente lo envía Zyncra por WhatsApp y correo (abajo) y no cambia con nada de esta sección.
+                </Text>
+                <Text style={[s.help, { marginTop: 6 }]}>
+                  El interruptor cambia solo este teléfono y se aplica al instante. La anticipación se guarda con Guardar configuración y vale para todos los teléfonos donde entras como dueño.
                 </Text>
               </View>
             </Animated.View>
@@ -339,6 +400,13 @@ function crearEstilos(t: ThemeColors) {
     cardTitleRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 },
     cardIcon:     { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
     cardTitle:    { flex: 1, fontSize: 14, fontFamily: Fonts.semibold, color: t.text },
+    switchRow:    { flexDirection: "row", alignItems: "center", gap: 10 },
+    switchSub:    { fontSize: 11.5, fontFamily: Fonts.regular, color: t.muted, marginTop: 2 },
+    divider:      { height: 1, marginVertical: 14 },
+    subTitle:     { fontSize: 13, fontFamily: Fonts.semibold, color: t.text, marginBottom: 10 },
+    ejemplo:      { borderWidth: 1, borderRadius: Radius.md, padding: 12, marginTop: 14 },
+    ejemploTitulo:{ fontSize: 12, fontFamily: Fonts.bold, color: t.text },
+    ejemploTexto: { fontSize: 12.5, fontFamily: Fonts.regular, color: t.muted, marginTop: 3, lineHeight: 18 },
     help:         { fontSize: 11.5, fontFamily: Fonts.regular, color: t.muted, marginTop: 12, lineHeight: 17 },
     infoLine:     { flexDirection: "row", gap: 8 },
     infoText:     { flex: 1, fontSize: 13, fontFamily: Fonts.regular, color: t.text, lineHeight: 19 },
