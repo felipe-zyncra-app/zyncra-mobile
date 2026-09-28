@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { View, StyleSheet, Dimensions, Image } from "react-native";
 import Animated, {
   useSharedValue, useAnimatedStyle,
@@ -35,7 +35,8 @@ function LandingRing() {
       withTiming(0, { duration: 820, easing: Easing.out(Easing.cubic) }),
     ));
     scale.value = withDelay(T.ring, withTiming(3.4, { duration: 900, easing: Easing.out(Easing.cubic) }));
-  }, []);
+    // Shared values: referencia estable, el efecto corre una sola vez.
+  }, [opacity, scale]);
 
   const st = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -55,6 +56,10 @@ export default function ZyncraIntro({ onDone }: { onDone: () => void }) {
   const exitScale   = useSharedValue(1);
   const logoGlow    = useSharedValue(0);
   const barX        = useSharedValue(-BAR_W);
+  // El padre pasa onDone como flecha nueva en cada render; si fuera dependencia
+  // del efecto, cada re-render reiniciaría la animación y el temporizador.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
   useEffect(() => {
     // Un solo pulso de glow al aterrizar el logo, luego reposo tenue
@@ -68,9 +73,9 @@ export default function ZyncraIntro({ onDone }: { onDone: () => void }) {
     exitOpacity.value = withDelay(T.exit, withTiming(0, { duration: 420, easing: Easing.in(Easing.cubic) }));
     exitScale.value   = withDelay(T.exit, withTiming(1.05, { duration: 420, easing: Easing.in(Easing.cubic) }));
 
-    const t = setTimeout(onDone, T.done);
+    const t = setTimeout(() => onDoneRef.current(), T.done);
     return () => clearTimeout(t);
-  }, []);
+  }, [logoGlow, barX, exitOpacity, exitScale]);
 
   const exitStyle = useAnimatedStyle(() => ({
     opacity: exitOpacity.value,

@@ -35,6 +35,11 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+# temporal de "npm run gen:types" (si el CLI falla a mitad, no pisa los tipos)
+lib/database.types.tmp
+
+# jest --coverage
+coverage/
 
 # generated native folders
 /ios
@@ -42,3 +47,23 @@ yarn-error.*
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Screenshots que baja "eas metadata:pull" desde App Store Connect.
+# Son una copia de lo que ya vive en ASC (3 MB de binarios); el repo ya
+# versiona los originales en marketing-screenshots/. Se regenera con pull.
+store/
+
+# store.config.json lleva apple.review: usuario y contrasena de la cuenta demo
+# para App Review, mas telefono y correo de contacto. Este repo es publico, asi
+# que el archivo NO se versiona. Se regenera con "eas metadata:pull" y se
+# sincroniza con "eas metadata:push".
+store.config.json
+
+# Claves de cuenta de servicio de Google (eas submit -p android). Son
+# credenciales con permiso de publicar en Play; este repo es publico, asi
+# que NO se versionan. Lo ideal es que ni vivan aqui: la clave se sube a
+# los servidores de EAS con "eas credentials" y el archivo local se borra.
+*service-account*.json
+*play-store*.json
+google-services.json
+*-key.json

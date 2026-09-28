@@ -18,6 +18,9 @@ export default function BottomSaveBar({ label, saving, disabled, onPress }: Prop
         onPress={onPress}
         disabled={disabled || saving}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: !!disabled || saving, busy: saving }}
       >
         <View style={s.btnInner}>
           {saving ? <ActivityIndicator color="white" /> : <Text style={s.btnText}>{label}</Text>}

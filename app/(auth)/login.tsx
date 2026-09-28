@@ -1,62 +1,145 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, TextInput, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Pressable,
-  Image, Dimensions,
+  KeyboardAvoidingView, ScrollView, Pressable,
+  Image, Dimensions, ActivityIndicator,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import Animated, {
   FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
+import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
-import { Colors, Radius } from "@/constants/theme";
+import { Config } from "@/lib/config";
+import { validarCorreo } from "@/lib/contacto";
+import { traducirErrorAuth } from "@/lib/cuenta";
+import { Colors } from "@/constants/theme";
 
 const { height } = Dimensions.get("window");
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-function SolidButton({ label, onPress, loading }: { label: string; onPress: () => void; loading?: boolean }) {
+/** Si en este tiempo no se resolvió la cuenta, se suelta el botón con un mensaje. */
+const TOPE_ENTRADA_MS = 25_000;
+
+function SolidButton({ label, labelCargando, onPress, loading }: {
+  label: string; labelCargando: string; onPress: () => void; loading?: boolean;
+}) {
   const scale = useSharedValue(1);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
     <AnimatedPressable
-      style={[anim, btn.solid]}
-      onPressIn={() => { scale.value = withSpring(0.97, { stiffness: 400 }); }}
+      style={[anim, btn.solid, loading && { opacity: 0.75 }]}
+      onPressIn={() => { if (!loading) scale.value = withSpring(0.97, { stiffness: 400 }); }}
       onPressOut={() => { scale.value = withSpring(1,    { stiffness: 400 }); }}
-      onPress={onPress}>
-      <Text style={btn.label}>{loading ? "Entrando…" : label}</Text>
+      onPress={onPress}
+      // Mientras carga no se puede volver a enviar (antes permitía varios envíos seguidos).
+      disabled={loading}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!loading, busy: !!loading }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {loading && <ActivityIndicator size="small" color="white" />}
+        <Text style={btn.label}>{loading ? labelCargando : label}</Text>
+      </View>
     </AnimatedPressable>
   );
 }
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { role } = useAuth();
+  const { estado } = useAuth();
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [error,    setError]    = useState<string | null>(null);
+  const [aviso,    setAviso]    = useState<string | null>(null);
   const [loading,  setLoading]  = useState(false);
   const [focused,  setFocused]  = useState<string | null>(null);
   const [showPass, setShowPass] = useState(false);
+  // "¿Olvidaste tu contraseña?" (AJU-09): el mismo correo de recuperación
+  // que manda el portal, que abre su página /reset-password.
+  const [recuperando, setRecuperando] = useState(false);
+  const [enviandoRec, setEnviandoRec] = useState(false);
+  const tope = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // El registro se abre ENCIMA del login, que sigue montado. Sin saber si
+  // está a la vista, el efecto de abajo lo sacaba del registro en cuanto el
+  // rol pasaba a admin y el dueño nunca veía "¡Cuenta creada!" (ARQ-17).
+  const [enfocada, setEnfocada] = useState(false);
+  useFocusEffect(useCallback(() => {
+    setEnfocada(true);
+    return () => setEnfocada(false);
+  }, []));
+
+  const soltar = () => {
+    if (tope.current) clearTimeout(tope.current);
+    tope.current = null;
+    setLoading(false);
+  };
+  useEffect(() => () => { if (tope.current) clearTimeout(tope.current); }, []);
 
   const handleLogin = async () => {
-    if (!email || !password) { setError("Completa todos los campos."); return; }
+    if (loading) return;
+    // El autocompletado de iOS deja un espacio al final: sin trim, GoTrue
+    // respondía "Invalid login credentials" con la contraseña correcta (AJU-22).
+    const correo = email.trim().toLowerCase();
+    if (!correo || !password) { setError("Completa todos los campos."); return; }
     setLoading(true);
     setError(null);
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-    if (err) { setLoading(false); setError(err.message); return; }
-    // AuthProvider's onAuthStateChange handles role resolution and redirect
+    setAviso(null);
+    try {
+      const { error: err } = await supabase.auth.signInWithPassword({ email: correo, password });
+      if (err) { soltar(); setError(traducirErrorAuth(err)); return; }
+    } catch (e) {
+      soltar();
+      setError(traducirErrorAuth(e));
+      return;
+    }
+    // AuthProvider resuelve el rol. El efecto de abajo navega o suelta el
+    // botón; si nada responde, el tope evita el "Entrando…" eterno (AJU-06).
+    tope.current = setTimeout(() => {
+      tope.current = null;
+      setLoading(false);
+      setError("No pudimos terminar de entrar. Revisa tu conexión e inténtalo de nuevo.");
+    }, TOPE_ENTRADA_MS);
   };
 
   useEffect(() => {
-    if (role === "admin") router.replace("/(admin)");
-    else if (role === "staff") router.replace("/(staff)/agenda");
-  }, [role]);
+    if (!enfocada) return;
+    if (estado === "admin") { soltar(); router.replace("/(admin)/(tabs)"); return; }
+    if (estado === "staff") { soltar(); router.replace("/(staff)/agenda"); return; }
+    // Sesión sin negocio, colaborador desactivado o sin red: AuthProvider lleva
+    // a /sin-acceso, que explica el caso y ofrece salidas. Aquí solo se suelta
+    // el botón para que no quede en "Entrando…".
+    if (estado === "sin-rol" || estado === "desactivado" || estado === "error") soltar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estado, enfocada]);
+
+  const enviarRecuperacion = async () => {
+    if (enviandoRec) return;
+    const correo = validarCorreo(email);
+    if (!correo.ok) { setError(correo.error ?? "Escribe tu correo."); return; }
+    setEnviandoRec(true);
+    setError(null);
+    setAviso(null);
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(correo.valor!, {
+        redirectTo: Config.urls.restablecerContrasena,
+      });
+      if (err) { setError(traducirErrorAuth(err)); return; }
+      // Mismo texto exista o no la cuenta: no se revela qué correos están registrados.
+      setAviso(`Si hay una cuenta con ${correo.valor}, te enviamos un enlace para crear una contraseña nueva. Revisa también el spam.`);
+      setRecuperando(false);
+    } catch (e) {
+      setError(traducirErrorAuth(e));
+    } finally {
+      setEnviandoRec(false);
+    }
+  };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1 }}>
       <StatusBar style="light" />
 
       <View style={s.bg}>
@@ -69,7 +152,7 @@ export default function LoginScreen() {
         <View style={[s.corner, s.cornerTL]} />
         <View style={[s.corner, s.cornerBR]} />
 
-        <ScrollView
+        <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
@@ -93,13 +176,23 @@ export default function LoginScreen() {
             entering={FadeInDown.delay(180).duration(600).springify()}
             style={s.card}>
 
-            <Text style={s.heading}>Bienvenido de vuelta</Text>
-            <Text style={s.sub}>Inicia sesión en tu cuenta</Text>
+            <Text style={s.heading} accessibilityRole="header">
+              {recuperando ? "Recupera tu contraseña" : "Bienvenido de vuelta"}
+            </Text>
+            <Text style={s.sub}>
+              {recuperando ? "Te enviaremos un enlace a tu correo" : "Inicia sesión en tu cuenta"}
+            </Text>
 
             {error && (
-              <Animated.View entering={FadeInDown.duration(300)} style={s.errorBox}>
+              <Animated.View entering={FadeInDown.duration(300)} style={s.errorBox} accessibilityRole="alert">
                 <Ionicons name="alert-circle-outline" size={15} color="#ff6060" style={{ marginRight: 6 }} />
                 <Text style={s.errorText}>{error}</Text>
+              </Animated.View>
+            )}
+            {aviso && (
+              <Animated.View entering={FadeInDown.duration(300)} style={s.avisoBox} accessibilityLiveRegion="polite">
+                <Ionicons name="mail-outline" size={15} color="#5eead4" style={{ marginRight: 6 }} />
+                <Text style={s.avisoText}>{aviso}</Text>
               </Animated.View>
             )}
 
@@ -118,6 +211,10 @@ export default function LoginScreen() {
                   placeholderTextColor="rgba(255,255,255,0.22)"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="username"
+                  accessibilityLabel="Correo electrónico"
                   value={email}
                   onChangeText={setEmail}
                   onFocus={() => setFocused("email")}
@@ -126,6 +223,15 @@ export default function LoginScreen() {
               </View>
             </Animated.View>
 
+            {recuperando ? (
+              <View style={{ marginTop: 4 }}>
+                <SolidButton label="Enviar enlace" labelCargando="Enviando…" onPress={enviarRecuperacion} loading={enviandoRec} />
+                <Pressable style={s.forgotLink} onPress={() => { setRecuperando(false); setError(null); }} accessibilityRole="button">
+                  <Text style={s.forgotText}>Volver a iniciar sesión</Text>
+                </Pressable>
+              </View>
+            ) : (
+            <>
             {/* Password */}
             <Animated.View entering={FadeInDown.delay(370).duration(400)}>
               <Text style={s.label}>Contraseña</Text>
@@ -140,12 +246,18 @@ export default function LoginScreen() {
                   placeholder="Tu contraseña"
                   placeholderTextColor="rgba(255,255,255,0.22)"
                   secureTextEntry={!showPass}
+                  autoComplete="password"
+                  textContentType="password"
+                  accessibilityLabel="Contraseña"
+                  onSubmitEditing={handleLogin}
                   value={password}
                   onChangeText={setPassword}
                   onFocus={() => setFocused("password")}
                   onBlur={() => setFocused(null)}
                 />
-                <Pressable onPress={() => setShowPass(v => !v)} style={{ padding: 4 }}>
+                <Pressable
+                  onPress={() => setShowPass(v => !v)} style={{ padding: 4 }} hitSlop={8}
+                  accessibilityRole="button" accessibilityLabel={showPass ? "Ocultar contraseña" : "Mostrar contraseña"}>
                   <Ionicons
                     name={showPass ? "eye-off-outline" : "eye-outline"}
                     size={17}
@@ -155,19 +267,46 @@ export default function LoginScreen() {
               </View>
             </Animated.View>
 
+            <Pressable
+              style={s.forgotInline}
+              onPress={() => { setRecuperando(true); setError(null); setAviso(null); }}
+              hitSlop={8}
+              accessibilityRole="button">
+              <Text style={s.forgotText}>¿Olvidaste tu contraseña?</Text>
+            </Pressable>
+
             {/* CTA */}
             <Animated.View entering={FadeInDown.delay(440).duration(400)} style={{ marginTop: 8 }}>
-              <SolidButton label="Iniciar sesión" onPress={handleLogin} loading={loading} />
+              <SolidButton label="Iniciar sesión" labelCargando="Entrando…" onPress={handleLogin} loading={loading} />
+            </Animated.View>
+            </>
+            )}
+
+            {/* Alta de negocio. Recoge datos y crea la cuenta: no muestra planes
+                ni precios, y no cobra nada dentro de la app. */}
+            <Animated.View entering={FadeInDown.delay(500).duration(400)}>
+              <Pressable style={s.registerLink} onPress={() => router.push("/(auth)/register")} accessibilityRole="button">
+                <Text style={s.registerLinkText}>
+                  ¿No tienes cuenta? <Text style={s.registerLinkStrong}>Regístrate gratis</Text>
+                </Text>
+              </Pressable>
             </Animated.View>
 
-            {/* Aviso de acceso B2B (App Store 3.1.3(c)): la app es para negocios con
-                cuenta existente. Solo informativo — sin link, precio ni registro. */}
-            <Animated.View entering={FadeInDown.delay(520).duration(400)} style={s.accessNote}>
+            {/* Aviso para colaboradores: las cuentas de staff no se crean aquí,
+                las da de alta el dueño del negocio desde Ajustes → Equipo. */}
+            <Animated.View entering={FadeInDown.delay(560).duration(400)} style={s.accessNote}>
               <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.35)" style={{ marginTop: 1 }} />
               <Text style={s.accessNoteText}>
-                App para negocios con cuenta Zyncra activa. Si trabajas en un negocio que ya usa Zyncra, pide tu acceso al administrador.
+                ¿Trabajas en un negocio que ya usa Zyncra? No te registres aquí: pide tu acceso al administrador.
               </Text>
             </Animated.View>
+
+            <Pressable
+              style={s.legalLink}
+              onPress={() => Linking.openURL(Config.urls.privacidad).catch(() => {})}
+              accessibilityRole="link">
+              <Text style={s.legalText}>Política de privacidad</Text>
+            </Pressable>
 
           </Animated.View>
         </ScrollView>
@@ -330,6 +469,63 @@ const s = StyleSheet.create({
     color: "#ff6060",
     fontSize: 13,
     fontFamily: "SpaceGrotesk_600SemiBold",
+  },
+  avisoBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "rgba(45,212,191,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.3)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  avisoText: {
+    flex: 1,
+    color: "#99f6e4",
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "SpaceGrotesk_600SemiBold",
+  },
+  forgotInline: {
+    alignSelf: "flex-end",
+    marginTop: -8,
+    marginBottom: 14,
+    paddingVertical: 4,
+  },
+  forgotLink: {
+    alignItems: "center",
+    marginTop: 16,
+    paddingVertical: 6,
+  },
+  forgotText: {
+    fontSize: 13,
+    fontFamily: "SpaceGrotesk_600SemiBold",
+    color: "rgba(255,255,255,0.7)",
+  },
+  legalLink: {
+    alignItems: "center",
+    marginTop: 18,
+    paddingVertical: 6,
+  },
+  legalText: {
+    fontSize: 12,
+    fontFamily: "SpaceGrotesk_400Regular",
+    color: "rgba(255,255,255,0.5)",
+    textDecorationLine: "underline",
+  },
+  registerLink: {
+    alignItems: "center",
+    marginTop: 18,
+  },
+  registerLinkText: {
+    fontSize: 13.5,
+    fontFamily: "SpaceGrotesk_400Regular",
+    color: "rgba(255,255,255,0.5)",
+  },
+  registerLinkStrong: {
+    fontFamily: "SpaceGrotesk_700Bold",
+    color: Colors.red,
   },
   accessNote: {
     flexDirection: "row",

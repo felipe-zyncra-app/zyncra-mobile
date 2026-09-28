@@ -1,3 +1,6 @@
+// Colores de marca y de la paleta CLARA. Para fondos, cards, texto y bordes
+// usa los tokens de useTheme().t (lib/theme), que cambian en modo oscuro:
+// Colors.bg/card/text/subtle solo sirven para superficies que siempre son claras.
 export const Colors = {
   red:     "#fb0f05",
   blue:    "#0027fe",
@@ -15,7 +18,9 @@ export const Colors = {
   text:    "#14111C",
   dim:     "#564E66",
   muted:   "#564E66",
-  subtle:  "#8E879B",
+  // #736C82 da 5:1 sobre blanco y 4,6:1 sobre el lienzo; el #8E879B de antes
+  // (3,2 a 3,5:1) no llegaba al 4,5:1 que piden los textos de 9-11 px.
+  subtle:  "#736C82",
   white:   "#ffffff",
   success: "#10b981",
   card:    "#ffffff",
@@ -25,7 +30,7 @@ export const Gradients = {
   brand:     ["#fb0f05", "#0027fe"] as const,
   brandH:    ["#fb0f05", "#0027fe"] as const,
   brandSoft: ["rgba(251,15,5,0.10)", "rgba(0,39,254,0.05)"] as const,
-  ink:       ["#111118", "#09090F"] as const,
+  ink:       ["#14141d", "#0C0C14"] as const,
 };
 
 export const Fonts = {
@@ -34,6 +39,8 @@ export const Fonts = {
   bold:     "SpaceGrotesk_700Bold",
   mono:     "JetBrainsMono_500Medium",
   monoBold: "JetBrainsMono_700Bold",
+  serif:       "InstrumentSerif_400Regular",
+  serifItalic: "InstrumentSerif_400Regular_Italic",
 };
 
 export const MonoLabel = {
@@ -41,7 +48,7 @@ export const MonoLabel = {
   fontSize: 10,
   letterSpacing: 0.8,
   textTransform: "uppercase" as const,
-  color: "#8E879B",
+  color: "#736C82",
 };
 
 export const Radius = {
@@ -76,16 +83,34 @@ export const Shadow = {
   },
 };
 
+// Card sólida estilo portal web (.statCard/.listCard de admin.module.css):
+// blanco sobre lienzo claro, borde hairline, sombra mínima.
+export const CardStyle = {
+  base: {
+    borderRadius: 16,
+    borderWidth: 1,
+    shadowColor: "#14111C",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+};
+
+// "Glass" es legado: hoy mapea a la card sólida del portal web para que
+// las pantallas sin migrar hereden el nuevo estilo sin tocarlas una a una.
+// Es blanco fijo, así que en modo oscuro queda como un parche claro.
+/** @deprecated Usa useTheme().t: cardSolid/card de fondo y line/cardBorder de borde. */
 export const Glass = {
   card: {
-    backgroundColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(20,15,30,0.08)",
   },
   cardStrong: {
-    backgroundColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.75)",
+    borderColor: "rgba(20,15,30,0.08)",
   },
   dark: {
     backgroundColor: "rgba(20,17,28,0.35)",

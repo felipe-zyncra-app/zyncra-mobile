@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet,
   ScrollView, TextInput, ActivityIndicator,
@@ -7,184 +7,185 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
-import { Colors, Gradients, Radius, Shadow, Glass } from "@/constants/theme";
-import { scheduleAppointmentReminder } from "@/lib/notifications";
-import { timeToMins, generateSlotsForDay, buildWeek, chunk, hasSlotConflict, effectiveDayHours, normalizeSlotInterval, DEFAULT_SLOT_INTERVAL } from "@/lib/scheduling";
-import { useClientSearch } from "@/lib/useClientSearch";
-import { fmt12Hour, localDateStr } from "@/lib/format";
+import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
+import { useTheme, type ThemeColors } from "@/lib/theme";
+import { useTenant } from "@/lib/tenant";
+import { reprogramarRecordatorioCita } from "@/lib/notifications";
+import {
+  avisosDeHorario, cargarCatalogoAgenda, effectiveDayHours, esHorarioOcupado, mensajeErrorCita,
+  minsToTime, profesionalesDeLaSede, timeToMins, verificarCupo,
+  type CatalogoAgenda, type ProfesionalAgenda, type ServicioAgenda,
+} from "@/lib/scheduling";
+import { buscarClientePorTelefono, useClientSearch } from "@/lib/useClientSearch";
+import { DEFAULT_COUNTRY_ISO, telefonoParaGuardar } from "@/lib/countries";
+import { fmt12, fmtMoneyFull, fmtTelefono, localDateStr } from "@/lib/format";
 import { getActiveLocationId } from "@/lib/active-location";
-import { OtherTimeField } from "@/components/OtherTimeField";
+import { ErrorDB, exigirFilas, mensajeError, nuevoId, revisar } from "@/lib/db";
+import { fmtDia, hoyNegocio, inicioDeSemana, minutosDelDia } from "@/lib/tz";
+import { useGuardRespuestas, useHoyNegocio } from "@/lib/useRecarga";
+import ErrorState from "@/components/ErrorState";
+import { IconButton } from "@/components/ui";
+import SemanaStrip from "@/components/agenda/SemanaStrip";
+import SelectorHora from "@/components/agenda/SelectorHora";
+import { useCuposDelDia } from "@/components/agenda/useCupos";
+import { confirmar } from "@/components/agenda/tipos";
 
-type Service      = { id: string; name: string; duration_minutes: number; price: number };
-type Client       = { id: string; name: string; phone: string };
-type Professional = { id: string; name: string; role: string; schedule?: any };
-type ExistingBlock = { appointment_time: string; duration: number };
-type ApptField    = { id: string; name: string; field_key: string; field_type: string; options: string[]; required: boolean };
-
-const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-function computeAvailable(slots: string[], existing: ExistingBlock[], newDuration: number): string[] {
-  return slots.filter(slot => {
-    const slotStart = timeToMins(slot);
-    const slotEnd   = slotStart + newDuration;
-    return existing.every(block => {
-      const blockStart = timeToMins(block.appointment_time.slice(0, 5));
-      const blockEnd   = blockStart + block.duration;
-      return slotEnd <= blockStart || slotStart >= blockEnd;
-    });
-  });
-}
-
+type Client   = { id: string; name: string; phone: string };
+type ApptField = { id: string; name: string; field_key: string; field_type: string; options: string[]; required: boolean };
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   tenantId: string;
-  initialDate?: Date;
+  /**
+   * Día con el que abre: 'YYYY-MM-DD' del negocio (preferido) o un Date de
+   * picker / fechaDeDia(dia), del que se toma su fecha de calendario. Un día
+   * pasado abre en hoy (AGE-25).
+   */
+  initialDate?: Date | string;
   onSuccess: () => void;
 }
 
+/** Área táctil extra de los botones pequeños (CAL-24). */
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
+const STEP_LABELS = [
+  "Paso 1 · Profesional",
+  "Paso 2 · Cliente",
+  "Paso 3 · Servicio",
+  "Paso 4 · Fecha y hora",
+];
+
 export default function NewApptModal({ visible, onClose, tenantId, initialDate, onSuccess }: Props) {
+  const router = useRouter();
+  const { t } = useTheme();
+  const s = useMemo(() => crearEstilos(t), [t]);
+  const { timezone } = useTenant();
+  const hoy = useHoyNegocio(timezone);
+  const guard = useGuardRespuestas();
+
   const [step, setStep]               = useState(0);
   const [loading, setLoading]         = useState(false);
+  const [loadError, setLoadError]     = useState<unknown>(null);
   const [saving, setSaving]           = useState(false);
-  const [loadingSlots, setLoadingSlots] = useState(false);
 
+  const [catalogo, setCatalogo]       = useState<CatalogoAgenda | null>(null);
+  const [sede, setSede]               = useState<string | null>(null);
   const [clients, setClients]         = useState<Client[]>([]);
-  const [services, setServices]       = useState<Service[]>([]);
-  const [professionals, setPros]      = useState<Professional[]>([]);
 
-  const [selectedPro, setSelectedPro]         = useState<Professional | null>(null);
+  const [selectedPro, setSelectedPro]         = useState<ProfesionalAgenda | null>(null);
   const [clientSearch, setClientSearch]       = useState("");
   const [isNewClient, setIsNewClient]         = useState(false);
   const [newClientName, setNewClientName]     = useState("");
   const [newClientPhone, setNewClientPhone]   = useState("");
   const [apptFields, setApptFields]           = useState<ApptField[]>([]);
+  const [fieldsError, setFieldsError]         = useState<unknown>(null);
   const [fieldValues, setFieldValues]         = useState<Record<string, string>>({});
   const [selectedClient, setSelectedClient]   = useState<Client | null>(null);
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [selectedDate, setSelectedDate]       = useState(initialDate ?? new Date());
-  const [weekBase, setWeekBase]               = useState(initialDate ?? new Date());
+  const [selectedService, setSelectedService] = useState<ServicioAgenda | null>(null);
+  const [selectedDay, setSelectedDay]         = useState(() => hoyNegocio(timezone));
+  const [semana, setSemana]                   = useState(() => inicioDeSemana(hoyNegocio(timezone)));
   const [selectedTime, setSelectedTime]       = useState<string | null>(null);
-  const [availableSlots, setAvailableSlots]   = useState<string[]>([]);
-  const [dayClosed, setDayClosed]             = useState(false);
-  const [schedule, setSchedule]               = useState<Record<string, { open: boolean; start: string; end: string; break_start?: string | null; break_end?: string | null }> | null>(null);
-  /** Cada cuánto abre cupo el negocio (tenants.settings.slot_interval_min). */
-  const [slotInterval, setSlotInterval]       = useState<number>(DEFAULT_SLOT_INTERVAL);
+
+  // Id de la cita generado al abrir: si el insert llegó pero la respuesta se
+  // perdió, el reintento choca con su propia fila (23505) y se reconoce como
+  // guardada en vez de duplicarla.
+  const apptIdRef = useRef<string>(nuevoId());
+
+  const cargar = async () => {
+    const turno = guard.nuevo();
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [cat, loc, clis] = await Promise.all([
+        cargarCatalogoAgenda(tenantId),
+        getActiveLocationId(tenantId),
+        supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name").order("id").limit(150),
+      ]);
+      const lista = revisar(clis, "No se pudieron cargar los clientes") ?? [];
+      if (!turno.vigente()) return;
+      setCatalogo(cat);
+      setSede(loc);
+      setClients(lista.map((c: { id: string; name: string; phone: string | null }) => ({ ...c, phone: c.phone ?? "" })));
+    } catch (e) {
+      if (turno.vigente()) setLoadError(e);
+    } finally {
+      if (turno.vigente()) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!visible) return;
+    const hoyAhora = hoyNegocio(timezone);
+    // Un Date llega de un picker o de fechaDeDia(dia) (mediodía LOCAL de ese
+    // día): se lee su fecha de calendario. Pasarlo por la zona del negocio lo
+    // corría un día cuando el teléfono y el negocio están a 12 h o más.
+    let base = typeof initialDate === "string" ? initialDate
+      : initialDate instanceof Date && !Number.isNaN(initialDate.getTime()) ? localDateStr(initialDate)
+      : hoyAhora;
+    if (!base || base < hoyAhora) base = hoyAhora;
+    apptIdRef.current = nuevoId();
     setStep(0);
     setSelectedPro(null);
     setSelectedClient(null);
     setSelectedService(null);
     setSelectedTime(null);
-    setAvailableSlots([]);
-    setDayClosed(false);
     setClientSearch("");
     setNewClientName("");
     setNewClientPhone("");
     setIsNewClient(false);
-    const base = initialDate ?? new Date();
-    setSelectedDate(base);
-    setWeekBase(base);
-    fetchData();
+    setFieldValues({});
+    setSelectedDay(base);
+    setSemana(inicioDeSemana(base));
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Reload slots when date changes while on step 3
-  useEffect(() => {
-    if (step === 3 && selectedPro && selectedService) {
-      loadSlots(selectedPro.id, selectedDate, selectedService.duration_minutes, schedule);
-    }
-  }, [step, selectedDate]);
-
   // Campos personalizados del servicio (los mismos que captura la reserva online del web)
+  const guardCampos = useGuardRespuestas();
+  const servicioId = selectedService?.id ?? null;
   useEffect(() => {
-    if (!selectedService) { setApptFields([]); setFieldValues({}); return; }
-    let cancelled = false;
+    if (!servicioId) { setApptFields([]); setFieldValues({}); setFieldsError(null); return; }
+    const turno = guardCampos.nuevo();
     supabase.from("custom_fields")
       .select("id, name, field_key, field_type, options, required")
-      .eq("service_id", selectedService.id)
+      .eq("service_id", servicioId)
       .eq("active", true)
       .order("position")
-      .then(({ data }) => {
-        if (cancelled) return;
+      .then(({ data, error }) => {
+        if (!turno.vigente()) return;
+        if (error) { setFieldsError(error); setApptFields([]); return; }
+        setFieldsError(null);
         setApptFields((data ?? []).map((f: any) => ({ ...f, options: Array.isArray(f.options) ? f.options : [] })));
         setFieldValues({});
       });
-    return () => { cancelled = true; };
-  }, [selectedService?.id]);
+  }, [servicioId, guardCampos]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    const [{ data: svcs }, { data: pros }, { data: clis }, { data: tenant }] = await Promise.all([
-      supabase.from("services").select("id, name, duration_minutes, price").eq("tenant_id", tenantId).order("name"),
-      supabase.from("professionals").select("id, name, role, schedule").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
-      supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name").limit(150),
-      supabase.from("tenants").select("settings").eq("id", tenantId).single(),
-    ]);
-    setServices(svcs ?? []);
-    setPros(pros ?? []);
-    setClients((clis ?? []).map(c => ({ ...c, phone: c.phone ?? "" })));
-    setSchedule((tenant?.settings as any)?.schedule ?? null);
-    setSlotInterval(normalizeSlotInterval((tenant?.settings as any)?.slot_interval_min));
-    setLoading(false);
-  };
+  const profesionales = useMemo(
+    () => profesionalesDeLaSede(catalogo?.profesionales ?? [], sede),
+    [catalogo, sede],
+  );
+  const servicios = useMemo(() => (catalogo?.servicios ?? []).filter(x => x.activo), [catalogo]);
 
-  const loadSlots = async (
-    proId: string,
-    date: Date,
-    newDuration: number,
-    tenantSchedule: typeof schedule,
-  ) => {
-    setLoadingSlots(true);
-    setSelectedTime(null);
-    setDayClosed(false);
+  const cupos = useCuposDelDia({
+    tenantId,
+    profesional: selectedPro,
+    duracion: selectedService?.duracion ?? null,
+    dia: selectedDay,
+    horario: catalogo?.horario ?? null,
+    intervalo: catalogo?.intervalo ?? 30,
+    habilitado: visible && step === 3,
+    // Si un intento anterior sí guardó (se perdió la respuesta), su propia
+    // fila no debe ocupar el cupo que se va a reintentar.
+    excluirCitaId: apptIdRef.current,
+    hoy,
+    timezone,
+  });
 
-    // Horario efectivo del día: el propio del profesional (si tiene) sobre el del negocio
-    const dayConfig = effectiveDayHours(date, tenantSchedule, selectedPro?.schedule);
-
-    if (!dayConfig?.open) {
-      setDayClosed(true);
-      setAvailableSlots([]);
-      setLoadingSlots(false);
-      return;
-    }
-
-    // Cupos del día: paso del negocio, sin pisar el descanso ni el cierre.
-    const slots = generateSlotsForDay(dayConfig, newDuration, slotInterval);
-
-    const dateStr = localDateStr(date);
-    const { data: appts } = await supabase
-      .from("appointments")
-      .select("appointment_time, service_id")
-      .eq("professional_id", proId)
-      .eq("appointment_date", dateStr)
-      .neq("status", "cancelled");
-
-    if (!appts || appts.length === 0) {
-      setAvailableSlots(slots);
-      setLoadingSlots(false);
-      return;
-    }
-
-    const serviceIds = [...new Set(appts.map(a => a.service_id).filter(Boolean))];
-    const { data: svcs } = await supabase
-      .from("services")
-      .select("id, duration_minutes")
-      .in("id", serviceIds);
-
-    const durMap = new Map((svcs ?? []).map(s => [s.id, s.duration_minutes]));
-
-    const blocks: ExistingBlock[] = appts.map(a => ({
-      appointment_time: a.appointment_time as string,
-      duration: durMap.get(a.service_id) ?? 60,
-    }));
-
-    setAvailableSlots(computeAvailable(slots, blocks, newDuration));
-    setLoadingSlots(false);
-  };
+  // Al cambiar de día o recargar, la hora elegida deja de valer.
+  useEffect(() => { setSelectedTime(null); }, [selectedDay, selectedPro?.id, selectedService?.id]);
 
   // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
   const serverClients = useClientSearch(tenantId, clientSearch);
@@ -193,63 +194,180 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     c.phone.includes(clientSearch)
   );
 
-  const clientName = isNewClient ? newClientName : (selectedClient?.name ?? "");
+  // Teléfono del cliente nuevo: obligatorio (clients.phone es NOT NULL y
+  // UNIQUE por negocio, ESQ-13). Se normaliza igual que la pestaña Clientes.
+  // Sin selector de país aquí: Colombia por defecto, y "+52…" respeta el país escrito.
+  const telNuevo = newClientPhone.trim() ? telefonoParaGuardar(DEFAULT_COUNTRY_ISO, newClientPhone) : null;
+  const telNuevoValido = !!telNuevo?.valido;
+
+  const clientName = isNewClient ? newClientName.trim() : (selectedClient?.name ?? "");
   const canStep0   = selectedPro !== null;
-  const canStep1   = isNewClient ? newClientName.trim().length >= 2 : selectedClient !== null;
+  const canStep1   = isNewClient ? newClientName.trim().length >= 2 && telNuevoValido : selectedClient !== null;
   const canStep2   = selectedService !== null;
   const requiredFieldsOk = apptFields.every(f => !f.required || (fieldValues[f.id] ?? "").trim().length > 0);
-  const canSave    = selectedTime !== null && requiredFieldsOk;
-
+  const canSave    = selectedTime !== null && requiredFieldsOk && selectedDay >= hoy;
   const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
 
+  const horaFueraDeGrilla = selectedTime !== null && !cupos.cupos.includes(selectedTime);
+  const avisosHora = (() => {
+    if (!selectedTime || !selectedService || !horaFueraDeGrilla) return [];
+    const avisos = avisosDeHorario(cupos.horarioDia, selectedTime, selectedService.duracion);
+    if (selectedDay === hoy && timeToMins(selectedTime) < minutosDelDia(new Date(), timezone)) {
+      avisos.push("Esa hora de hoy ya pasó.");
+    }
+    return avisos;
+  })();
+
+  /**
+   * Cliente nuevo → id. Reutiliza el que ya tenga ese teléfono (con
+   * confirmación) en vez de insertar otro: clients.phone es UNIQUE por negocio.
+   * Devuelve null si el usuario no confirma o si ya se le explicó el problema.
+   */
+  const resolverClienteNuevo = async (): Promise<Client | null> => {
+    const tel = telefonoParaGuardar(DEFAULT_COUNTRY_ISO, newClientPhone);
+    if (!tel) {
+      Alert.alert("Falta el teléfono", "Escribe el teléfono del cliente para crearlo.");
+      return null;
+    }
+    if (!tel.valido) {
+      Alert.alert("Teléfono no válido", "Revisa el número. Si es de otro país, escríbelo con el indicativo (por ejemplo +52…).");
+      return null;
+    }
+    const ofrecerExistente = async (c: Client) => {
+      const usar = await confirmar(
+        "Ese teléfono ya está registrado",
+        `Pertenece a ${c.name}. ¿Agendar la cita a su nombre?`,
+        `Usar ${c.name.split(" ")[0]}`,
+      );
+      return usar ? c : null;
+    };
+    const existente = await buscarClientePorTelefono(tenantId, tel.phone, tel.countryCode);
+    if (existente) return ofrecerExistente(existente);
+
+    const { data, error } = await supabase
+      .from("clients")
+      .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: tel.phone, phone_country_code: tel.countryCode })
+      .select("id, name, phone")
+      .single();
+    if (error) {
+      const code = (error as { code?: string }).code;
+      if (code === "23505") {
+        // Otra persona lo creó entre la búsqueda y el insert.
+        const otra = await buscarClientePorTelefono(tenantId, tel.phone, tel.countryCode);
+        if (otra) return ofrecerExistente(otra);
+        // Chocó con un formato del número que la búsqueda no cubre: antes
+        // salía un mensaje genérico que parecía de conexión.
+        Alert.alert("Ese teléfono ya está registrado", "Ya hay un cliente con ese número. Búscalo en «Existente».");
+        return null;
+      }
+      if (code === "23502") {
+        Alert.alert("Falta el teléfono", "Escribe el teléfono del cliente para crearlo.");
+        return null;
+      }
+      throw new ErrorDB(error, "No se pudo crear el cliente");
+    }
+    return data as Client;
+  };
+
   const handleSave = async () => {
-    if (!canSave || !selectedService || !selectedPro || !selectedTime) return;
+    if (!canSave || !selectedService || !selectedPro || !selectedTime || saving) return;
+    if (selectedDay < hoy) {
+      Alert.alert("Fecha pasada", "No se pueden agendar citas en días que ya pasaron.");
+      return;
+    }
+    if (avisosHora.length > 0) {
+      const seguir = await confirmar("¿Agendar a esta hora?", avisosHora.join("\n"), "Agendar igual");
+      if (!seguir) return;
+    }
     setSaving(true);
     try {
-      const dateStr = localDateStr(selectedDate);
-
-      // El slot pudo ocuparse desde otro dispositivo mientras se completaba el formulario
-      if (await hasSlotConflict(selectedPro.id, dateStr, timeToMins(selectedTime), selectedService.duration_minutes)) {
-        Alert.alert("Horario ya ocupado", "Ese horario acaba de reservarse. Elige otro.");
-        loadSlots(selectedPro.id, selectedDate, selectedService.duration_minutes, schedule);
+      const apptId = apptIdRef.current;
+      // Justo antes de guardar: el cupo pudo ocuparse (otra cita o una
+      // ausencia cargada en el web) mientras se completaba el formulario.
+      // Se excluye la propia cita: si un intento anterior llegó a guardarse y
+      // solo se perdió la respuesta, el reintento no debe chocar consigo mismo.
+      let v;
+      try {
+        v = await verificarCupo({
+          tenantId, professionalId: selectedPro.id, dia: selectedDay, hora: selectedTime, duracion: selectedService.duracion,
+          excluirCitaId: apptId,
+        });
+      } catch (e) {
+        Alert.alert("No se pudo verificar el horario", mensajeError(e));
+        return;
+      }
+      if (!v.ok) {
+        Alert.alert("Horario no disponible", v.motivo);
+        cupos.recargar();
         return;
       }
 
       let clientId = selectedClient?.id ?? null;
-
-      if (isNewClient && newClientName.trim()) {
-        const { data: newCli, error: cliError } = await supabase
-          .from("clients")
-          .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: newClientPhone.trim() || null })
-          .select("id")
-          .single();
-        if (cliError || !newCli) {
-          Alert.alert("No se pudo crear el cliente", "Revisa tu conexión e inténtalo de nuevo.");
+      // Nombre real del cliente de la cita (si se reutilizó uno existente por
+      // su teléfono, es el suyo y no el que se escribió).
+      let nombreCliente = clientName;
+      if (isNewClient) {
+        let cli: Client | null;
+        try {
+          cli = await resolverClienteNuevo();
+        } catch (e) {
+          Alert.alert("No se pudo crear el cliente", mensajeError(e));
           return;
         }
-        clientId = newCli.id;
+        if (!cli) return;
+        // Si la cita falla después, el reintento usa este cliente y no crea
+        // otro con el mismo teléfono (AGE-17).
+        setSelectedClient(cli);
+        setIsNewClient(false);
+        clientId = cli.id;
+        nombreCliente = cli.name;
       }
 
-      const payload: Record<string, unknown> = {
-        tenant_id:        tenantId,
+      // Lo que el usuario eligió (también sirve para corregir la fila de un
+      // intento anterior). Tipado con columnas reales: con el cliente tipado
+      // (CAL-26) un nombre mal escrito no compila.
+      // La sede es la del profesional elegido; si no tiene, la activa. Con la
+      // sede activa a secas, un profesional de otra sede quedaba con la cita
+      // en la sede equivocada (AGE-16).
+      const locationId = selectedPro.location_id ?? sede;
+      const elegido: {
+        service_id: string; professional_id: string; appointment_date: string; appointment_time: string;
+        client_id?: string; location_id?: string;
+      } = {
         service_id:       selectedService.id,
         professional_id:  selectedPro.id,
-        appointment_date: dateStr,
+        appointment_date: selectedDay,
         appointment_time: `${selectedTime}:00`,
-        status:           "pending",
       };
-      if (clientId) payload.client_id = clientId;
-      // Sede activa: sin esto la cita no aparece en el panel web al filtrar
-      // por sede ni bloquea el horario en la reserva pública por sede
-      const locationId = await getActiveLocationId(tenantId);
-      if (locationId) payload.location_id = locationId;
+      if (clientId) elegido.client_id = clientId;
+      if (locationId) elegido.location_id = locationId;
+      const payload = { ...elegido, id: apptId, tenant_id: tenantId, status: "pending" };
 
-      const { data: inserted, error: apptError } = await supabase
-        .from("appointments").insert(payload).select("id").single();
-
-      if (apptError || !inserted) {
-        Alert.alert("No se pudo guardar la cita", "Revisa tu conexión e inténtalo de nuevo.");
-        return;
+      const { error: apptError } = await supabase.from("appointments").insert(payload);
+      if (apptError) {
+        let yaGuardada = false;
+        if (esHorarioOcupado(apptError)) {
+          const { data: propia } = await supabase.from("appointments").select("id").eq("id", apptId).maybeSingle();
+          yaGuardada = !!propia;
+        }
+        if (!yaGuardada) {
+          Alert.alert("No se pudo guardar la cita", mensajeErrorCita(apptError));
+          if (esHorarioOcupado(apptError)) cupos.recargar();
+          return;
+        }
+        // La fila de un intento anterior ya existe, pero el usuario pudo
+        // cambiar la hora, el día o el servicio antes de reintentar: se deja
+        // con lo que eligió ahora (el cupo nuevo ya se verificó arriba).
+        try {
+          exigirFilas(
+            await supabase.from("appointments").update(elegido).eq("id", apptId).select("id"),
+            "No se pudo guardar la cita",
+          );
+        } catch (e) {
+          Alert.alert("No se pudo guardar la cita", mensajeErrorCita(e));
+          if (esHorarioOcupado(e)) cupos.recargar();
+          return;
+        }
       }
 
       // Valores de los campos del servicio — mismo destino que la reserva online (client_field_values)
@@ -258,24 +376,22 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
           .filter(f => (fieldValues[f.id] ?? "").trim())
           .map(f => ({ tenant_id: tenantId, client_id: clientId, field_id: f.id, field_key: f.field_key, value: fieldValues[f.id].trim() }));
         if (upserts.length > 0) {
-          await supabase.from("client_field_values").upsert(upserts, { onConflict: "client_id,field_id" });
+          const { error } = await supabase.from("client_field_values").upsert(upserts, { onConflict: "client_id,field_id" });
+          if (error) {
+            Alert.alert("Cita guardada", `La cita quedó agendada, pero no se guardaron los datos adicionales. ${mensajeError(error)}`);
+          }
         }
       }
 
-      const { data: settings } = await supabase
-        .from("reminder_settings").select("hours_before, message_template")
-        .eq("tenant_id", tenantId).single();
-      await scheduleAppointmentReminder(
-        {
-          id: inserted.id,
-          date: dateStr,
-          time: `${selectedTime}:00`,
-          clientName: isNewClient ? newClientName.trim() : (selectedClient?.name ?? "Cliente"),
-          serviceName: selectedService.name,
-        },
-        settings?.hours_before ?? 24,
-        settings?.message_template ?? "Recordatorio: {{nombre}} – {{servicio}} el {{fecha}} a las {{hora}}"
-      ).catch(() => {});
+      // Aviso en el teléfono del dueño, en la hora del negocio.
+      reprogramarRecordatorioCita(tenantId, {
+        id: apptId,
+        date: selectedDay,
+        time: `${selectedTime}:00`,
+        clientName: nombreCliente || "Cliente",
+        serviceName: selectedService.name,
+        status: "pending",
+      }, timezone).catch(() => {});
 
       onSuccess();
       onClose();
@@ -284,27 +400,31 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     }
   };
 
-  const week  = buildWeek(weekBase);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const irAConfigurarHorario = () => {
+    onClose();
+    router.push("/settings/schedule");
+  };
 
-  const STEP_LABELS = [
-    "Paso 1 · Profesional",
-    "Paso 2 · Cliente",
-    "Paso 3 · Servicio",
-    "Paso 4 · Fecha y hora",
-  ];
+  const diaCerrado = (d: string) =>
+    !!selectedPro && !!catalogo && !effectiveDayHours(d, catalogo.horario, selectedPro.schedule).open;
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cream2 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
 
         {/* Header */}
-        <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+        <View style={[s.header, { backgroundColor: "#0C0C14" }]}>
           <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
           <View style={s.headerRow}>
-            <TouchableOpacity onPress={step === 0 ? onClose : () => setStep(p => p - 1)} style={s.backBtn}>
-              <Text style={s.backBtnText}>{step === 0 ? "✕" : "←"}</Text>
-            </TouchableOpacity>
+            <IconButton
+              icon={step === 0 ? "close" : "arrow-back"}
+              label={step === 0 ? "Cerrar" : "Paso anterior"}
+              onPress={step === 0 ? onClose : () => setStep(p => p - 1)}
+              tone="plain"
+              size={20}
+              color="white"
+              style={s.backBtn}
+            />
             <View style={{ alignItems: "center" }}>
               <Text style={s.headerTitle}>Nueva cita</Text>
               <Text style={s.headerSub}>{STEP_LABELS[step]}</Text>
@@ -316,37 +436,41 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
               <View key={i} style={[s.progressDot, step >= i && s.progressActive]} />
             ))}
           </View>
-        </LinearGradient>
+        </View>
 
         {loading ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={Colors.red} size="large" />
           </View>
+        ) : loadError ? (
+          <ErrorState error={loadError} onRetry={cargar} />
         ) : (
           <>
             {/* ── STEP 0: PROFESSIONAL ── */}
             {step === 0 && (
               <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                {professionals.length === 0 ? (
+                {profesionales.length === 0 ? (
                   <View style={[s.card, { alignItems: "center", paddingVertical: 40 }, Shadow.sm]}>
                     <Text style={{ fontSize: 36, marginBottom: 12 }}>👷</Text>
                     <Text style={s.emptyTitle}>Sin profesionales</Text>
                     <Text style={s.emptySub}>Agrega el equipo en Ajustes → Equipo de trabajo</Text>
                   </View>
                 ) : (
-                  professionals.map((pro, i) => (
-                    <Animated.View key={pro.id} entering={FadeInDown.delay(i * 55).duration(300)}>
+                  profesionales.map((pro, i) => (
+                    <Animated.View key={pro.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
                       <TouchableOpacity
-                        style={[s.proCard, Shadow.sm, selectedPro?.id === pro.id && s.proCardActive]}
+                        style={[s.proCard, Shadow.sm, selectedPro?.id === pro.id && s.cardActive]}
                         onPress={() => setSelectedPro(pro)}
                         activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: selectedPro?.id === pro.id }}
                       >
                         <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.proAvatar}>
-                          <Text style={s.proAvatarText}>{pro.name[0].toUpperCase()}</Text>
+                          <Text style={s.proAvatarText}>{(pro.name[0] ?? "?").toUpperCase()}</Text>
                         </LinearGradient>
                         <View style={{ flex: 1 }}>
                           <Text style={[s.proName, selectedPro?.id === pro.id && { color: Colors.red }]}>{pro.name}</Text>
-                          <Text style={s.proRole}>{pro.role}</Text>
+                          {!!pro.role && <Text style={s.proRole}>{pro.role}</Text>}
                         </View>
                         {selectedPro?.id === pro.id && (
                           <View style={s.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>
@@ -363,10 +487,10 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
               <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
                 <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
                   <View style={[s.toggleRow, Shadow.sm]}>
-                    <TouchableOpacity style={[s.toggleBtn, !isNewClient && s.toggleActive]} onPress={() => setIsNewClient(false)} activeOpacity={0.8}>
+                    <TouchableOpacity style={[s.toggleBtn, !isNewClient && s.toggleActive]} onPress={() => setIsNewClient(false)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: !isNewClient }}>
                       <Text style={[s.toggleText, !isNewClient && s.toggleTextActive]}>Existente</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[s.toggleBtn, isNewClient && s.toggleActive]} onPress={() => setIsNewClient(true)} activeOpacity={0.8}>
+                    <TouchableOpacity style={[s.toggleBtn, isNewClient && s.toggleActive]} onPress={() => setIsNewClient(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: isNewClient }}>
                       <Text style={[s.toggleText, isNewClient && s.toggleTextActive]}>Nuevo cliente</Text>
                     </TouchableOpacity>
                   </View>
@@ -379,33 +503,40 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         value={newClientName}
                         onChangeText={setNewClientName}
                         placeholder="Ej: Juan García"
-                        placeholderTextColor={Colors.subtle}
+                        placeholderTextColor={t.subtle}
                         autoFocus
                       />
-                      <Text style={[s.fieldLabel, { marginTop: 14 }]}>Teléfono (opcional)</Text>
+                      <Text style={[s.fieldLabel, { marginTop: 14 }]}>Teléfono</Text>
                       <TextInput
-                        style={s.input}
+                        style={[s.input, !!newClientPhone.trim() && !telNuevoValido && { borderColor: Colors.red }]}
                         value={newClientPhone}
                         onChangeText={setNewClientPhone}
                         placeholder="Ej: 300 123 4567"
-                        placeholderTextColor={Colors.subtle}
+                        placeholderTextColor={t.subtle}
                         keyboardType="phone-pad"
                       />
+                      <Text style={[s.hint, !!newClientPhone.trim() && !telNuevoValido && { color: Colors.red }]}>
+                        {newClientPhone.trim() && !telNuevoValido
+                          ? "Número no válido. Si es de otro país, escríbelo con el indicativo (+52…)."
+                          : telNuevoValido
+                            ? `Se guardará como ${fmtTelefono(telNuevo!.phone, { indicativo: telNuevo!.countryCode })}`
+                            : "Obligatorio: con él se identifica al cliente y se le envían los recordatorios."}
+                      </Text>
                     </View>
                   ) : (
                     <>
                       <View style={[s.searchBar, Shadow.sm]}>
-                        <Text style={{ fontSize: 15, color: Colors.subtle }}>🔍</Text>
+                        <Text style={{ fontSize: 15, color: t.subtle }}>🔍</Text>
                         <TextInput
                           style={s.searchInput}
                           value={clientSearch}
                           onChangeText={setClientSearch}
                           placeholder="Buscar por nombre o teléfono..."
-                          placeholderTextColor={Colors.subtle}
+                          placeholderTextColor={t.subtle}
                         />
                         {clientSearch.length > 0 && (
-                          <TouchableOpacity onPress={() => setClientSearch("")}>
-                            <Text style={{ color: Colors.subtle, fontSize: 16 }}>✕</Text>
+                          <TouchableOpacity onPress={() => setClientSearch("")} accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={HIT_SLOP}>
+                            <Text style={{ color: t.subtle, fontSize: 16 }}>✕</Text>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -419,16 +550,18 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         filteredClients.map(c => (
                           <TouchableOpacity
                             key={c.id}
-                            style={[s.clientRow, Shadow.sm, selectedClient?.id === c.id && s.clientRowActive]}
+                            style={[s.clientRow, Shadow.sm, selectedClient?.id === c.id && s.cardActive]}
                             onPress={() => setSelectedClient(c)}
                             activeOpacity={0.75}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: selectedClient?.id === c.id }}
                           >
                             <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.avatarGrad}>
-                              <Text style={s.avatarText}>{c.name[0].toUpperCase()}</Text>
+                              <Text style={s.avatarText}>{(c.name[0] ?? "?").toUpperCase()}</Text>
                             </LinearGradient>
                             <View style={{ flex: 1 }}>
                               <Text style={s.clientName}>{c.name}</Text>
-                              <Text style={s.clientPhone}>{c.phone}</Text>
+                              <Text style={s.clientPhone}>{fmtTelefono(c.phone)}</Text>
                             </View>
                             {selectedClient?.id === c.id && (
                               <View style={s.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>
@@ -445,26 +578,28 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
             {/* ── STEP 2: SERVICE ── */}
             {step === 2 && (
               <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                {services.length === 0 ? (
+                {servicios.length === 0 ? (
                   <View style={[s.card, { alignItems: "center", paddingVertical: 40 }, Shadow.sm]}>
                     <Text style={{ fontSize: 40, marginBottom: 12 }}>✂️</Text>
                     <Text style={s.emptyTitle}>Sin servicios</Text>
                     <Text style={s.emptySub}>Agrega servicios desde Ajustes para poder agendar</Text>
                   </View>
                 ) : (
-                  services.map((svc, i) => (
-                    <Animated.View key={svc.id} entering={FadeInDown.delay(i * 55).duration(300)}>
+                  servicios.map((svc, i) => (
+                    <Animated.View key={svc.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
                       <TouchableOpacity
-                        style={[s.svcCard, Shadow.sm, selectedService?.id === svc.id && s.svcCardActive]}
+                        style={[s.svcCard, Shadow.sm, selectedService?.id === svc.id && s.cardActive]}
                         onPress={() => setSelectedService(svc)}
                         activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: selectedService?.id === svc.id }}
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={[s.svcName, selectedService?.id === svc.id && { color: Colors.red }]}>{svc.name}</Text>
-                          <Text style={s.svcMeta}>⏱ {svc.duration_minutes} min</Text>
+                          <Text style={s.svcMeta}>⏱ {svc.duracion} min</Text>
                         </View>
                         <View style={{ alignItems: "flex-end", gap: 6 }}>
-                          <Text style={s.svcPrice}>${Number(svc.price).toLocaleString("es-CO")}</Text>
+                          <Text style={s.svcPrice}>{fmtMoneyFull(svc.price)}</Text>
                           {selectedService?.id === svc.id && (
                             <View style={s.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>
                           )}
@@ -478,109 +613,47 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
             {/* ── STEP 3: DATE + AVAILABLE SLOTS ── */}
             {step === 3 && (
-              <ScrollView contentContainerStyle={{ paddingBottom: 130 }}>
-                {/* Week strip */}
-                <View style={[s.weekStrip, Shadow.sm]}>
-                  <TouchableOpacity style={s.arrow} onPress={() => setWeekBase(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })}>
-                    <Text style={s.arrowText}>‹</Text>
-                  </TouchableOpacity>
-                  {week.map((d, i) => {
-                    const isPast   = d < today;
-                    const isClosed = schedule ? effectiveDayHours(d, schedule, selectedPro?.schedule)?.open === false : false;
-                    const isBlocked = isPast || isClosed;
-                    const isSel   = d.toDateString() === selectedDate.toDateString();
-                    const isToday = d.toDateString() === new Date().toDateString();
-                    return (
-                      <TouchableOpacity
-                        key={i}
-                        style={[s.dayCol, isBlocked && { opacity: 0.3 }]}
-                        onPress={() => { if (!isBlocked) setSelectedDate(new Date(d)); }}
-                        disabled={isBlocked}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[s.dayName, isSel && !isBlocked && { color: Colors.red }]}>{DAYS[d.getDay()]}</Text>
-                        {isSel && !isBlocked ? (
-                          <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.dayCircle}>
-                            <Text style={[s.dayNum, { color: "white" }]}>{d.getDate()}</Text>
-                          </LinearGradient>
-                        ) : (
-                          <View style={[s.dayCircle, isToday && !isBlocked && { backgroundColor: Colors.red + "15" }]}>
-                            <Text style={[s.dayNum, isToday && !isBlocked && { color: Colors.red }]}>{d.getDate()}</Text>
-                          </View>
-                        )}
-                        {isClosed && !isPast && <View style={s.closedBar} />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <TouchableOpacity style={s.arrow} onPress={() => setWeekBase(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })}>
-                    <Text style={s.arrowText}>›</Text>
-                  </TouchableOpacity>
-                </View>
+              <ScrollView contentContainerStyle={{ paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
+                <SemanaStrip
+                  semana={semana}
+                  seleccionado={selectedDay}
+                  hoy={hoy}
+                  onSeleccionar={setSelectedDay}
+                  onCambiarSemana={setSemana}
+                  deshabilitado={d => d < hoy || diaCerrado(d)}
+                  cerrado={d => d >= hoy && diaCerrado(d)}
+                />
 
                 <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
-                  {/* Service duration reminder */}
                   {selectedService && (
                     <View style={s.durationNote}>
                       <Text style={s.durationNoteText}>
-                        {selectedService.name}  ·  ⏱ {selectedService.duration_minutes} min
+                        {fmtDia(selectedDay, "largo")}  ·  {selectedService.name}  ·  ⏱ {selectedService.duracion} min
                       </Text>
                     </View>
                   )}
 
-                  <Text style={[s.sectionLabel, { marginTop: 18 }]}>Horas disponibles</Text>
+                  <SelectorHora
+                    estado={cupos.estado}
+                    error={cupos.error}
+                    onReintentar={cupos.recargar}
+                    cupos={cupos.cupos}
+                    seleccionada={selectedTime}
+                    onSeleccionar={setSelectedTime}
+                    bloqueos={cupos.bloqueos}
+                    avisoHora={avisosHora.length ? avisosHora.join(" ") : null}
+                    mensajeCerrado={selectedPro?.schedule ? `${selectedPro.name} no atiende este día.` : "El negocio no atiende este día."}
+                    horarioPorDefecto={catalogo?.horario.porDefecto}
+                    onConfigurarHorario={irAConfigurarHorario}
+                  />
 
-                  {loadingSlots ? (
-                    <View style={{ alignItems: "center", paddingVertical: 40 }}>
-                      <ActivityIndicator color={Colors.red} />
-                      <Text style={[s.svcMeta, { marginTop: 10 }]}>Verificando agenda...</Text>
-                    </View>
-                  ) : dayClosed ? (
-                    <View style={[s.card, { alignItems: "center", paddingVertical: 32 }, Shadow.sm]}>
-                      <Text style={{ fontSize: 32, marginBottom: 10 }}>🚫</Text>
-                      <Text style={s.emptyTitle}>Día no laborable</Text>
-                      <Text style={s.emptySub}>El negocio no atiende este día</Text>
-                    </View>
-                  ) : availableSlots.length === 0 ? (
-                    <View style={[s.card, { alignItems: "center", paddingVertical: 32 }, Shadow.sm]}>
-                      <Text style={{ fontSize: 32, marginBottom: 10 }}>😔</Text>
-                      <Text style={s.emptyTitle}>Sin disponibilidad</Text>
-                      <Text style={s.emptySub}>La agenda está llena para este día</Text>
-                    </View>
-                  ) : (
-                    <View style={{ gap: 8 }}>
-                      {chunk(availableSlots, 3).map((row, ri) => (
-                        <View key={ri} style={{ flexDirection: "row", gap: 8 }}>
-                          {row.map(t => (
-                            <TouchableOpacity
-                              key={t}
-                              style={[s.timeSlot, { flex: 1 }, selectedTime === t && s.timeSlotActive]}
-                              onPress={() => setSelectedTime(t)}
-                              activeOpacity={0.75}
-                            >
-                              {selectedTime === t && (
-                                <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-                              )}
-                              <Text style={[s.timeSlotText, selectedTime === t && { color: "white" }]}>{fmt12Hour(t)}</Text>
-                            </TouchableOpacity>
-                          ))}
-                          {/* Fill empty cells in last row so flex alignment holds */}
-                          {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
-                            <View key={`pad-${i}`} style={{ flex: 1 }} />
-                          ))}
-                        </View>
-                      ))}
-                    </View>
+                  {!!fieldsError && (
+                    <Text style={[s.hint, { color: Colors.red, marginTop: 12 }]}>
+                      No se pudieron cargar los datos adicionales del servicio. {mensajeError(fieldsError)}
+                    </Text>
                   )}
 
-                  {!loadingSlots && !dayClosed && (
-                    <OtherTimeField
-                      value={selectedTime}
-                      inGrid={selectedTime !== null && availableSlots.includes(selectedTime)}
-                      onChange={setSelectedTime}
-                    />
-                  )}
-
-                  {apptFields.length > 0 && !dayClosed && (availableSlots.length > 0 || selectedTime !== null) && (
+                  {apptFields.length > 0 && selectedTime !== null && (
                     <View style={[s.card, Shadow.sm, { marginTop: 18 }]}>
                       <Text style={s.fieldLabel}>Datos de la cita</Text>
                       {apptFields.map(f => (
@@ -588,19 +661,19 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                           <Text style={s.svcMeta}>{f.name}{f.required ? " *" : ""}</Text>
                           {f.field_type === "select" && f.options.length > 0 ? (
                             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                              {f.options.map(opt => (
-                                <TouchableOpacity
-                                  key={opt}
-                                  style={[s.timeSlot, { paddingHorizontal: 14 }, fieldValues[f.id] === opt && s.timeSlotActive]}
-                                  onPress={() => setFieldValues(v => ({ ...v, [f.id]: v[f.id] === opt ? "" : opt }))}
-                                  activeOpacity={0.75}
-                                >
-                                  {fieldValues[f.id] === opt && (
-                                    <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-                                  )}
-                                  <Text style={[s.timeSlotText, fieldValues[f.id] === opt && { color: "white" }]}>{opt}</Text>
-                                </TouchableOpacity>
-                              ))}
+                              {f.options.map(opt => {
+                                const on = fieldValues[f.id] === opt;
+                                return (
+                                  <TouchableOpacity
+                                    key={opt}
+                                    style={[s.optChip, on && { backgroundColor: Colors.red, borderColor: Colors.red }]}
+                                    onPress={() => setFieldValues(v => ({ ...v, [f.id]: v[f.id] === opt ? "" : opt }))}
+                                    activeOpacity={0.75}
+                                  >
+                                    <Text style={[s.optChipText, on && { color: "white" }]}>{opt}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
                             </View>
                           ) : (
                             <TextInput
@@ -608,7 +681,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                               value={fieldValues[f.id] ?? ""}
                               onChangeText={txt => setFieldValues(v => ({ ...v, [f.id]: txt }))}
                               placeholder={f.name}
-                              placeholderTextColor={Colors.subtle}
+                              placeholderTextColor={t.subtle}
                               keyboardType={f.field_type === "number" ? "numeric" : "default"}
                             />
                           )}
@@ -620,13 +693,13 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                   {canSave && selectedService && selectedPro && (
                     <Animated.View entering={FadeInDown.duration(300)} style={[s.summary, Shadow.md]}>
                       <Text style={s.summaryTitle}>Resumen de la cita</Text>
-                      <SummaryRow label="Profesional" value={selectedPro.name} />
-                      <SummaryRow label="Cliente"     value={clientName} />
-                      <SummaryRow label="Servicio"    value={selectedService.name} />
-                      <SummaryRow label="Duración"    value={`${selectedService.duration_minutes} min`} />
-                      <SummaryRow label="Fecha"       value={selectedDate.toLocaleDateString("es-CO", { weekday: "short", day: "numeric", month: "short" })} />
-                      <SummaryRow label="Hora"        value={fmt12Hour(selectedTime!)} />
-                      <SummaryRow label="Valor"       value={`$${Number(selectedService.price).toLocaleString("es-CO")}`} highlight />
+                      <SummaryRow s={s} label="Profesional" value={selectedPro.name} />
+                      <SummaryRow s={s} label="Cliente"     value={clientName} />
+                      <SummaryRow s={s} label="Servicio"    value={selectedService.name} />
+                      <SummaryRow s={s} label="Duración"    value={`${selectedService.duracion} min`} />
+                      <SummaryRow s={s} label="Fecha"       value={fmtDia(selectedDay, "largo")} />
+                      <SummaryRow s={s} label="Hora"        value={`${fmt12(selectedTime!)} – ${fmt12(minsToTime(timeToMins(selectedTime!) + selectedService.duracion))}`} />
+                      <SummaryRow s={s} label="Valor"       value={fmtMoneyFull(selectedService.price)} highlight />
                     </Animated.View>
                   )}
                 </View>
@@ -641,6 +714,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                   onPress={() => setStep(p => p + 1)}
                   disabled={!stepCanProceed[step]}
                   activeOpacity={0.85}
+                  accessibilityRole="button"
                 >
                   <View style={s.btnGrad}>
                     <Text style={s.btnText}>Siguiente →</Text>
@@ -652,6 +726,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                   onPress={handleSave}
                   disabled={!canSave || saving}
                   activeOpacity={0.85}
+                  accessibilityRole="button"
                 >
                   <View style={s.btnGrad}>
                     {saving
@@ -669,95 +744,87 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   );
 }
 
-function SummaryRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function SummaryRow({ s, label, value, highlight }: { s: Estilos; label: string; value: string; highlight?: boolean }) {
   return (
     <View style={s.summaryRow}>
       <Text style={s.summaryLabel}>{label}</Text>
-      <Text style={[s.summaryValue, highlight && { color: Colors.red, fontFamily: "SpaceGrotesk_700Bold" }]}>{value}</Text>
+      <Text style={[s.summaryValue, highlight && { color: Colors.red, fontFamily: Fonts.bold }]}>{value}</Text>
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  header:        { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 18 },
-  headerRow:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
-  backBtn:       { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,.2)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
-  backBtnText:   { color: "white", fontSize: 18, fontFamily: "SpaceGrotesk_600SemiBold" },
-  headerTitle:   { fontSize: 18, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  headerSub:     { fontSize: 12, color: "rgba(255,255,255,.75)", fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
-  progressRow:   { flexDirection: "row", gap: 6 },
-  progressDot:   { height: 4, flex: 1, borderRadius: 2, backgroundColor: "rgba(255,255,255,.25)" },
-  progressActive:{ backgroundColor: "rgba(255,255,255,.95)" },
+type Estilos = ReturnType<typeof crearEstilos>;
 
-  // Professional picker
-  proCard:       { flexDirection: "row", alignItems: "center", ...Glass.cardStrong, borderRadius: Radius.lg, padding: 14, marginBottom: 10, gap: 14 },
-  proCardActive: { borderColor: Colors.red, backgroundColor: "rgba(251,15,5,0.08)" },
-  proAvatar:     { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  proAvatarText: { color: "white", fontSize: 16, fontFamily: "SpaceGrotesk_700Bold" },
-  proName:       { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text, marginBottom: 2 },
-  proRole:       { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
+function crearEstilos(t: ThemeColors) {
+  const card = { backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line };
+  return StyleSheet.create({
+    header:        { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 18 },
+    headerRow:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
+    backBtn:       { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,.2)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
+    headerTitle:   { fontSize: 18, fontFamily: Fonts.bold, color: "white" },
+    headerSub:     { fontSize: 12, color: "rgba(255,255,255,.75)", fontFamily: Fonts.regular, marginTop: 2 },
+    progressRow:   { flexDirection: "row", gap: 6 },
+    progressDot:   { height: 4, flex: 1, borderRadius: 2, backgroundColor: "rgba(255,255,255,.25)" },
+    progressActive:{ backgroundColor: "rgba(255,255,255,.95)" },
 
-  // Client picker
-  toggleRow:       { flexDirection: "row", ...Glass.card, borderRadius: Radius.lg, padding: 4, marginBottom: 16 },
-  toggleBtn:       { flex: 1, paddingVertical: 10, borderRadius: Radius.md, alignItems: "center" },
-  toggleActive:    { backgroundColor: Colors.red },
-  toggleText:      { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted },
-  toggleTextActive:{ color: "white" },
+    cardActive:    { borderColor: Colors.red, backgroundColor: "rgba(251,15,5,0.08)" },
 
-  card:       { ...Glass.cardStrong, borderRadius: Radius.lg, padding: 16, marginBottom: 12 },
-  fieldLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.6 },
-  input:      { fontSize: 15, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text, borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md, padding: 12 },
+    // Professional picker
+    proCard:       { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, padding: 14, marginBottom: 10, gap: 14 },
+    proAvatar:     { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    proAvatarText: { color: "white", fontSize: 16, fontFamily: Fonts.bold },
+    proName:       { fontSize: 14, fontFamily: Fonts.semibold, color: t.text, marginBottom: 2 },
+    proRole:       { fontSize: 12, fontFamily: Fonts.regular, color: t.muted },
 
-  searchBar:   { flexDirection: "row", alignItems: "center", ...Glass.card, borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12, gap: 8 },
-  searchInput: { flex: 1, fontSize: 14, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
+    // Client picker
+    toggleRow:       { flexDirection: "row", ...card, borderRadius: Radius.lg, padding: 4, marginBottom: 16 },
+    toggleBtn:       { flex: 1, paddingVertical: 10, borderRadius: Radius.md, alignItems: "center" },
+    toggleActive:    { backgroundColor: Colors.red },
+    toggleText:      { fontSize: 13, fontFamily: Fonts.semibold, color: t.muted },
+    toggleTextActive:{ color: "white" },
 
-  clientRow:       { flexDirection: "row", alignItems: "center", ...Glass.cardStrong, borderRadius: Radius.lg, padding: 12, marginBottom: 8, gap: 12 },
-  clientRowActive: { borderColor: Colors.red, backgroundColor: "rgba(251,15,5,0.08)" },
-  avatarGrad:      { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
-  avatarText:      { color: "white", fontSize: 15, fontFamily: "SpaceGrotesk_700Bold" },
-  clientName:      { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  clientPhone:     { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 2 },
-  check:           { width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center" },
+    card:       { ...card, borderRadius: Radius.lg, padding: 16, marginBottom: 12 },
+    fieldLabel: { fontSize: 11, fontFamily: Fonts.bold, color: t.muted, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.6 },
+    input:      { fontSize: 15, fontFamily: Fonts.semibold, color: t.text, backgroundColor: t.inputBg, borderWidth: 1.5, borderColor: t.inputBorder, borderRadius: Radius.md, padding: 12 },
+    hint:       { fontSize: 11.5, fontFamily: Fonts.regular, color: t.subtle, marginTop: 6, lineHeight: 16 },
 
-  // Service picker
-  svcCard:       { flexDirection: "row", alignItems: "center", ...Glass.cardStrong, borderRadius: Radius.lg, padding: 16, marginBottom: 10 },
-  svcCardActive: { borderColor: Colors.red, backgroundColor: "rgba(251,15,5,0.08)" },
-  svcName:       { fontSize: 14, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text, marginBottom: 4 },
-  svcMeta:       { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
-  svcPrice:      { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
+    searchBar:   { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12, gap: 8 },
+    searchInput: { flex: 1, fontSize: 14, fontFamily: Fonts.regular, color: t.text },
 
-  // Date + time
-  durationNote:     { backgroundColor: Colors.red + "10", borderRadius: Radius.md, padding: 12 },
-  durationNoteText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red },
+    clientRow:       { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, padding: 12, marginBottom: 8, gap: 12 },
+    avatarGrad:      { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
+    avatarText:      { color: "white", fontSize: 15, fontFamily: Fonts.bold },
+    clientName:      { fontSize: 14, fontFamily: Fonts.semibold, color: t.text },
+    clientPhone:     { fontSize: 12, fontFamily: Fonts.regular, color: t.muted, marginTop: 2 },
+    check:           { width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center" },
 
-  weekStrip: { ...Glass.cardStrong, flexDirection: "row", alignItems: "center", paddingVertical: 13, paddingHorizontal: 2 },
-  arrow:     { width: 34, alignItems: "center" },
-  arrowText: { fontSize: 26, color: Colors.muted, lineHeight: 30 },
-  dayCol:    { flex: 1, alignItems: "center", gap: 6 },
-  dayName:   { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle, textTransform: "uppercase" },
-  dayCircle: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  dayNum:    { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  closedBar: { width: 16, height: 2, borderRadius: 1, backgroundColor: Colors.muted },
+    // Service picker
+    svcCard:       { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, padding: 16, marginBottom: 10 },
+    svcName:       { fontSize: 14, fontFamily: Fonts.semibold, color: t.text, marginBottom: 4 },
+    svcMeta:       { fontSize: 12, fontFamily: Fonts.regular, color: t.muted },
+    svcPrice:      { fontSize: 14, fontFamily: Fonts.bold, color: t.text },
 
-  sectionLabel: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
-  timeGrid:     { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  timeSlot:     { paddingVertical: 13, borderRadius: Radius.md, overflow: "hidden", ...Glass.card, alignItems: "center" },
-  timeSlotActive:{ borderWidth: 0 },
-  timeSlotText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
+    // Date + time
+    durationNote:     { backgroundColor: Colors.red + "10", borderRadius: Radius.md, padding: 12 },
+    durationNoteText: { fontSize: 13, fontFamily: Fonts.semibold, color: Colors.red },
 
-  // Summary
-  summary:      { ...Glass.cardStrong, borderRadius: Radius.xl, padding: 20, marginTop: 22 },
-  summaryTitle: { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 14 },
-  summaryRow:   { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-  summaryLabel: { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
-  summaryValue: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
+    optChip:      { paddingVertical: 10, paddingHorizontal: 14, borderRadius: Radius.md, borderWidth: 1, borderColor: t.line, backgroundColor: t.cardSolid },
+    optChipText:  { fontSize: 13, fontFamily: Fonts.semibold, color: t.text },
 
-  // Bottom
-  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 20, paddingBottom: 34, backgroundColor: "rgba(244,244,249,0.85)", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.6)" },
-  btn:       { borderRadius: Radius.full, overflow: "hidden" },
-  btnGrad: { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
-  btnText:   { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: 0.3 },
+    // Summary
+    summary:      { ...card, borderRadius: Radius.xl, padding: 20, marginTop: 22 },
+    summaryTitle: { fontSize: 14, fontFamily: Fonts.bold, color: t.text, marginBottom: 14 },
+    summaryRow:   { flexDirection: "row", justifyContent: "space-between", gap: 12, marginBottom: 10 },
+    summaryLabel: { fontSize: 13, fontFamily: Fonts.regular, color: t.muted },
+    summaryValue: { flexShrink: 1, textAlign: "right", fontSize: 13, fontFamily: Fonts.semibold, color: t.text },
 
-  emptyTitle: { fontSize: 15, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 6 },
-  emptySub:   { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, textAlign: "center" },
-});
+    // Bottom
+    bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 20, paddingBottom: 34, backgroundColor: t.bottomBar, borderTopWidth: 1, borderTopColor: t.bottomBorder },
+    btn:       { borderRadius: Radius.full, overflow: "hidden" },
+    btnGrad:   { paddingVertical: 16, alignItems: "center", backgroundColor: Colors.red },
+    btnText:   { fontSize: 15, fontFamily: Fonts.bold, color: "white", letterSpacing: 0.3 },
+
+    emptyTitle: { fontSize: 15, fontFamily: Fonts.bold, color: t.text, marginBottom: 6 },
+    emptySub:   { fontSize: 13, fontFamily: Fonts.regular, color: t.muted, textAlign: "center" },
+  });
+}

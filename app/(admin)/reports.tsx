@@ -1,211 +1,266 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
-import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
-import ErrorState from "@/components/ErrorState";
+import { useTenant } from "@/lib/tenant";
+import { getActiveLocationId } from "@/lib/active-location";
+import {
+  diaLocalDe, hoyNegocio, listaDeDias, mesDe, rangoDePeriodo, rangoAnterior,
+  rangoIncluyeHoy, moverReferencia, etiquetaRango,
+  type Periodo, type RangoNegocio,
+} from "@/lib/tz";
+import { mensajeError, revisar, traerTodo } from "@/lib/db";
+import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
+import { cobradoDe, estaCobrada, montoDe, precioDeLista, rangoDeHoras, horaDe, type VentaResumen } from "@/lib/ingresos";
+import { Colors, Fonts, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { fmtMoney, pct } from "@/lib/format";
+import ErrorState from "@/components/ErrorState";
+import { ScreenHeader, SegmentedControl, Card, CardHead, MonoTag, TrendChip, IconButton, useCountUp } from "@/components/ui";
+import { AreaChart, Bars, RankBars, ChartEmpty } from "@/components/charts";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
-type Period = "week" | "month" | "year";
+type Period = Extract<Periodo, "semana" | "mes" | "anio">;
 
-function getRange(period: Period): { start: string; end: string } {
-  const now = new Date();
-  if (period === "week") {
-    const day = now.getDay();
-    const diff = (day === 0 ? -6 : 1) - day;
-    const mon = new Date(now); mon.setDate(now.getDate() + diff);
-    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    return { start: mon.toISOString().slice(0, 10), end: sun.toISOString().slice(0, 10) };
-  }
-  if (period === "month") {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-    return { start, end };
-  }
-  return {
-    start: new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10),
-    end:   new Date(now.getFullYear(), 11, 31).toISOString().slice(0, 10),
-  };
-}
+const LETRAS_SEMANA = ["L", "M", "X", "J", "V", "S", "D"];
+const MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
-function getPrevRange(period: Period): { start: string; end: string } {
-  const now = new Date();
-  if (period === "week") {
-    const day  = now.getDay();
-    const diff = (day === 0 ? -6 : 1) - day;
-    const mon  = new Date(now); mon.setDate(now.getDate() + diff - 7);
-    const sun  = new Date(mon); sun.setDate(mon.getDate() + 6);
-    return { start: mon.toISOString().slice(0, 10), end: sun.toISOString().slice(0, 10) };
-  }
-  if (period === "month") {
-    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
-    const end   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
-    return { start, end };
-  }
-  return {
-    start: new Date(now.getFullYear() - 1, 0, 1).toISOString().slice(0, 10),
-    end:   new Date(now.getFullYear() - 1, 11, 31).toISOString().slice(0, 10),
-  };
-}
+type CitaReporte = {
+  id: string;
+  appointment_date: string;
+  appointment_time: string | null;
+  status: string;
+  services: { name: string; price?: number | string | null } | null;
+  appointment_services: { price: number | string | null }[] | null;
+  professionals: { name: string } | null;
+  clients: { id: string; created_at: string | null } | null;
+  pos_sales: VentaResumen[] | null;
+};
+type CitaPrevia = { id: string; status: string; pos_sales: VentaResumen[] | null };
+type VentaSuelta = VentaResumen & { id: string; created_at: string };
 
-// Generates day-by-day or month-by-month labels + slots depending on period
-function buildSlots(period: Period): string[] {
-  const now = new Date();
-  if (period === "week") {
-    const { start } = getRange("week");
-    const base = new Date(start);
-    const days = ["L", "M", "X", "J", "V", "S", "D"];
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base); d.setDate(base.getDate() + i);
-      return days[i];
+type Reporte = {
+  /** Rango para el que se calculó (para no mostrar datos de otro periodo). */
+  clave: string;
+  sede: string | null;
+  revenue: number;
+  prevRevenue: number;
+  apptCount: number;
+  prevCount: number;
+  avgTicket: number;
+  noShowRate: number;
+  newClients: number;
+  /** Completadas sin venta del periodo: por cobrar, no ingreso (D10 / DIN-05). */
+  sinCobroCount: number;
+  /** Su precio de lista (servicio + adicionales): lo que falta cobrar. */
+  sinCobroMonto: number;
+  slots: { label: string; value: number }[];
+  topServices: { name: string; count: number }[];
+  staffPerf: { name: string; count: number; revenue: number }[];
+  hourly: { label: string; value: number; hour: number }[];
+};
+
+const claveDe = (r: RangoNegocio) => `${r.periodo}|${r.desde}|${r.hasta}|${r.timeZone}`;
+
+async function cargarReporte(tenantId: string, r: RangoNegocio): Promise<Reporte> {
+  const prev = rangoAnterior(r);
+  const tz = r.timeZone;
+  // Misma sede que el Panel y que el web (DIN-12): antes Reportes sumaba todas
+  // las sedes y el mismo mes daba otra cifra que el Panel.
+  const loc = await getActiveLocationId(tenantId);
+
+  const [cur, prv, sueltas, sueltasPrev, sedes] = await Promise.all([
+    // Paginado: el servidor corta en 1000 filas y "Año" las pasaba (CAL-05).
+    traerTodo<CitaReporte>((d, h) => {
+      let q = supabase.from("appointments")
+        .select("id, appointment_date, appointment_time, status, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
+        .eq("tenant_id", tenantId)
+        .gte("appointment_date", r.desde)
+        .lte("appointment_date", r.hasta);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("appointment_date").order("id").range(d, h)
+        .overrideTypes<CitaReporte[], { merge: false }>();
+    }, { contexto: "No se pudieron cargar las citas del periodo" }),
+    traerTodo<CitaPrevia>((d, h) => {
+      let q = supabase.from("appointments")
+        .select("id, status, pos_sales(total)")
+        .eq("tenant_id", tenantId)
+        .gte("appointment_date", prev.desde)
+        .lte("appointment_date", prev.hasta);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("appointment_date").order("id").range(d, h)
+        .overrideTypes<CitaPrevia[], { merge: false }>();
+    }, { contexto: "No se pudieron cargar las citas del periodo anterior" }),
+    // Ventas de mostrador. Fronteras en la zona del negocio (lib/tz.ts).
+    traerTodo<VentaSuelta>((d, h) => {
+      let q = supabase.from("pos_sales").select("id, total, created_at")
+        .eq("tenant_id", tenantId).is("appointment_id", null)
+        .gte("created_at", r.desdeUTC).lte("created_at", r.hastaUTC);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("created_at").order("id").range(d, h);
+    }, { contexto: "No se pudieron cargar las ventas del periodo" }),
+    traerTodo<VentaSuelta>((d, h) => {
+      let q = supabase.from("pos_sales").select("id, total, created_at")
+        .eq("tenant_id", tenantId).is("appointment_id", null)
+        .gte("created_at", prev.desdeUTC).lte("created_at", prev.hastaUTC);
+      if (loc) q = q.eq("location_id", loc);
+      return q.order("created_at").order("id").range(d, h);
+    }, { contexto: "No se pudieron cargar las ventas del periodo anterior" }),
+    loc
+      ? supabase.from("locations").select("id, name").eq("tenant_id", tenantId).eq("is_active", true)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+  ]);
+  const listaSedes = revisar(sedes, "No se pudieron cargar las sedes") ?? [];
+  // Solo se nombra la sede si hay más de una: con una sola es el negocio entero.
+  const sede = listaSedes.length > 1 ? (listaSedes.find(x => x.id === loc)?.name ?? "Sede activa") : null;
+
+  // Memoria en la zona del negocio (la otra mitad del problema).
+  const ventas = sueltas
+    .map(v => ({ v, dia: diaLocalDe(v.created_at, tz) }))
+    .filter(x => x.dia >= r.desde && x.dia <= r.hasta);
+  const ventasPrev = sueltasPrev
+    .map(v => ({ v, dia: diaLocalDe(v.created_at, tz) }))
+    .filter(x => x.dia >= prev.desde && x.dia <= prev.hasta);
+
+  // Ingreso = solo lo cobrado (D10): citas con venta (valoradas por lo que se
+  // cobró, sin caer al precio de lista) + ventas de mostrador.
+  const cobradas     = cur.filter(estaCobrada);
+  const cobradasPrev = prv.filter(estaCobrada);
+  const revenue     = cobradas.reduce((s, a) => s + cobradoDe(a), 0) + ventas.reduce((s, x) => s + montoDe(x.v), 0);
+  const prevRevenue = cobradasPrev.reduce((s, a) => s + cobradoDe(a), 0) + ventasPrev.reduce((s, x) => s + montoDe(x.v), 0);
+
+  const activas = cur.filter(a => a.status !== "cancelled");
+  // Denominador de inasistencia: todas las citas del periodo menos las
+  // canceladas (mismo criterio que noShowRate en admin/page.tsx).
+  const noShows = cur.filter(a => a.status === "no_show").length;
+  // Ticket promedio = ingreso / cobros reales, sin los cobros en $0 (cortesías).
+  const paidCount = cobradas.filter(a => cobradoDe(a) > 0).length + ventas.length;
+
+  // Completadas sin venta: NO se valoran a precio de lista como ingreso (antes
+  // marcar "Completada" inventaba plata: DIN-05). Se cuentan aparte como por
+  // cobrar, para que no desaparezcan del reporte sin explicación.
+  const sinCobro = cur.filter(a => a.status === "completed" && !estaCobrada(a));
+
+  // Clientes nuevos: comparar el DÍA del negocio en que se creó el cliente.
+  // Comparar el timestamp con la fecha dejaba fuera el último día (TZ-05).
+  const creados = new Map<string, string>();
+  cur.forEach(a => { if (a.clients?.id && a.clients.created_at) creados.set(a.clients.id, a.clients.created_at); });
+  const newClients = Array.from(creados.values())
+    .map(c => diaLocalDe(c, tz))
+    .filter(d => d >= r.desde && d <= r.hasta).length;
+
+  // Ingresos por franja: días del rango (o meses del año) como cadenas, sin
+  // new Date(y, m, d).toISOString(), que en UTC+ corría todo un día (TZ-02).
+  let slots: { label: string; value: number }[];
+  if (r.periodo === "anio") {
+    const y = r.desde.slice(0, 4);
+    slots = MESES_CORTOS.map((label, i) => {
+      const mes = `${y}-${String(i + 1).padStart(2, "0")}`;
+      return {
+        label,
+        value: cobradas.filter(a => mesDe(a.appointment_date) === mes).reduce((s, a) => s + cobradoDe(a), 0)
+             + ventas.filter(x => mesDe(x.dia) === mes).reduce((s, x) => s + montoDe(x.v), 0),
+      };
     });
+  } else {
+    slots = listaDeDias(r.desde, r.hasta).map((dia, i) => ({
+      label: r.periodo === "semana" ? LETRAS_SEMANA[i] ?? "" : String(Number(dia.slice(8, 10))),
+      value: cobradas.filter(a => a.appointment_date === dia).reduce((s, a) => s + cobradoDe(a), 0)
+           + ventas.filter(x => x.dia === dia).reduce((s, x) => s + montoDe(x.v), 0),
+    }));
   }
-  if (period === "month") {
-    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    return Array.from({ length: days }, (_, i) => String(i + 1));
-  }
-  return ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-}
 
-function buildSlotDates(period: Period): string[] {
-  const { start } = getRange(period);
-  const now = new Date();
-  if (period === "week") {
-    const base = new Date(start);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base); d.setDate(base.getDate() + i);
-      return d.toISOString().slice(0, 10);
-    });
-  }
-  if (period === "month") {
-    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const base = new Date(now.getFullYear(), now.getMonth(), 1);
-    return Array.from({ length: days }, (_, i) => {
-      const d = new Date(base); d.setDate(base.getDate() + i);
-      return d.toISOString().slice(0, 10);
-    });
-  }
-  return Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), i, 1);
-    return d.toISOString().slice(0, 7);
+  const svcMap = new Map<string, number>();
+  activas.forEach(a => {
+    const sn = a.services?.name ?? "Sin servicio";
+    svcMap.set(sn, (svcMap.get(sn) ?? 0) + 1);
   });
+  const topServices = Array.from(svcMap.entries())
+    .sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([name, count]) => ({ name, count }));
+
+  const staffMap = new Map<string, { count: number; revenue: number }>();
+  cobradas.forEach(a => {
+    const sn = a.professionals?.name ?? "Sin profesional";
+    const p2 = staffMap.get(sn) ?? { count: 0, revenue: 0 };
+    staffMap.set(sn, { count: p2.count + 1, revenue: p2.revenue + cobradoDe(a) });
+  });
+  const staffPerf = Array.from(staffMap.entries())
+    .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)
+    .map(([name, v]) => ({ name, ...v }));
+
+  // Horas: 7–19 h ampliado con las que tengan citas (antes se recortaba y la
+  // hora pico de las 20 h no tenía barra: TZ-09).
+  const horas = activas.map(a => horaDe(a.appointment_time));
+  const hourly = rangoDeHoras(horas, 7, 19).map(h => ({
+    hour: h,
+    label: `${h}h`,
+    value: horas.filter(x => x === h).length,
+  }));
+
+  return {
+    clave: claveDe(r),
+    sede,
+    revenue,
+    prevRevenue,
+    apptCount: activas.length,
+    prevCount: prv.filter(a => a.status !== "cancelled").length,
+    avgTicket: paidCount > 0 ? revenue / paidCount : 0,
+    noShowRate: activas.length > 0 ? (noShows / activas.length) * 100 : 0,
+    newClients,
+    sinCobroCount: sinCobro.length,
+    sinCobroMonto: sinCobro.reduce((s, a) => s + precioDeLista(a), 0),
+    slots,
+    topServices,
+    staffPerf,
+    hourly,
+  };
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function KpiCard({ label, value, sub, icon, color, trend, delay }: {
-  label: string; value: string; sub?: string; icon: IoniconName;
-  color: string; trend?: "up" | "down" | "neutral"; delay: number;
+// ─── KPI card (patrón MetricCard del web) ─────────────────────────────────────
+function KpiCard({ label, raw, fmt, sub, icon, trend, trendVal, alert, delay }: {
+  label: string; raw: number; fmt: (n: number) => string;
+  sub?: string; icon: IoniconName;
+  trend?: "up" | "down" | "neutral"; trendVal?: string;
+  alert?: boolean; delay: number;
 }) {
   const { t } = useTheme();
+  const v = useCountUp(raw);
   return (
-    <Animated.View entering={FadeInDown.delay(delay).duration(350)} style={[kpi.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-      <View style={[kpi.iconBox, { backgroundColor: color + "18" }]}>
-        <Ionicons name={icon} size={18} color={color} />
+    <Animated.View
+      entering={FadeInDown.delay(delay).duration(350)}
+      style={[CardStyle.base, kpi.card, { backgroundColor: t.cardSolid, borderColor: alert ? "rgba(251,15,5,0.32)" : t.line }]}
+    >
+      <View style={kpi.rowTop}>
+        <MonoTag>{label}</MonoTag>
+        <Ionicons name={icon} size={14} color={alert ? Colors.red : t.subtle} />
       </View>
-      <Text style={[kpi.value, { color }]}>{value}</Text>
-      <Text style={[kpi.label, { color: t.muted }]}>{label}</Text>
-      {(sub || trend) && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-          {trend && trend !== "neutral" && (
-            <Ionicons
-              name={trend === "up" ? "trending-up-outline" : "trending-down-outline"}
-              size={12}
-              color={trend === "up" ? Colors.success : Colors.red}
-            />
-          )}
-          {sub && <Text style={[kpi.sub, trend === "up" && { color: Colors.success }, trend === "down" && { color: Colors.red }]}>{sub}</Text>}
+      <Text style={[kpi.value, { color: alert ? "#dc2626" : t.ink }]} numberOfLines={1} adjustsFontSizeToFit>
+        {fmt(v)}
+      </Text>
+      {(trendVal || sub) ? (
+        <View style={kpi.rowSub}>
+          {trendVal && trend ? <TrendChip trend={trend} label={trendVal} /> : null}
+          {sub ? <Text style={[kpi.sub, { color: t.subtle }]} numberOfLines={1}>{sub}</Text> : null}
         </View>
-      )}
+      ) : null}
     </Animated.View>
   );
 }
 
 const kpi = StyleSheet.create({
-  card:    { flex: 1, backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14, alignItems: "center", gap: 4 },
-  iconBox: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center", marginBottom: 4 },
-  value:   { fontSize: 20, fontFamily: "SpaceGrotesk_700Bold", letterSpacing: -0.5 },
-  label:   { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted, textAlign: "center" },
-  sub:     { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle },
-});
-
-// Native bar chart
-function BarChart({ data, labels, color = Colors.red }: {
-  data: number[]; labels: string[]; color?: string;
-}) {
-  const max = Math.max(...data, 1);
-  const showEvery = data.length > 14 ? Math.ceil(data.length / 7) : 1;
-  return (
-    <View style={bc.wrap}>
-      <View style={bc.barsRow}>
-        {data.map((v, i) => (
-          <View key={i} style={bc.barCol}>
-            <View style={bc.barTrack}>
-              <View style={[bc.bar, {
-                height: `${Math.max((v / max) * 100, v > 0 ? 4 : 0)}%`,
-                backgroundColor: v === 0 ? Colors.border : color,
-              }]} />
-            </View>
-            {i % showEvery === 0 && (
-              <Text style={bc.barLabel}>{labels[i]}</Text>
-            )}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-const bc = StyleSheet.create({
-  wrap:     { paddingTop: 8, paddingBottom: 4 },
-  barsRow:  { flexDirection: "row", alignItems: "flex-end", height: 80, gap: 3 },
-  barCol:   { flex: 1, alignItems: "center", justifyContent: "flex-end" },
-  barTrack: { width: "100%", height: "100%", justifyContent: "flex-end" },
-  bar:      { width: "100%", borderRadius: 3, minHeight: 0 },
-  barLabel: { fontSize: 8, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.subtle, marginTop: 4, textAlign: "center" },
-});
-
-// Horizontal bar row for rankings
-function RankRow({ label, value, total, color, rank, delay }: {
-  label: string; value: number; total: number; color: string; rank: number; delay: number;
-}) {
-  const pctW = total > 0 ? (value / total) * 100 : 0;
-  return (
-    <Animated.View entering={FadeInRight.delay(delay).duration(320)} style={rk.row}>
-      <View style={[rk.rankBadge, { backgroundColor: color + "14" }]}>
-        <Text style={[rk.rankNum, { color }]}>#{rank}</Text>
-      </View>
-      <View style={{ flex: 1, gap: 4 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={rk.label} numberOfLines={1}>{label}</Text>
-          <Text style={[rk.value, { color }]}>{value}</Text>
-        </View>
-        <View style={rk.track}>
-          <View style={[rk.fill, { width: `${pctW}%`, backgroundColor: color }]} />
-        </View>
-      </View>
-    </Animated.View>
-  );
-}
-
-const rk = StyleSheet.create({
-  row:       { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
-  rankBadge: { width: 30, height: 30, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  rankNum:   { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold" },
-  label:     { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text, flex: 1 },
-  value:     { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold" },
-  track:     { height: 4, backgroundColor: Colors.border, borderRadius: 2, overflow: "hidden" },
-  fill:      { height: "100%", borderRadius: 2 },
+  card:   { flex: 1, padding: 13 },
+  rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 6 },
+  rowSub: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 8, flexWrap: "wrap" },
+  value:  { fontSize: 19, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 9 },
+  sub:    { fontSize: 10.5, fontFamily: Fonts.regular },
 });
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
@@ -213,324 +268,208 @@ const rk = StyleSheet.create({
 export default function ReportsScreen() {
   const router = useRouter();
   const { t } = useTheme();
-  const [period, setPeriod] = useState<Period>("month");
   const { tenantId } = useAuth();
-  const [loading, setLoading]   = useState(true);
+  const { timezone, ready } = useTenant();
+  const guard = useGuardRespuestas();
+  const [period, setPeriod] = useState<Period>("mes");
+  // Día de referencia del periodo que se mira. null = el periodo actual, así
+  // la pantalla sigue a "hoy" si cambia el día (o la semana) con la app abierta.
+  const [ref, setRef] = useState<string | null>(null);
+  const [datos, setDatos] = useState<Reporte | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // KPIs
-  const [revenue, setRevenue]         = useState(0);
-  const [prevRevenue, setPrevRevenue] = useState(0);
-  const [apptCount, setApptCount]     = useState(0);
-  const [prevCount, setPrevCount]     = useState(0);
-  const [avgTicket, setAvgTicket]     = useState(0);
-  const [noShowRate, setNoShowRate]   = useState(0);
-  const [newClients, setNewClients]   = useState(0);
-
-  // Charts
-  const [revenueSlots, setRevenueSlots] = useState<number[]>([]);
-  const [slotLabels, setSlotLabels]     = useState<string[]>([]);
-
-  // Rankings
-  const [topServices, setTopServices] = useState<{ name: string; count: number }[]>([]);
-  const [staffPerf, setStaffPerf]     = useState<{ name: string; count: number; revenue: number }[]>([]);
-  const [hourly, setHourly]           = useState<{ hour: number; count: number }[]>([]);
-
-  useEffect(() => {
+  const { hoy, recargar } = useRecarga(async () => {
     if (!tenantId) return;
-    let cancelled = false;
-    load().then(() => { if (cancelled) return; });
-    return () => { cancelled = true; };
-  }, [tenantId, period]);
+    const turno = guard.nuevo();
+    try {
+      const r = rangoDePeriodo(period, timezone, ref ?? hoyNegocio(timezone));
+      const rep = await cargarReporte(tenantId, r);
+      if (!turno.vigente()) return;
+      setDatos(rep);
+      setError(null);
+    } catch (e) {
+      if (turno.vigente()) setError(e);
+    }
+  }, [tenantId, timezone, period, ref], { timeZone: timezone, habilitado: !!tenantId && ready });
 
-  const load = useCallback(async () => {
-    if (!tenantId) return;
-    setLoading(true);
-    const { start, end }         = getRange(period);
-    const { start: ps, end: pe } = getPrevRange(period);
+  const r = rangoDePeriodo(period, timezone, ref ?? hoy);
+  const actual = rangoIncluyeHoy(r);
+  const d = datos && datos.clave === claveDe(r) ? datos : null;
 
-    const [curRes, prevRes, posRes, prevPosRes] = await Promise.all([
-      supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, services(name, price), professionals(name), clients(id, created_at)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", start)
-        .lte("appointment_date", end),
-      supabase.from("appointments")
-        .select("id, status, services(price)")
-        .eq("tenant_id", tenantId)
-        .gte("appointment_date", ps)
-        .lte("appointment_date", pe),
-      supabase.from("pos_sales").select("total, created_at").eq("tenant_id", tenantId)
-        .gte("created_at", start).lte("created_at", end + "T23:59:59").limit(5000),
-      supabase.from("pos_sales").select("total").eq("tenant_id", tenantId)
-        .gte("created_at", ps).lte("created_at", pe + "T23:59:59").limit(5000),
-    ]);
+  const cambiarPeriodo = (p: Period) => { setPeriod(p); setRef(null); };
+  const mover = (pasos: number) => {
+    const nueva = moverReferencia(period, r.desde, pasos);
+    // Volver al periodo de hoy lo deja en "actual" (sigue al cambio de día).
+    setRef(rangoIncluyeHoy(rangoDePeriodo(period, timezone, nueva)) ? null : nueva);
+  };
 
-    const cur: any[]  = curRes.data  ?? [];
-    const prev: any[] = prevRes.data ?? [];
-    const posData: any[] = posRes.data ?? [];
-    const prevPosData: any[] = prevPosRes.data ?? [];
+  const onRefresh = async () => { setRefreshing(true); await recargar(); setRefreshing(false); };
 
-    // KPIs
-    const done  = cur.filter(a => a.status === "completed" || a.status === "confirmed");
-    const apptRev  = done.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
-    const posRev   = posData.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    const rev      = apptRev + posRev;
-    const prevDone = prev.filter(a => a.status === "completed" || a.status === "confirmed");
-    const prevApptRev = prevDone.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0);
-    const prevPosRev  = prevPosData.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    const prevRev  = prevApptRev + prevPosRev;
-    const noShows  = cur.filter(a => a.status === "no_show").length;
-    const totalFinished = done.length + noShows;
+  const revTrend   = d && d.prevRevenue > 0 ? ((d.revenue - d.prevRevenue) / d.prevRevenue) * 100 : 0;
+  const countTrend = d && d.prevCount   > 0 ? ((d.apptCount - d.prevCount) / d.prevCount) * 100   : 0;
+  const peak = d ? d.hourly.reduce((a, b) => (b.value > a.value ? b : a), { hour: 0, value: 0, label: "" }) : null;
 
-    setRevenue(rev);
-    setPrevRevenue(prevRev);
-    setApptCount(cur.filter(a => a.status !== "cancelled").length);
-    setPrevCount(prev.filter(a => a.status !== "cancelled").length);
-    setAvgTicket(done.length > 0 ? rev / done.length : 0);
-    setNoShowRate(totalFinished > 0 ? (noShows / totalFinished) * 100 : 0);
-
-    // New clients (created within the range)
-    const uniqueClients = new Map<string, string>();
-    cur.forEach((a: any) => { if (a.clients?.id) uniqueClients.set(a.clients.id, a.clients.created_at); });
-    const newC = Array.from(uniqueClients.values()).filter(d => d >= start && d <= end).length;
-    setNewClients(newC);
-
-    // Revenue by slot
-    const dates = buildSlotDates(period);
-    const labels = buildSlots(period);
-    const slotRev = dates.map(slotKey => {
-      const apptMatches = done.filter((a: any) => {
-        if (period === "year") return a.appointment_date?.startsWith(slotKey);
-        return a.appointment_date === slotKey;
-      });
-      const posMatches = posData.filter((p: any) => {
-        const d = (p.created_at ?? "").slice(0, period === "year" ? 7 : 10);
-        return d === slotKey;
-      });
-      return apptMatches.reduce((s: number, a: any) => s + (a.services?.price ?? 0), 0)
-           + posMatches.reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
-    });
-    setRevenueSlots(slotRev);
-    setSlotLabels(labels);
-
-    // Top services
-    const svcMap = new Map<string, number>();
-    cur.filter(a => a.status !== "cancelled").forEach((a: any) => {
-      const sn = a.services?.name ?? "Sin servicio";
-      svcMap.set(sn, (svcMap.get(sn) ?? 0) + 1);
-    });
-    const top5 = Array.from(svcMap.entries())
-      .sort((a, b) => b[1] - a[1]).slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
-    setTopServices(top5);
-
-    // Staff performance
-    const staffMap = new Map<string, { count: number; revenue: number }>();
-    done.forEach((a: any) => {
-      const sn = (a.professionals as any)?.name ?? "Sin profesional";
-      const prev2 = staffMap.get(sn) ?? { count: 0, revenue: 0 };
-      staffMap.set(sn, { count: prev2.count + 1, revenue: prev2.revenue + (a.services?.price ?? 0) });
-    });
-    const sp = Array.from(staffMap.entries())
-      .sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5)
-      .map(([name, v]) => ({ name, ...v }));
-    setStaffPerf(sp);
-
-    // Hourly distribution
-    const hourMap = new Map<number, number>();
-    cur.filter(a => a.status !== "cancelled").forEach((a: any) => {
-      const h = parseInt((a.appointment_time ?? "00:00").slice(0, 2));
-      hourMap.set(h, (hourMap.get(h) ?? 0) + 1);
-    });
-    const hrs = Array.from(hourMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([hour, count]) => ({ hour, count }));
-    setHourly(hrs);
-
-    setLoading(false);
-    setRefreshing(false);
-  }, [tenantId, period]);
-
-  const onRefresh = () => { setRefreshing(true); load(); };
-
-  const revTrend   = prevRevenue > 0 ? ((revenue - prevRevenue) / prevRevenue) * 100 : 0;
-  const countTrend = prevCount   > 0 ? ((apptCount - prevCount) / prevCount) * 100   : 0;
-
-  const topSvcTotal = topServices.reduce((s, x) => s + x.count, 0);
-  const topStaffRev = staffPerf[0]?.revenue ?? 1;
-
-  const hourlyMax = Math.max(...hourly.map(h => h.count), 1);
-  const peakHour  = hourly.reduce((a, b) => b.count > a.count ? b : a, { hour: 0, count: 0 });
-
-  const periodLabel = period === "week" ? "esta semana" : period === "month" ? "este mes" : "este año";
+  const periodLabel = actual
+    ? (period === "semana" ? "esta semana" : period === "mes" ? "este mes" : "este año")
+    : etiquetaRango(r);
+  const periodTag = period === "semana" ? "Semana" : period === "mes" ? "Mes" : "Año";
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="white" />
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
+      <ScreenHeader
+        crumb="Dinero"
+        title="Reportes"
+        subtitle={d?.sede ? `Sede ${d.sede} · solo lo cobrado` : "Análisis de rendimiento · solo lo cobrado"}
+        onBack={() => router.back()}
+      />
+
+      <View style={{ paddingHorizontal: 20, paddingTop: 12, gap: 10 }}>
+        <SegmentedControl<Period>
+          options={[
+            { value: "semana", label: "Semana" },
+            { value: "mes", label: "Mes" },
+            { value: "anio", label: "Año" },
+          ]}
+          value={period}
+          onChange={cambiarPeriodo}
+        />
+        <View style={s.navRow}>
+          <IconButton icon="chevron-back" label="Periodo anterior" onPress={() => mover(-1)} />
+          <TouchableOpacity
+            style={{ flex: 1, alignItems: "center" }}
+            onPress={() => setRef(null)}
+            disabled={actual}
+            accessibilityRole="button"
+            accessibilityLabel={actual ? etiquetaRango(r) : `${etiquetaRango(r)}. Volver al periodo actual`}
+          >
+            <Text style={[s.navLabel, { color: t.ink }]}>{etiquetaRango(r)}</Text>
+            {!actual ? <Text style={[s.navHint, { color: Colors.red }]}>Volver a hoy</Text> : null}
           </TouchableOpacity>
-          <View>
-            <Text style={s.headerTitle}>Reportes</Text>
-            <Text style={s.headerSub}>Análisis de rendimiento</Text>
-          </View>
+          <IconButton icon="chevron-forward" label="Periodo siguiente" onPress={() => mover(1)} disabled={actual} />
         </View>
+      </View>
 
-        {/* Period selector */}
-        <View style={s.periodRow}>
-          {(["week", "month", "year"] as Period[]).map(p => (
-            <TouchableOpacity
-              key={p}
-              style={[s.periodBtn, period === p && s.periodBtnActive]}
-              onPress={() => setPeriod(p)}
-            >
-              <Text style={[s.periodBtnTxt, period === p && s.periodBtnTxtActive]}>
-                {p === "week" ? "Semana" : p === "month" ? "Mes" : "Año"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </LinearGradient>
-
-      {loading && !refreshing ? (
+      {error && !d ? (
+        <ErrorState error={error} onRetry={recargar} />
+      ) : !d ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: 110 }}
+          contentContainerStyle={{ padding: 20, paddingTop: 12, paddingBottom: 110, gap: 14 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
         >
-          {/* KPI row 1 */}
-          <Text style={[s.sectionTitle, { color: t.subtle }]}>Resumen {periodLabel}</Text>
+          {error ? (
+            <TouchableOpacity
+              onPress={recargar}
+              activeOpacity={0.8}
+              style={[s.staleBanner, { backgroundColor: t.cardSolid, borderColor: "rgba(251,15,5,0.32)" }]}
+              accessibilityRole="button"
+              accessibilityLabel="No se pudo actualizar. Reintentar"
+            >
+              <Ionicons name="alert-circle-outline" size={16} color={Colors.red} />
+              <Text style={[s.staleText, { color: t.ink }]} numberOfLines={2}>No se pudo actualizar: {mensajeError(error)}</Text>
+              <Text style={s.staleRetry}>Reintentar</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* KPIs */}
           <View style={s.kpiRow}>
             <KpiCard
-              label="Ingresos" value={fmtMoney(revenue)} icon="cash-outline" color={Colors.red}
+              label="Ingresos" raw={d.revenue} fmt={fmtMoney} icon="cash-outline"
               trend={revTrend > 0 ? "up" : revTrend < 0 ? "down" : "neutral"}
-              sub={prevRevenue > 0 ? `${revTrend > 0 ? "+" : ""}${pct(revTrend)} vs anterior` : undefined}
+              trendVal={d.prevRevenue > 0 ? `${revTrend > 0 ? "+" : ""}${pct(revTrend)}` : undefined}
+              sub={d.prevRevenue > 0 ? "vs anterior" : undefined}
               delay={0}
             />
             <KpiCard
-              label="Citas" value={String(apptCount)} icon="calendar-outline" color={Colors.blue}
+              label="Citas" raw={d.apptCount} fmt={v => String(Math.round(v))} icon="calendar-outline"
               trend={countTrend > 0 ? "up" : countTrend < 0 ? "down" : "neutral"}
-              sub={prevCount > 0 ? `${countTrend > 0 ? "+" : ""}${pct(countTrend)} vs anterior` : undefined}
+              trendVal={d.prevCount > 0 ? `${countTrend > 0 ? "+" : ""}${pct(countTrend)}` : undefined}
+              sub={d.prevCount > 0 ? "vs anterior" : undefined}
               delay={60}
             />
           </View>
-
           <View style={s.kpiRow}>
-            <KpiCard label="Ticket promedio" value={fmtMoney(avgTicket)} icon="pricetag-outline" color="#f59e0b" delay={120} />
-            <KpiCard label="No asistió" value={pct(noShowRate)} icon="person-remove-outline" color={noShowRate > 15 ? Colors.red : Colors.muted} delay={180} />
-            <KpiCard label="Clientes nuevos" value={String(newClients)} icon="person-add-outline" color={Colors.success} delay={240} />
+            <KpiCard label="Ticket promedio" raw={d.avgTicket} fmt={fmtMoney} icon="pricetag-outline" delay={120} />
+            <KpiCard label="No asistió" raw={d.noShowRate} fmt={v => pct(v)} icon="person-remove-outline" alert={d.noShowRate > 15} delay={180} />
+            <KpiCard label="Nuevos" raw={d.newClients} fmt={v => String(Math.round(v))} icon="person-add-outline" delay={240} />
           </View>
 
-          {/* Revenue chart */}
-          {revenueSlots.some(v => v > 0) && (
-            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-              <View style={s.cardHeader}>
-                <View style={[s.cardIconBox, { backgroundColor: Colors.red + "14" }]}>
-                  <Ionicons name="bar-chart-outline" size={16} color={Colors.red} />
-                </View>
-                <Text style={[s.cardTitle, { color: t.text }]}>Ingresos por {period === "week" ? "día" : period === "month" ? "día" : "mes"}</Text>
-              </View>
-              <BarChart data={revenueSlots} labels={slotLabels} color={Colors.red} />
-              <View style={[s.chartFooter, { borderTopColor: t.border }]}>
-                <Text style={[s.chartFooterTxt, { color: t.muted }]}>Total: {fmtMoney(revenue)}</Text>
-                <Text style={[s.chartFooterTxt, { color: t.muted }]}>Prom/día: {fmtMoney(revenueSlots.filter(v => v > 0).reduce((a, b) => a + b, 0) / Math.max(revenueSlots.filter(v => v > 0).length, 1))}</Text>
-              </View>
-            </Animated.View>
-          )}
+          {d.sinCobroCount > 0 ? (
+            <View
+              style={[s.aviso, { backgroundColor: t.cardSolid, borderColor: "rgba(217,119,6,0.35)" }]}
+              accessible
+              accessibilityRole="text"
+            >
+              <Ionicons name="wallet-outline" size={16} color="#d97706" />
+              <Text style={[s.avisoText, { color: t.ink }]}>
+                {d.sinCobroCount} cita{d.sinCobroCount !== 1 ? "s" : ""} completada{d.sinCobroCount !== 1 ? "s" : ""} sin cobro
+                {d.sinCobroMonto > 0 ? ` · ${fmtMoney(d.sinCobroMonto)} por cobrar` : ""}. No suman en los ingresos hasta que se cobren.
+              </Text>
+            </View>
+          ) : null}
 
-          {/* Top services */}
-          {topServices.length > 0 && (
-            <Animated.View entering={FadeInDown.delay(360).duration(400)} style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-              <View style={s.cardHeader}>
-                <View style={[s.cardIconBox, { backgroundColor: "#8b5cf614" }]}>
-                  <Ionicons name="pricetags-outline" size={16} color="#8b5cf6" />
-                </View>
-                <Text style={[s.cardTitle, { color: t.text }]}>Top servicios</Text>
-              </View>
-              {topServices.map((svc, i) => (
-                <RankRow
-                  key={svc.name} rank={i + 1} label={svc.name} value={svc.count}
-                  total={topSvcTotal} color={["#8b5cf6", Colors.blue, Colors.success, "#f59e0b", Colors.red][i]}
-                  delay={i * 60}
-                />
-              ))}
-            </Animated.View>
-          )}
+          {/* Evolución de ingresos */}
+          <Card delay={280}>
+            <CardHead
+              title={period === "anio" ? "Ingresos por mes" : "Ingresos por día"}
+              sub={`Resumen ${periodLabel}`}
+              aside={periodTag}
+            />
+            <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 }}>
+              <AreaChart data={d.slots} fmt={fmtMoney} height={180} />
+            </View>
+          </Card>
 
-          {/* Staff performance */}
-          {staffPerf.length > 0 && (
-            <Animated.View entering={FadeInDown.delay(420).duration(400)} style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-              <View style={s.cardHeader}>
-                <View style={[s.cardIconBox, { backgroundColor: Colors.blue + "14" }]}>
-                  <Ionicons name="people-outline" size={16} color={Colors.blue} />
-                </View>
-                <Text style={[s.cardTitle, { color: t.text }]}>Rendimiento del equipo</Text>
-              </View>
-              {staffPerf.map((p, i) => (
-                <Animated.View key={p.name} entering={i < 10 ? FadeInRight.delay(i * 60).duration(320) : undefined} style={s.staffRow}>
-                  <View style={[s.staffAvatar, { backgroundColor: [Colors.red, Colors.blue, Colors.success, "#f59e0b", "#8b5cf6"][i] }]}>
-                    <Text style={s.staffAvatarTxt}>{p.name[0]}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.staffName, { color: t.text }]}>{p.name}</Text>
-                    <Text style={[s.staffSub, { color: t.muted }]}>{p.count} citas</Text>
-                  </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={[s.staffRevenue, { color: t.text }]}>{fmtMoney(p.revenue)}</Text>
-                    <View style={[s.staffTrack, { backgroundColor: t.border }]}>
-                      <View style={[s.staffFill, { width: `${(p.revenue / topStaffRev) * 100}%`, backgroundColor: [Colors.red, Colors.blue, Colors.success, "#f59e0b", "#8b5cf6"][i] }]} />
-                    </View>
-                  </View>
-                </Animated.View>
-              ))}
-            </Animated.View>
-          )}
+          {/* Top servicios */}
+          <Card delay={330}>
+            <CardHead title="Top 5 servicios" sub="Los más solicitados del período" />
+            <View style={{ padding: 18 }}>
+              <RankBars
+                items={d.topServices.map(svc => ({
+                  label: svc.name, value: svc.count,
+                  sub: d.apptCount > 0 ? `${((svc.count / d.apptCount) * 100).toFixed(0)}%` : undefined,
+                }))}
+                fmt={v => String(Math.round(v))}
+              />
+            </View>
+          </Card>
 
-          {/* Hourly distribution */}
-          {hourly.length > 0 && (
-            <Animated.View entering={FadeInDown.delay(480).duration(400)} style={[s.card, Shadow.sm, { backgroundColor: t.bgAlt }]}>
-              <View style={s.cardHeader}>
-                <View style={[s.cardIconBox, { backgroundColor: Colors.success + "14" }]}>
-                  <Ionicons name="time-outline" size={16} color={Colors.success} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.cardTitle, { color: t.text }]}>Horarios más activos</Text>
-                  {peakHour.count > 0 && (
-                    <Text style={s.cardSub}>Pico: {peakHour.hour}:00 – {peakHour.hour + 1}:00</Text>
-                  )}
-                </View>
-              </View>
-              <View style={s.hourGrid}>
-                {Array.from({ length: 13 }, (_, i) => i + 7).map(h => {
-                  const slot = hourly.find(x => x.hour === h);
-                  const cnt  = slot?.count ?? 0;
-                  const height = cnt > 0 ? Math.max((cnt / hourlyMax) * 60, 6) : 2;
-                  const active = h === peakHour.hour && cnt > 0;
-                  return (
-                    <View key={h} style={s.hourCol}>
-                      <View style={[s.hourBar, { height, backgroundColor: active ? Colors.success : cnt > 0 ? Colors.success + "60" : Colors.border }]} />
-                      <Text style={[s.hourLabel, active && { color: Colors.success, fontFamily: "SpaceGrotesk_700Bold" }]}>{h}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </Animated.View>
-          )}
+          {/* Rendimiento del equipo */}
+          <Card delay={380}>
+            <CardHead title="Rendimiento del equipo" sub="Por lo cobrado en el período" />
+            <View style={{ padding: 18 }}>
+              <RankBars
+                items={d.staffPerf.map(p => ({
+                  label: p.name, value: p.revenue,
+                  sub: `${p.count} cita${p.count !== 1 ? "s" : ""}`,
+                }))}
+                fmt={fmtMoney}
+              />
+            </View>
+          </Card>
+
+          {/* Horarios más activos */}
+          <Card delay={430}>
+            <CardHead
+              title="Horarios más activos"
+              sub={peak && peak.value > 0 ? `Pico: ${peak.hour}:00 – ${peak.hour + 1}:00` : "Distribución de la agenda"}
+            />
+            <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 14 }}>
+              {d.hourly.some(h => h.value > 0)
+                ? <Bars data={d.hourly} accent="green" height={120} />
+                : <ChartEmpty msg={`Sin citas ${periodLabel}.`} />}
+            </View>
+          </Card>
 
           {/* Empty state */}
-          {!loading && revenue === 0 && apptCount === 0 && (
-            <View style={s.emptyBox}>
-              <Ionicons name="bar-chart-outline" size={40} color={Colors.subtle} />
-              <Text style={[s.emptyTitle, { color: t.text }]}>Sin datos {periodLabel}</Text>
-              <Text style={[s.emptyTxt, { color: t.muted }]}>Los reportes aparecerán cuando haya citas registradas.</Text>
-            </View>
+          {d.revenue === 0 && d.apptCount === 0 && (
+            <Card delay={0}>
+              <ChartEmpty msg={`Sin datos ${periodLabel}. Los reportes aparecerán cuando haya citas registradas.`} />
+            </Card>
           )}
         </ScrollView>
       )}
@@ -538,48 +477,14 @@ export default function ReportsScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const s = StyleSheet.create({
-  header:      { paddingTop: 16, paddingHorizontal: 24, paddingBottom: 16 },
-  headerRow:   { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 14 },
-  backBtn:     { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.5 },
-  headerSub:   { fontSize: 13, color: "rgba(255,255,255,.75)", fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
-
-  periodRow:       { flexDirection: "row", gap: 8, paddingBottom: 4 },
-  periodBtn:       { flex: 1, paddingVertical: 8, borderRadius: Radius.md, alignItems: "center", backgroundColor: "rgba(255,255,255,.15)" },
-  periodBtnActive: { backgroundColor: "white" },
-  periodBtnTxt:    { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.8)" },
-  periodBtnTxtActive: { color: Colors.red, fontFamily: "SpaceGrotesk_700Bold" },
-
-  sectionTitle: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
-  kpiRow:       { flexDirection: "row", gap: 10, marginBottom: 10 },
-
-  card:       { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 16, marginBottom: 14 },
-  cardHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 },
-  cardIconBox:{ width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  cardTitle:  { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
-  cardSub:    { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, marginTop: 1 },
-
-  chartFooter:    { flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.border },
-  chartFooterTxt: { fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted },
-
-  staffRow:       { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
-  staffAvatar:    { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
-  staffAvatarTxt: { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  staffName:      { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.text },
-  staffSub:       { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted },
-  staffRevenue:   { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 4 },
-  staffTrack:     { width: 80, height: 3, backgroundColor: Colors.border, borderRadius: 2, overflow: "hidden" },
-  staffFill:      { height: "100%", borderRadius: 2 },
-
-  hourGrid:  { flexDirection: "row", alignItems: "flex-end", gap: 2, height: 80 },
-  hourCol:   { flex: 1, alignItems: "center", justifyContent: "flex-end", gap: 4 },
-  hourBar:   { width: "100%", borderRadius: 2, minHeight: 2 },
-  hourLabel: { fontSize: 7, fontFamily: "SpaceGrotesk_400Regular", color: Colors.subtle },
-
-  emptyBox:  { alignItems: "center", justifyContent: "center", paddingVertical: 60, gap: 12 },
-  emptyTitle:{ fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
-  emptyTxt:  { fontSize: 13, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, textAlign: "center" },
+  kpiRow:   { flexDirection: "row", gap: 10 },
+  navRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
+  navLabel: { fontSize: 14, fontFamily: Fonts.semibold, textTransform: "capitalize" },
+  navHint:  { fontSize: 11, fontFamily: Fonts.semibold, marginTop: 1 },
+  staleBanner: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  staleText:   { flex: 1, fontSize: 12, fontFamily: Fonts.regular },
+  staleRetry:  { fontSize: 12, fontFamily: Fonts.bold, color: Colors.red },
+  aviso:       { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  avisoText:   { flex: 1, fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17 },
 });

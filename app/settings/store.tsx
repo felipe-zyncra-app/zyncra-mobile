@@ -1,8 +1,8 @@
-﻿import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Share, Image, Pressable,
+  TextInput, KeyboardAvoidingView, ActivityIndicator,
+  Share, Image, Pressable, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -12,12 +12,19 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
-import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
+import { useTenant } from "@/lib/tenant";
+import { Colors, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { Config } from "@/lib/config";
-import GradientHeader from "@/components/GradientHeader";
+import { ScreenHeader } from "@/components/ui";
 import BottomSaveBar from "@/components/BottomSaveBar";
 import FormField from "@/components/FormField";
+import ErrorState from "@/components/ErrorState";
+import { useGuardRespuestas } from "@/lib/useRecarga";
+import { ErrorDB, exigirFilas, mensajeError, revisar } from "@/lib/db";
+import { telefonoE164 } from "@/lib/format";
+import { validarTelefono } from "@/lib/contacto";
+import { paisDeLocale } from "@/lib/cuenta";
 
 const COLOR_PRESETS = [
   "#fb0f05","#ef4444","#f97316","#f59e0b",
@@ -25,8 +32,11 @@ const COLOR_PRESETS = [
   "#8b5cf6","#4f46e5","#ec4899","#111118",
 ];
 
+const BIENVENIDA_POR_DEFECTO = "Reserva tu cita fácil y rápido";
+
 // ── Color picker ──────────────────────────────────────────────────────────────
 function ColorPicker({ label, value, onChange }: { label: string; value: string; onChange: (c: string) => void }) {
+  const { t } = useTheme();
   const [hex, setHex] = useState(value);
 
   useEffect(() => { setHex(value); }, [value]);
@@ -39,22 +49,33 @@ function ColorPicker({ label, value, onChange }: { label: string; value: string;
 
   return (
     <View style={{ marginBottom: 22 }}>
-      <Text style={cp.label}>{label}</Text>
+      <Text style={[cp.label, { color: t.muted }]}>{label}</Text>
       <View style={cp.swatches}>
         {COLOR_PRESETS.map(c => (
-          <Pressable key={c} onPress={() => { onChange(c); setHex(c); }} style={[cp.swatch, { backgroundColor: c }, value === c && cp.swatchActive]} />
+          <Pressable
+            key={c}
+            onPress={() => { onChange(c); setHex(c); }}
+            style={[cp.swatch, { backgroundColor: c }, value === c && [cp.swatchActive, { borderColor: t.text }]]}
+            // 30 pt + 4 por lado: cubre el espacio entre muestras sin pisar la vecina.
+            hitSlop={4}
+            accessibilityRole="radio"
+            accessibilityLabel={`${label} ${c}`}
+            accessibilityState={{ checked: value === c }}
+          />
         ))}
       </View>
       <View style={cp.hexRow}>
-        <View style={[cp.preview, { backgroundColor: value }]} />
+        <View style={[cp.preview, { backgroundColor: value, borderColor: t.line }]} />
         <TextInput
-          style={cp.hexInput}
+          style={[cp.hexInput, { backgroundColor: t.inputBg, borderColor: t.inputBorder, color: t.text }]}
           value={hex}
           onChangeText={applyHex}
           placeholder="#000000"
-          placeholderTextColor={Colors.subtle}
+          placeholderTextColor={t.subtle}
           autoCapitalize="none"
+          autoCorrect={false}
           maxLength={7}
+          accessibilityLabel={`${label} en hexadecimal`}
         />
       </View>
     </View>
@@ -62,24 +83,25 @@ function ColorPicker({ label, value, onChange }: { label: string; value: string;
 }
 
 const cp = StyleSheet.create({
-  label:       { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 },
+  label:       { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 },
   swatches:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   swatch:      { width: 30, height: 30, borderRadius: 8, borderWidth: 1.5, borderColor: "transparent" },
-  swatchActive:{ borderColor: Colors.text, transform: [{ scale: 1.15 }] },
+  swatchActive:{ transform: [{ scale: 1.15 }] },
   hexRow:      { flexDirection: "row", alignItems: "center", gap: 10 },
-  preview:     { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: Colors.border },
-  hexInput:    { flex: 1, backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, fontFamily: "SpaceGrotesk_400Regular", color: Colors.text },
+  preview:     { width: 36, height: 36, borderRadius: 10, borderWidth: 1 },
+  hexInput:    { flex: 1, borderWidth: 1.5, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, fontFamily: "SpaceGrotesk_400Regular" },
 });
 
 // ── Section card ──────────────────────────────────────────────────────────────
-function Section({ title, icon, color, children }: { title: string; icon: string; color: string; children: React.ReactNode }) {
+function Section({ title, icon, color, children }: { title: string; icon: React.ComponentProps<typeof Ionicons>["name"]; color: string; children: React.ReactNode }) {
+  const { t } = useTheme();
   return (
-    <Animated.View entering={FadeInDown.duration(400)} style={[sc.card, Shadow.sm]}>
-      <View style={sc.header}>
+    <Animated.View entering={FadeInDown.duration(400)} style={[sc.card, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
+      <View style={[sc.header, { borderBottomColor: t.line }]}>
         <View style={[sc.iconBox, { backgroundColor: color + "15" }]}>
-          <Ionicons name={icon as any} size={17} color={color} />
+          <Ionicons name={icon} size={17} color={color} />
         </View>
-        <Text style={sc.title}>{title}</Text>
+        <Text style={[sc.title, { color: t.text }]} accessibilityRole="header">{title}</Text>
       </View>
       <View style={sc.body}>{children}</View>
     </Animated.View>
@@ -87,151 +109,239 @@ function Section({ title, icon, color, children }: { title: string; icon: string
 }
 
 const sc = StyleSheet.create({
-  card:    { backgroundColor: Colors.white, borderRadius: 18, marginBottom: 16, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
-  header:  { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  card:    { borderRadius: 18, marginBottom: 16, overflow: "hidden", borderWidth: 1 },
+  header:  { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1 },
   iconBox: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  title:   { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text },
+  title:   { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold" },
   body:    { padding: 18 },
 });
+
+type Subida = { ok: true; url: string } | { ok: false; mensaje: string };
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function StoreScreen() {
   const router = useRouter();
   const { tenantId } = useAuth();
   const { t } = useTheme();
+  const { patch: patchTenant, locale } = useTenant();
+  const guard = useGuardRespuestas();
+  const pais = paisDeLocale(locale);
+  // En un ref: que llegue el locale no debe recargar (y pisar) el formulario.
+  const paisRef = useRef(pais);
+  paisRef.current = pais;
 
   const [slug,       setSlug]       = useState<string>("");
   const [loading,    setLoading]    = useState(true);
+  const [cargaError, setCargaError] = useState<unknown>(null);
   const [saving,     setSaving]     = useState(false);
   const [saved,      setSaved]      = useState(false);
-  const [linkCopied, setLinkCopied] = useState(false);
 
   // Tenants fields
   const [bizName,  setBizName]  = useState("");
   const [phone,    setPhone]    = useState("");
+  const [phoneInicial, setPhoneInicial] = useState("");
+  const [tenantTeniaTel, setTenantTeniaTel] = useState(false);
   const [address,  setAddress]  = useState("");
+  const [errPhone, setErrPhone] = useState<string | null>(null);
 
   // Branding fields
   const [logoUrl,      setLogoUrl]      = useState<string | null>(null);
   const [logoUri,      setLogoUri]      = useState<string | null>(null);  // local pick
-  const [welcome,      setWelcome]      = useState("Reserva tu cita fácil y rápido");
+  const [welcome,      setWelcome]      = useState(BIENVENIDA_POR_DEFECTO);
   const [primaryColor, setPrimaryColor] = useState(Colors.red);
   const [secondColor,  setSecondColor]  = useState(Colors.blue);
 
   const bookingLink = slug ? `${Config.urls.booking}${slug}` : "";
 
+  /**
+   * Carga una vez al abrir (y con "Reintentar"). No se recarga al volver a
+   * primer plano: elegir el logo abre la galería y al volver pisaría lo que
+   * el dueño ya había escrito.
+   *
+   * Si la lectura de branding falla NO se muestra el formulario: antes se
+   * quedaban los valores por defecto y el siguiente guardado borraba el logo
+   * y los colores de la página de reservas (AJU-15).
+   */
   const load = useCallback(async () => {
     if (!tenantId) return;
+    const turno = guard.nuevo();
     setLoading(true);
-
-    const { data: tenant } = await supabase
-      .from("tenants")
-      .select("name, phone, address, slug")
-      .eq("id", tenantId)
-      .single();
-
-    if (tenant) {
-      setSlug(tenant.slug ?? "");
-      setBizName(tenant.name ?? "");
-      setPhone(tenant.phone ?? "");
-      setAddress(tenant.address ?? "");
-
-      const { data: brand } = await supabase
+    try {
+      const tenant = revisar(
+        await supabase.from("tenants").select("name, phone, address, slug").eq("id", tenantId).single(),
+        "No se pudieron cargar los datos de tu tienda",
+      ) as { name: string | null; phone: string | null; address: string | null; slug: string | null };
+      const brandRes = await supabase
         .from("branding")
         .select("logo_url, welcome_message, primary_color, secondary_color")
         .eq("tenant_id", tenantId)
         .maybeSingle();
+      if (brandRes.error) throw new ErrorDB(brandRes.error, "No se pudo cargar la personalización de tu tienda");
+      if (!turno.vigente()) return;
 
-      if (brand) {
-        setLogoUrl(brand.logo_url ?? null);
-        setWelcome(brand.welcome_message ?? "Reserva tu cita fácil y rápido");
-        setPrimaryColor(brand.primary_color ?? Colors.red);
-        setSecondColor(brand.secondary_color ?? Colors.blue);
-      }
+      setSlug(tenant.slug ?? "");
+      setBizName(tenant.name ?? "");
+      const tel = tenant.phone ? (telefonoE164(tenant.phone, { pais: paisRef.current }) ?? tenant.phone) : "";
+      setPhone(tel);
+      setPhoneInicial(tel);
+      setTenantTeniaTel(!!tenant.phone);
+      setAddress(tenant.address ?? "");
+
+      const brand = brandRes.data;
+      // Sin fila de branding (negocio nuevo) se muestran los valores por defecto:
+      // eso sí es correcto, porque no hay nada que pisar.
+      setLogoUrl(brand?.logo_url ?? null);
+      setWelcome(brand?.welcome_message ?? BIENVENIDA_POR_DEFECTO);
+      setPrimaryColor(brand?.primary_color ?? Colors.red);
+      setSecondColor(brand?.secondary_color ?? Colors.blue);
+      setCargaError(null);
+    } catch (e) {
+      if (turno.vigente()) setCargaError(e);
+    } finally {
+      if (turno.vigente()) setLoading(false);
     }
-    setLoading(false);
-  }, [tenantId]);
+  }, [tenantId, guard]);
 
   useEffect(() => { load(); }, [load]);
 
   const pickLogo = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") return;
+    if (status !== "granted") {
+      Alert.alert("Permiso requerido", "Necesitamos acceso a tu galería para elegir el logo.");
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.8,
     });
     if (!result.canceled) setLogoUri(result.assets[0].uri);
   };
 
-  const uploadLogo = async (): Promise<string | null> => {
-    if (!logoUri || !tenantId) return logoUrl;
-    const response = await fetch(logoUri);
-    const blob = await response.blob();
-    const path = `${tenantId}/logo.jpg`;
-    const { error } = await supabase.storage.from("logos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
-    if (error) return logoUrl;
-    const { data } = supabase.storage.from("logos").getPublicUrl(path);
-    return `${data.publicUrl}?t=${Date.now()}`;
+  /** Sube el logo a logos/<tenantId>/logo.jpg (la carpeta del negocio). */
+  const uploadLogo = async (uri: string): Promise<Subida> => {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const path = `${tenantId}/logo.jpg`;
+      const { error } = await supabase.storage.from("logos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (error) return { ok: false, mensaje: mensajeError(error, "No se pudo subir el logo") };
+      const { data } = supabase.storage.from("logos").getPublicUrl(path);
+      return { ok: true, url: `${data.publicUrl}?t=${Date.now()}` };
+    } catch (e) {
+      return { ok: false, mensaje: mensajeError(e, "No se pudo subir el logo") };
+    }
   };
 
+  const nombreOk = bizName.trim().length >= 2;
+
   const handleSave = async () => {
-    if (!tenantId) return;
+    if (!tenantId || cargaError) return;
+    if (!nombreOk) return;
+
+    const telCambio = phone.trim() !== phoneInicial.trim();
+    let telGuardar: string | null = null;
+    if (telCambio) {
+      if (phone.trim()) {
+        const tel = validarTelefono(phone, pais);
+        if (!tel.ok) { setErrPhone(tel.error ?? "Revisa el teléfono."); return; }
+        telGuardar = tel.valor!;
+      } else if (tenantTeniaTel) {
+        setErrPhone("El teléfono no puede quedar vacío: es la forma de contactar a tu negocio.");
+        return;
+      }
+    }
+    setErrPhone(null);
+
     setSaving(true);
+    setSaved(false);
+    try {
+      const campos: { name: string; address: string | null; phone?: string | null } = {
+        name: bizName.trim(),
+        address: address.trim() || null,
+      };
+      if (telCambio) campos.phone = telGuardar;
+      exigirFilas(
+        await supabase.from("tenants").update(campos).eq("id", tenantId).select("id"),
+        "No se pudieron guardar los datos del negocio",
+      );
 
-    // Update tenant info
-    await supabase.from("tenants").update({
-      name:    bizName.trim() || null,
-      phone:   phone.trim()   || null,
-      address: address.trim() || null,
-    }).eq("id", tenantId);
+      // Logo: si no sube, se conserva el que había y se avisa (antes se
+      // ignoraba el error y se mostraba "guardado").
+      let finalLogoUrl = logoUrl;
+      let avisoLogo: string | null = null;
+      if (logoUri) {
+        const sub = await uploadLogo(logoUri);
+        if (sub.ok) finalLogoUrl = sub.url;
+        else avisoLogo = sub.mensaje;
+      }
 
-    // Upload logo if picked
-    const finalLogoUrl = await uploadLogo();
-    if (logoUri) { setLogoUrl(finalLogoUrl); setLogoUri(null); }
+      revisar(
+        await supabase.from("branding").upsert({
+          tenant_id:       tenantId,
+          business_name:   bizName.trim(),
+          logo_url:        finalLogoUrl,
+          welcome_message: welcome.trim() || BIENVENIDA_POR_DEFECTO,
+          primary_color:   primaryColor,
+          secondary_color: secondColor,
+        }, { onConflict: "tenant_id" }).select("tenant_id"),
+        "No se pudo guardar la personalización",
+      );
 
-    // Upsert branding
-    await supabase.from("branding").upsert({
-      tenant_id:       tenantId,
-      business_name:   bizName.trim(),
-      logo_url:        finalLogoUrl,
-      welcome_message: welcome.trim(),
-      primary_color:   primaryColor,
-      secondary_color: secondColor,
-    }, { onConflict: "tenant_id" });
+      if (logoUri && !avisoLogo) { setLogoUrl(finalLogoUrl); setLogoUri(null); }
+      patchTenant({
+        name:    bizName.trim(),
+        address: address.trim(),
+        slug:    slug.trim(),
+        ...(telCambio ? { phone: telGuardar ?? "" } : {}),
+      });
+      if (telCambio) {
+        const nuevo = telGuardar ? (telefonoE164(telGuardar, { pais }) ?? telGuardar) : "";
+        setPhone(nuevo);
+        setPhoneInicial(nuevo);
+        setTenantTeniaTel(!!telGuardar);
+      }
 
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+      if (avisoLogo) {
+        Alert.alert("Guardado sin el logo nuevo", `${avisoLogo} Lo demás quedó guardado.`);
+      } else {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+      }
+    } catch (e) {
+      Alert.alert("No se guardó", mensajeError(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleShare = () => {
     if (!bookingLink) return;
-    Share.share({ message: bookingLink, url: bookingLink });
+    Share.share({ message: bookingLink, url: bookingLink }).catch(() => {});
   };
 
-  const handleCopyLink = async () => {
-    if (!bookingLink) return;
-    // Share sheet with copy option — no external clipboard package needed
-    await Share.share({ message: bookingLink });
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
+  const logoDisplay = logoUri ?? logoUrl;
 
-  const logoDisplay = logoUri ?? (logoUrl ? `${logoUrl}` : null);
+  if (cargaError && !loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+        <ScreenHeader crumb="Negocio" title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
+        <ErrorState error={cargaError} onRetry={load} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <GradientHeader title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
+      <ScreenHeader crumb="Negocio" title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={Colors.red} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }}>
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-            {/* ── Booking link card ──────────────────────────────────── */}
+            {/* ── Booking link card (tinta oscura en ambos temas: firma de marca) ── */}
             <Animated.View entering={FadeInDown.delay(60).duration(400)} style={[s.linkCard, Shadow.md]}>
               <LinearGradient
                 colors={["#07071a", "#130d2e"]}
@@ -251,30 +361,32 @@ export default function StoreScreen() {
               </View>
 
               <View style={s.linkUrlBox}>
-                <Text style={s.linkUrl} numberOfLines={1} ellipsizeMode="middle">
+                <Text style={s.linkUrl} numberOfLines={1} ellipsizeMode="middle" selectable>
                   {bookingLink || "Configurando tu tienda…"}
                 </Text>
               </View>
 
-              <View style={s.linkActions}>
-                <TouchableOpacity style={s.linkBtn} onPress={handleCopyLink} activeOpacity={0.8}>
-                  <Ionicons name="copy-outline" size={15} color="rgba(255,255,255,0.8)" />
-                  <Text style={s.linkBtnText}>Copiar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.linkBtnPrimary} onPress={handleShare} activeOpacity={0.8}>
-                  <View style={s.linkBtnGrad}>
-                    <Ionicons name="share-social-outline" size={15} color="white" />
-                    <Text style={s.linkBtnPrimaryText}>Compartir</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={s.linkBtnPrimary} onPress={handleShare} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Compartir link de reservas">
+                <View style={s.linkBtnGrad}>
+                  <Ionicons name="share-social-outline" size={15} color="white" />
+                  <Text style={s.linkBtnPrimaryText}>Compartir o copiar</Text>
+                </View>
+              </TouchableOpacity>
             </Animated.View>
 
             {/* ── Información del negocio ────────────────────────────── */}
             <Section title="Información del negocio" icon="storefront-outline" color={Colors.red}>
-              <FormField label="Nombre del negocio" value={bizName} onChangeText={setBizName} placeholder="Ej: Salón Bella" />
-              <FormField label="Teléfono / WhatsApp" value={phone}   onChangeText={setPhone}   placeholder="Ej: 3001234567" keyboardType="phone-pad" />
-              <FormField label="Dirección"           value={address} onChangeText={setAddress} placeholder="Ej: Cra 15 #45-20, Bogotá" />
+              <FormField
+                label="Nombre del negocio *" value={bizName} onChangeText={setBizName} placeholder="Ej: Salón Bella"
+                error={!nombreOk ? "Escribe al menos 2 letras." : undefined}
+              />
+              <FormField
+                label="Teléfono / WhatsApp" value={phone}
+                onChangeText={v => { setPhone(v); setErrPhone(null); }}
+                placeholder="Ej: +57 300 123 4567" keyboardType="phone-pad"
+                error={errPhone ?? undefined}
+              />
+              <FormField label="Dirección" value={address} onChangeText={setAddress} placeholder="Ej: Cra 15 #45-20, Bogotá" />
             </Section>
 
             {/* ── Personalización visual ─────────────────────────────── */}
@@ -282,41 +394,43 @@ export default function StoreScreen() {
 
               {/* Logo */}
               <View style={s.logoRow}>
-                <Pressable onPress={pickLogo} style={s.logoPicker}>
+                <Pressable onPress={pickLogo} style={s.logoPicker} accessibilityRole="button" accessibilityLabel="Cambiar logo">
                   {logoDisplay ? (
                     <Image source={{ uri: logoDisplay }} style={s.logoImg} />
                   ) : (
-                    <View style={s.logoPlaceholder}>
-                      <Ionicons name="image-outline" size={28} color={Colors.subtle} />
+                    <View style={[s.logoPlaceholder, { backgroundColor: t.chipBg, borderColor: t.lineStrong }]}>
+                      <Ionicons name="image-outline" size={28} color={t.subtle} />
                     </View>
                   )}
-                  <View style={s.logoBadge}>
+                  <View style={[s.logoBadge, { borderColor: t.card }]}>
                     <Ionicons name="camera" size={12} color="white" />
                   </View>
                 </Pressable>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.logoHint}>Logo del negocio</Text>
-                  <Text style={s.logoHintSub}>Se muestra en tu página de reservas pública. Toca para cambiar.</Text>
+                  <Text style={[s.logoHint, { color: t.text }]}>Logo del negocio</Text>
+                  <Text style={[s.logoHintSub, { color: t.muted }]}>
+                    {logoUri ? "Logo nuevo elegido: se sube al guardar." : "Se muestra en tu página de reservas pública. Toca para cambiar."}
+                  </Text>
                 </View>
               </View>
 
-              <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: 18 }} />
+              <View style={{ height: 1, backgroundColor: t.line, marginBottom: 18 }} />
 
               <FormField
                 label="Mensaje de bienvenida"
                 value={welcome}
                 onChangeText={setWelcome}
-                placeholder="Reserva tu cita fácil y rápido"
+                placeholder={BIENVENIDA_POR_DEFECTO}
               />
 
-              <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: 18 }} />
+              <View style={{ height: 1, backgroundColor: t.line, marginBottom: 18 }} />
 
               <ColorPicker label="Color primario"    value={primaryColor} onChange={setPrimaryColor} />
               <ColorPicker label="Color secundario"  value={secondColor}  onChange={setSecondColor}  />
 
               {/* Live preview strip */}
-              <View style={s.previewStrip}>
-                <Text style={s.previewLabel}>Vista previa del botón</Text>
+              <View style={[s.previewStrip, { backgroundColor: t.chipBg, borderColor: t.line }]}>
+                <Text style={[s.previewLabel, { color: t.muted }]}>Vista previa del botón</Text>
                 <View style={{ borderRadius: 10, overflow: "hidden", alignSelf: "flex-start" }}>
                   <LinearGradient
                     colors={[primaryColor, secondColor]}
@@ -330,7 +444,7 @@ export default function StoreScreen() {
             </Section>
 
             {saved && (
-              <Animated.View entering={FadeInDown.duration(300)} style={[s.savedBanner, Shadow.sm]}>
+              <Animated.View entering={FadeInDown.duration(300)} style={[s.savedBanner, Shadow.sm]} accessibilityLiveRegion="polite">
                 <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
                 <Text style={s.savedText}>Cambios guardados correctamente</Text>
               </Animated.View>
@@ -339,7 +453,7 @@ export default function StoreScreen() {
             <View style={{ height: 120 }} />
           </ScrollView>
 
-          <BottomSaveBar label="Guardar cambios" saving={saving} onPress={handleSave} />
+          <BottomSaveBar label="Guardar cambios" saving={saving} disabled={!nombreOk} onPress={handleSave} />
         </KeyboardAvoidingView>
       )}
     </SafeAreaView>
@@ -355,28 +469,25 @@ const s = StyleSheet.create({
   linkTop:      { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 14 },
   linkIconBox:  { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(251,15,5,0.15)", alignItems: "center", justifyContent: "center" },
   linkTitle:    { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold", color: "white", marginBottom: 3 },
-  linkSub:      { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,0.45)", lineHeight: 15 },
+  linkSub:      { fontSize: 11, fontFamily: "SpaceGrotesk_400Regular", color: "rgba(255,255,255,0.55)", lineHeight: 15 },
   linkUrlBox:   { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  linkUrl:      { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red, letterSpacing: 0.2 },
-  linkActions:  { flexDirection: "row", gap: 10 },
-  linkBtn:      { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(255,255,255,0.07)" },
-  linkBtnText:  { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,0.8)" },
-  linkBtnPrimary: { flex: 1, borderRadius: 10, overflow: "hidden" },
-  linkBtnGrad:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, backgroundColor: Colors.red, borderRadius: 10 },
+  linkUrl:      { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "#ff6a63", letterSpacing: 0.2 },
+  linkBtnPrimary: { borderRadius: 10, overflow: "hidden" },
+  linkBtnGrad:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, backgroundColor: Colors.red, borderRadius: 10 },
   linkBtnPrimaryText: { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "white" },
 
   // Logo
   logoRow:         { flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 20 },
   logoPicker:      { position: "relative" },
   logoImg:         { width: 72, height: 72, borderRadius: 18 },
-  logoPlaceholder: { width: 72, height: 72, borderRadius: 18, backgroundColor: Colors.cream2, borderWidth: 1.5, borderColor: Colors.border, alignItems: "center", justifyContent: "center", borderStyle: "dashed" },
-  logoBadge:       { position: "absolute", bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: Colors.white },
-  logoHint:        { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold", color: Colors.text, marginBottom: 4 },
-  logoHintSub:     { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", color: Colors.muted, lineHeight: 17 },
+  logoPlaceholder: { width: 72, height: 72, borderRadius: 18, borderWidth: 1.5, alignItems: "center", justifyContent: "center", borderStyle: "dashed" },
+  logoBadge:       { position: "absolute", bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center", borderWidth: 2 },
+  logoHint:        { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold", marginBottom: 4 },
+  logoHintSub:     { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", lineHeight: 17 },
 
   // Preview
-  previewStrip:    { backgroundColor: Colors.cream2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
-  previewLabel:    { fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 },
+  previewStrip:    { borderRadius: 12, padding: 14, borderWidth: 1 },
+  previewLabel:    { fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 },
   previewBtn:      { paddingVertical: 10, paddingHorizontal: 20 },
   previewBtnText:  { fontSize: 13, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
 

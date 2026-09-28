@@ -2,28 +2,47 @@ import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Gradients } from "@/constants/theme";
+import { iconLabel } from "@/components/ui";
+
+// Cabecera de hoja modal. La superficie es tinta oscura en claro y en oscuro
+// (firma de marca), por eso los textos e íconos van en blanco fijo.
 
 type Props = {
   title: string;
   onClose: () => void;
-  rightAction?: { icon: React.ComponentProps<typeof Ionicons>["name"]; onPress: () => void };
+  /** label es lo que dice el lector de pantalla; si falta, se deduce del ícono. */
+  rightAction?: { icon: React.ComponentProps<typeof Ionicons>["name"]; onPress: () => void; label?: string };
 };
+
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export default function ModalHeader({ title, onClose, rightAction }: Props) {
   return (
     <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
       <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.accent} />
       <View style={s.row}>
-        <TouchableOpacity onPress={onClose} style={s.btn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          onPress={onClose}
+          style={s.btn}
+          hitSlop={HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel="Cerrar"
+        >
           <Ionicons name="close" size={20} color="white" />
         </TouchableOpacity>
-        <Text style={s.title}>{title}</Text>
+        <Text style={s.title} accessibilityRole="header">{title}</Text>
         {rightAction ? (
-          <TouchableOpacity onPress={rightAction.onPress} style={s.btn}>
+          <TouchableOpacity
+            onPress={rightAction.onPress}
+            style={s.btn}
+            hitSlop={HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel={iconLabel(rightAction.icon, rightAction.label)}
+          >
             <Ionicons name={rightAction.icon} size={18} color="white" />
           </TouchableOpacity>
         ) : (
-          <View style={{ width: 40 }} />
+          <View style={{ width: 36 }} />
         )}
       </View>
     </LinearGradient>

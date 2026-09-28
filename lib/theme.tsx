@@ -1,52 +1,82 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { useColorScheme } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+/** Esquema realmente pintado. Nunca es "system": ya está resuelto. */
 export type ThemeMode = "light" | "dark";
+/** Lo que el usuario eligió en Ajustes. "system" sigue al dispositivo. */
+export type ThemePreference = ThemeMode | "system";
 
 const LIGHT = {
   bg:           "#F4F4F9",
   bgAlt:        "#FFFFFF",
-  card:         "rgba(255,255,255,0.72)",
-  cardBorder:   "rgba(255,255,255,0.75)",
-  cardSoft:     "rgba(255,255,255,0.55)",
-  cardSoftBorder: "rgba(255,255,255,0.6)",
+  // Cards sólidas estilo portal web (antes glass): blanco + borde hairline
+  card:         "#FFFFFF",
+  cardBorder:   "rgba(20,15,30,0.08)",
+  cardSoft:     "#FFFFFF",
+  cardSoftBorder: "rgba(20,15,30,0.08)",
   text:         "#14111C",
   muted:        "#564E66",
-  subtle:       "#8E879B",
+  // #736C82: 5:1 sobre blanco y 4,6:1 sobre el lienzo (AA). El #8E879B de
+  // antes daba 3,2:1 y las fechas y etiquetas pequeñas no se leían (CAL-24).
+  // Es el mismo valor de Colors.subtle en constants/theme.ts.
+  subtle:       "#736C82",
   border:       "rgba(20,15,30,0.08)",
   divider:      "rgba(20,15,30,0.08)",
-  inputBg:      "rgba(255,255,255,0.72)",
-  inputBorder:  "rgba(255,255,255,0.75)",
+  inputBg:      "#FFFFFF",
+  inputBorder:  "rgba(20,15,30,0.12)",
   bottomBar:    "rgba(244,244,249,0.85)",
   bottomBorder: "rgba(255,255,255,0.6)",
   tabBarBg:     "rgba(255,255,255,0.55)",
   tabBarBorder: "rgba(255,255,255,0.6)",
+  // ── Tokens estilo portal web (tinta sobre lienzo claro) ──
+  canvas:       "#F4F4F9",
+  cardSolid:    "#FFFFFF",
+  line:         "rgba(20,15,30,0.08)",
+  lineStrong:   "rgba(20,15,30,0.16)",
+  ink:          "#14111C",
+  chipBg:       "rgba(20,15,30,0.04)",
+  trackBg:      "rgba(20,15,30,0.06)",
   blurTint:     "light" as const,
   statusBar:    "dark" as const,
 };
 
 const DARK = {
-  bg:           "#09090F",
-  bgAlt:        "#111118",
-  // Superficies sólidas: el blanco translúcido (5-8%) sobre #09090F se veía gris lavado
-  card:         "#15151E",
-  cardBorder:   "rgba(255,255,255,0.12)",
-  cardSoft:     "#101018",
-  cardSoftBorder: "rgba(255,255,255,0.10)",
-  text:         "#F5F4F9",
-  muted:        "#A8A2B6",
-  subtle:       "#837D93",
-  border:       "rgba(255,255,255,0.10)",
-  divider:      "rgba(255,255,255,0.08)",
-  inputBg:      "#17171F",
-  inputBorder:  "rgba(255,255,255,0.14)",
-  bottomBar:    "rgba(9,9,15,0.92)",
+  bg:           "#0D0D14",
+  bgAlt:        "#16161F",
+  // Cards sólidas sobre la base de la sidebar oscura del web
+  card:         "#16161F",
+  cardBorder:   "rgba(255,255,255,0.08)",
+  cardSoft:     "#16161F",
+  cardSoftBorder: "rgba(255,255,255,0.08)",
+  text:         "#F0EFF4",
+  muted:        "#9B95A8",
+  // #8A849C: 5,4:1 sobre el fondo y 5:1 sobre las tarjetas (AA). El #6B6580
+  // de antes daba 3,3:1 sobre las tarjetas (CAL-24).
+  subtle:       "#8A849C",
+  border:       "rgba(255,255,255,0.08)",
+  divider:      "rgba(255,255,255,0.06)",
+  inputBg:      "#16161F",
+  inputBorder:  "rgba(255,255,255,0.12)",
+  bottomBar:    "rgba(13,13,20,0.92)",
   bottomBorder: "rgba(255,255,255,0.08)",
   tabBarBg:     "rgba(17,17,24,0.75)",
   tabBarBorder: "rgba(255,255,255,0.08)",
+  // ── Tokens estilo portal web, mapeados sobre la sidebar oscura (#0C0C14) ──
+  canvas:       "#0D0D14",
+  cardSolid:    "#16161F",
+  line:         "rgba(255,255,255,0.08)",
+  lineStrong:   "rgba(255,255,255,0.16)",
+  ink:          "#F0EFF4",
+  chipBg:       "rgba(255,255,255,0.06)",
+  trackBg:      "rgba(255,255,255,0.08)",
   blurTint:     "dark" as const,
   statusBar:    "light" as const,
 };
+
+/** Las dos paletas, para pintar vistas previas de un esquema que no es el activo
+ *  (el selector de tema de Ajustes muestra claro y oscuro a la vez). */
+export const PALETTES = { light: LIGHT, dark: DARK } as const;
 
 export type ThemeColors = Omit<typeof LIGHT, "blurTint" | "statusBar"> & {
   blurTint: "light" | "dark";
@@ -54,38 +84,56 @@ export type ThemeColors = Omit<typeof LIGHT, "blurTint" | "statusBar"> & {
 };
 
 type ThemeCtx = {
+  /** Esquema en uso, ya resuelto contra el dispositivo. */
   mode: ThemeMode;
+  /** Elección del usuario: "system" | "light" | "dark". */
+  preference: ThemePreference;
   t: ThemeColors;
+  setPreference: (p: ThemePreference) => void;
+  /** Alterna claro/oscuro fijando la preferencia (deja de seguir al sistema). */
   toggle: () => void;
 };
 
 const ThemeContext = createContext<ThemeCtx>({
   mode: "light",
+  preference: "system",
   t: LIGHT,
+  setPreference: () => {},
   toggle: () => {},
 });
 
 const STORAGE_KEY = "@zyncra_theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>("light");
+  // Apariencia del dispositivo. Cambia sola cuando el SO alterna claro/oscuro
+  // (ajuste manual o el horario automático de noche), y este hook re-renderiza.
+  // Devuelve null si el SO aún no la reporta; se trata como claro.
+  const device = useColorScheme();
+  // Por defecto seguimos al dispositivo; una cuenta nueva no elige nada.
+  const [preference, setPref] = useState<ThemePreference>("system");
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((v) => {
-      if (v === "dark" || v === "light") setMode(v);
+      // Los valores que guardó la versión anterior ("light"/"dark") siguen
+      // siendo preferencias válidas: quien ya había elegido, la conserva.
+      if (v === "dark" || v === "light" || v === "system") setPref(v);
     });
   }, []);
 
-  const toggle = () => {
-    const next = mode === "light" ? "dark" : "light";
-    setMode(next);
-    AsyncStorage.setItem(STORAGE_KEY, next);
+  const setPreference = (p: ThemePreference) => {
+    setPref(p);
+    AsyncStorage.setItem(STORAGE_KEY, p);
   };
+
+  const mode: ThemeMode =
+    preference === "system" ? (device === "dark" ? "dark" : "light") : preference;
+
+  const toggle = () => setPreference(mode === "light" ? "dark" : "light");
 
   const t = mode === "dark" ? DARK : LIGHT;
 
   return (
-    <ThemeContext.Provider value={{ mode, t, toggle }}>
+    <ThemeContext.Provider value={{ mode, preference, t, setPreference, toggle }}>
       {children}
     </ThemeContext.Provider>
   );
