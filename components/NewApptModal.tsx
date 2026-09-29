@@ -431,7 +431,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         id: apptId,
         date: selectedDay,
         time: `${selectedTime}:00`,
-        clientName: nombreCliente || "Cliente",
+        clientName: nombreCliente || null,
         serviceName: selectedService.name,
         status: "pending",
       }, timezone).catch(() => {});

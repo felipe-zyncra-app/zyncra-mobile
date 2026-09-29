@@ -405,6 +405,7 @@ export type EstiloDia =
   | "corto"        // 26 sep 2026
   | "dia-mes"      // 26 sep
   | "semana-dia"   // sáb 26
+  | "semana-dia-mes" // sáb 26 sep
   | "largo"        // sábado 26 de septiembre
   | "completo"     // sábado 26 de septiembre de 2026
   | "mes-anio";    // septiembre 2026
@@ -423,6 +424,7 @@ export function fmtDia(diaISO: string, estilo: EstiloDia = "corto"): string {
     case "corto":      return `${d} ${MESES_CORTOS[m - 1]} ${y}`;
     case "dia-mes":    return `${d} ${MESES_CORTOS[m - 1]}`;
     case "semana-dia": return `${DIAS_CORTOS[sem]} ${d}`;
+    case "semana-dia-mes": return `${DIAS_CORTOS[sem]} ${d} ${MESES_CORTOS[m - 1]}`;
     case "largo":      return `${DIAS_LARGOS[sem]} ${d} de ${MESES_LARGOS[m - 1]}`;
     case "completo":   return `${DIAS_LARGOS[sem]} ${d} de ${MESES_LARGOS[m - 1]} de ${y}`;
     case "mes-anio":   return `${MESES_LARGOS[m - 1]} ${y}`;

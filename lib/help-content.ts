@@ -137,6 +137,25 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
       },
       {
+        // Debe decir lo mismo que lib/avisos.ts (reglas de la campana) y
+        // lib/useAvisos.ts (tocar una notificación abre la campana).
+        slug: "notificaciones",
+        title: "La campana de notificaciones del Panel",
+        description: "Citas nuevas, cancelaciones y citas que necesitan tu atención.",
+        category: "calendario",
+        readMinutes: 2,
+        steps: [
+          paso("Abre la campana",
+            "En el Panel, toca la campana que está al lado del nombre de tu negocio. El número rojo son los avisos que no has leído en este teléfono."),
+          paso("Qué te avisa",
+            "Las citas agendadas en las últimas 2 horas (y si alguna ya se canceló), las citas de hoy sin confirmar cuando faltan 2 horas o menos, las confirmadas que empiezan en 3 horas o menos y las de los próximos 7 días que no tienen profesional. Si tienes varias sedes, ves los de la sede activa."),
+          paso("Toca un aviso",
+            "Te lleva a la Agenda en el día de esa cita y abre su detalle. Con la X lo descartas y con el botón de arriba marcas todos como leídos."),
+          paso("Las notificaciones del teléfono",
+            "Cuando un cliente reserva en tu link o con Hanna, o cancela o cambia su cita, te llega una notificación si las tienes activadas, también con la app abierta. Al tocar cualquier notificación de Zyncra se abre la campana."),
+        ],
+      },
+      {
         slug: "horarios-negocio",
         title: "Cómo configurar el horario de atención",
         description: "Los días y horas en que se puede reservar.",
@@ -163,7 +182,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Compártelo donde estén tus clientes",
             "En la bio de Instagram, en tu estado de WhatsApp, en Facebook o en tu perfil de Google."),
           paso("El cliente reserva sin ayuda",
-            "Elige servicio, profesional, fecha y hora libre. La cita aparece en tu Agenda y te llega un aviso al teléfono si tienes activadas las notificaciones."),
+            "Elige servicio, profesional, fecha y hora libre. La cita aparece en tu Agenda y en la campana del Panel, y te llega una notificación al teléfono si tienes activadas las notificaciones."),
         ],
       },
     ],
@@ -244,6 +263,24 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
       },
       {
+        // Debe decir lo mismo que lib/porCobrar.ts y app/(admin)/por-cobrar.tsx.
+        slug: "por-cobrar",
+        title: "Qué es Por cobrar en el Panel",
+        description: "De qué citas es esa cifra y cómo dejarla al día.",
+        category: "pos",
+        readMinutes: 2,
+        steps: [
+          paso("Toca la tarjeta",
+            "En el Panel, toca la tarjeta Por cobrar. Se abre la lista de las citas que suman esa cifra, con la fecha, la hora, el cliente, los servicios, el profesional y el valor."),
+          paso("Qué incluye",
+            "Las citas pendientes, confirmadas o completadas que todavía no tienen cobro, de cualquier fecha: no depende de Hoy, 7 días o 30 días. Se cuentan a su precio (servicio más adicionales) y no suman a tus ingresos hasta que las cobres. Si tienes varias sedes, ves las de la sede activa."),
+          paso("Vencidas",
+            "Son citas que ya pasaron y nadie cobró. Toca Cobrar si el cliente pagó, o márcala como No asistió o Cancelada: en los tres casos sale de la lista."),
+          paso("Hoy y próximas",
+            "Las de hoy se cobran desde ahí mismo. Al tocar una próxima se abre la Agenda en ese día con su detalle."),
+        ],
+      },
+      {
         slug: "anular-cobro",
         title: "Cómo anular un cobro",
         description: "Cuando un cobro se registró por error.",
@@ -307,7 +344,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Abre Reportes", "Ve a Ajustes → Reportes. Para ingresos contra egresos, usa Ajustes → Módulo financiero."),
           paso("Elige el período", "Semana, Mes o Año, y muévete con las flechas a períodos anteriores."),
           paso("Qué cuenta como ingreso",
-            "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen como por cobrar."),
+            "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen en Por cobrar. En el Panel, toca esa tarjeta para ver cuáles son."),
           paso("Revisa el detalle",
             "Ingresos por día, los servicios más vendidos, el rendimiento de cada profesional y las horas con más movimiento."),
         ],
@@ -468,9 +505,10 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
       },
       {
-        // Debe decir lo mismo que app/settings/reminders.tsx (AGE-19): la
-        // anticipación solo mueve el aviso en el teléfono del dueño; al
-        // cliente le escribe el servidor con horarios fijos.
+        // Debe decir lo mismo que app/settings/reminders.tsx (AGE-19): el
+        // aviso por cita es para el negocio y se apaga por teléfono; la
+        // anticipación solo lo mueve; al cliente le escribe el servidor con
+        // horarios fijos.
         slug: "recordatorios",
         title: "Cómo funcionan los recordatorios de cita",
         description: "Qué te llega a ti, qué le llega al cliente y qué puedes cambiar.",
@@ -479,12 +517,14 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         steps: [
           paso("Abre Recordatorios", "Ve a Ajustes → Recordatorios."),
           paso("El aviso en tu teléfono",
-            "Elige cuánto antes de cada cita te avisamos en este teléfono: 1 h, 2 h, 6 h, 12 h, 1 día o 2 días. Esto no cambia lo que recibe el cliente."),
+            "Con «Avisarme en este teléfono antes de cada cita» (viene encendido) este teléfono te recuerda cada cita, por ejemplo: «Recuerda: mañana a las 3:00 PM tienes una cita con Juan para Corte». Es un aviso para ti: tus clientes no lo reciben. Si lo apagas, deja de sonar solo en este teléfono."),
+          paso("Cuánto tiempo antes",
+            "Elige 1 h, 2 h, 6 h, 12 h, 1 día o 2 días. Vale para todos los teléfonos donde entras como dueño y no cambia lo que recibe el cliente."),
           paso("El recordatorio al cliente",
             "Lo envía Zyncra sin que hagas nada: un correo 24 horas y otro 2 horas antes de la cita, si el cliente tiene correo, y un WhatsApp 2 horas antes si conectaste tu WhatsApp y elegiste una plantilla aprobada en el portal web."),
           paso("El mensaje para enviar a mano",
             "La plantilla de esta pantalla es el texto que se usa cuando le mandas el recordatorio tú mismo por WhatsApp desde el portal web. Toca Nombre, Servicio, Fecha y Hora para insertar {{nombre}}, {{servicio}}, {{fecha}} y {{hora}}. Con llaves simples ({nombre}) no funcionan."),
-          paso("Guarda", "Toca Guardar configuración. La vista previa te muestra cómo se verá el mensaje."),
+          paso("Guarda", "Toca Guardar configuración para la anticipación y la plantilla; el interruptor de este teléfono se aplica al instante. La vista previa te muestra cómo se verá el mensaje."),
         ],
       },
       {

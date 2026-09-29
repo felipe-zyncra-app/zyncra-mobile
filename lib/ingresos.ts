@@ -1,4 +1,5 @@
 import { salePaymentLines, type PaymentLine } from "./pos-payments";
+import { MEDIOS, MEDIO_OTRO } from "./medios-pago";
 
 /**
  * Ingresos del Panel, Reportes y Comisiones. Funciones puras (se prueban en
@@ -73,15 +74,10 @@ export function precioDeLista(cita: {
 // ─── Medios de pago ──────────────────────────────────────────────────────────
 
 /** Mismos colores que el portal web (PM_META de admin/page.tsx) más los que el web no tiene. */
-export const MEDIOS_PAGO: Record<string, { label: string; color: string }> = {
-  efectivo:      { label: "Efectivo",      color: "#10b981" },
-  tarjeta:       { label: "Tarjeta",       color: "#6366f1" },
-  nequi:         { label: "Nequi",         color: "#0027fe" },
-  daviplata:     { label: "Daviplata",     color: "#f59e0b" },
-  transferencia: { label: "Transferencia", color: "#06b6d4" },
-  qr:            { label: "QR",            color: "#8b5cf6" },
-  otro:          { label: "Otro",          color: "#736C82" },
-};
+// Nombre y color salen de lib/medios-pago: los mismos de la hoja de cobro.
+export const MEDIOS_PAGO: Record<string, { label: string; color: string }> = Object.fromEntries(
+  [...MEDIOS, MEDIO_OTRO].map(m => [m.key, { label: m.label, color: m.color }]),
+);
 
 /** Líneas de pago de una venta, con `payments` validado (llega como Json sin tipo). */
 export function lineasDePago(venta: VentaResumen): PaymentLine[] {

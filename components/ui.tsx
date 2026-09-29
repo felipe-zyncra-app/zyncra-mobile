@@ -288,10 +288,10 @@ export function IconButton({ icon, label, onPress, color, size = 18, tone = "chi
 }
 
 // ─── Badge de tenant (tenantBadge del web) ────────────────────────
-export function TenantBadge({ name }: { name: string }) {
+export function TenantBadge({ name, style }: { name: string; style?: StyleProp<ViewStyle> }) {
   const { t } = useTheme();
   return (
-    <View style={[s.tenantBadge, { backgroundColor: t.chipBg, borderColor: t.line }]}>
+    <View style={[s.tenantBadge, { backgroundColor: t.chipBg, borderColor: t.line }, style]}>
       <Text style={[s.tenantBadgeText, { color: t.muted }]} numberOfLines={1}>{name}</Text>
     </View>
   );

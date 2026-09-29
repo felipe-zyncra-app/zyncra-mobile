@@ -21,12 +21,14 @@ import { Colors, Fonts, Gradients, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtMoneyFull } from "@/lib/format";
+import { agruparPorCobrar, traerPorCobrar, RUTA_POR_COBRAR } from "@/lib/porCobrar";
 import { STATUS_META } from "@/constants/status";
 import { refreshAllReminders } from "@/lib/notifications";
 import NewApptModal from "@/components/NewApptModal";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
 import ErrorState from "@/components/ErrorState";
+import CampanaAvisos from "@/components/CampanaAvisos";
 import { Card, CardHead, MonoTag, TrendChip, TenantBadge, SegmentedControl, useCountUp } from "@/components/ui";
 import { Spark, AreaChart, Bars, Donut, RankBars, ChartEmpty } from "@/components/charts";
 
@@ -54,16 +56,6 @@ type Appt = {
 
 /** Venta de mostrador (sin cita). */
 type VentaSuelta = VentaResumen & { id: string; created_at: string };
-
-/** Cita que sigue sin cobrar (pendiente, confirmada o completada sin venta). */
-type PorCobrar = {
-  id: string;
-  appointment_date: string;
-  status: string;
-  services: { price?: number | string | null } | null;
-  appointment_services: { price: number | string | null }[] | null;
-  pos_sales?: { id: string }[] | null;
-};
 
 type Period = "hoy" | "semana" | "mes";
 
@@ -117,25 +109,22 @@ const hs = StyleSheet.create({
 });
 
 // ─── Metric Card ──────────────────────────────────────────────────────────────
-function MetricCard({ label, raw, fmt, sub, icon, trend, trendVal, alert, spark, delay = 0 }: {
+/**
+ * Con `onPress` la tarjeta se toca (p. ej. "Por cobrar" abre su detalle): un
+ * "Ver detalle ›" discreto abajo avisa que se puede, y `a11yLabel` es lo que
+ * dice el lector de pantalla (el monto completo, no el "$1.4M" abreviado).
+ */
+function MetricCard({ label, raw, fmt, sub, icon, trend, trendVal, alert, spark, delay = 0, onPress, a11yLabel, a11yHint }: {
   label: string; raw: number; fmt: (n: number) => string;
   sub?: string; icon: IoniconName;
   trend?: "up" | "down" | "neutral"; trendVal?: string;
   alert?: boolean; spark?: number[]; delay?: number;
+  onPress?: () => void; a11yLabel?: string; a11yHint?: string;
 }) {
   const { t } = useTheme();
   const v = useCountUp(raw);
-  return (
-    <Animated.View
-      entering={FadeInDown.delay(delay).duration(400)}
-      style={[CardStyle.base, ms.card, {
-        backgroundColor: t.cardSolid,
-        borderColor: alert ? "rgba(251,15,5,0.32)" : t.line,
-      }]}
-    >
-      {alert && (
-        <LinearGradient colors={["#fb0f05", "#f97316"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={ms.alertBar} />
-      )}
+  const contenido = (
+    <>
       <View style={ms.rowTop}>
         <MonoTag>{label}</MonoTag>
         <Ionicons name={icon} size={15} color={alert ? Colors.red : t.subtle} />
@@ -152,18 +141,55 @@ function MetricCard({ label, raw, fmt, sub, icon, trend, trendVal, alert, spark,
           {sub ? <Text style={[ms.sub, { color: t.subtle }]} numberOfLines={1}>{sub}</Text> : null}
         </View>
       ) : null}
+      {onPress ? (
+        <View style={ms.rowMore}>
+          <Text style={[ms.more, { color: t.muted }]}>Ver detalle</Text>
+          <Ionicons name="chevron-forward" size={12} color={t.subtle} />
+        </View>
+      ) : null}
+    </>
+  );
+  return (
+    <Animated.View
+      entering={FadeInDown.delay(delay).duration(400)}
+      style={[CardStyle.base, ms.card, {
+        backgroundColor: t.cardSolid,
+        borderColor: alert ? "rgba(251,15,5,0.32)" : t.line,
+      }]}
+    >
+      {alert && (
+        <LinearGradient colors={["#fb0f05", "#f97316"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={ms.alertBar} />
+      )}
+      {onPress ? (
+        <TouchableOpacity
+          style={ms.inner}
+          onPress={onPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={a11yLabel}
+          accessibilityHint={a11yHint}
+        >
+          {contenido}
+        </TouchableOpacity>
+      ) : (
+        <View style={ms.inner}>{contenido}</View>
+      )}
     </Animated.View>
   );
 }
 
 const ms = StyleSheet.create({
-  card:     { padding: 15, overflow: "hidden", width: "48.5%" as any, flexGrow: 1 },
+  // El relleno va adentro: en la tarjeta tocable toda la superficie responde.
+  card:     { overflow: "hidden", width: "48.5%" as any, flexGrow: 1 },
+  inner:    { padding: 15, flexGrow: 1 },
   alertBar: { position: "absolute", top: 0, left: 0, right: 0, height: 2.5 },
   rowTop:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   rowValue: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 8, marginTop: 10 },
   value:    { fontSize: 22, fontFamily: Fonts.bold, letterSpacing: -0.8, lineHeight: 24, flexShrink: 1 },
   rowSub:   { flexDirection: "row", gap: 7, alignItems: "center", marginTop: 9, flexWrap: "wrap" },
   sub:      { fontSize: 11, fontFamily: Fonts.regular, flexShrink: 1 },
+  rowMore:  { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 8 },
+  more:     { fontSize: 11, fontFamily: Fonts.semibold },
 });
 
 // ─── Fila de cita (listItem del web) ─────────────────────────────────────────
@@ -243,46 +269,6 @@ type DashData = {
   todayAppts: Appt[];
 };
 
-const SEL_POR_COBRAR = "id, appointment_date, status, services(price), appointment_services(price), pos_sales(id)";
-
-/**
- * Toda cita sin cobrar, de cualquier fecha: pendientes, confirmadas y
- * completadas SIN venta (D10). Una cita vive aquí hasta que alguien la cobra o
- * la marca cancelada / no asistió.
- */
-async function traerPorCobrar(tenantId: string, loc: string | null): Promise<PorCobrar[]> {
-  const contexto = "No se pudo calcular lo que está por cobrar";
-  try {
-    // Anti-join de PostgREST (pos_sales=is.null): solo las citas sin ninguna venta.
-    return await traerTodo<PorCobrar>((d, h) => {
-      let q = supabase.from("appointments")
-        .select(SEL_POR_COBRAR)
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "confirmed", "completed"])
-        .is("pos_sales", null);
-      if (loc) q = q.eq("location_id", loc);
-      // Descendente: si algún día se llega al tope, se pierden las más viejas
-      // (probablemente abandonadas) y no las futuras, que son compromisos reales.
-      return q.order("appointment_date", { ascending: false }).order("id").range(d, h)
-        .overrideTypes<PorCobrar[], { merge: false }>();
-    }, { contexto });
-  } catch (e) {
-    if (esErrorDeRed(e)) throw e;
-    // Un servidor sin anti-join responde error de sintaxis: se cae al criterio
-    // anterior (pendientes y confirmadas) quitando las que ya tienen venta.
-    const filas = await traerTodo<PorCobrar>((d, h) => {
-      let q = supabase.from("appointments")
-        .select(SEL_POR_COBRAR)
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "confirmed"]);
-      if (loc) q = q.eq("location_id", loc);
-      return q.order("appointment_date", { ascending: false }).order("id").range(d, h)
-        .overrideTypes<PorCobrar[], { merge: false }>();
-    }, { contexto });
-    return filas.filter(a => !(a.pos_sales && a.pos_sales.length > 0));
-  }
-}
-
 async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string): Promise<DashData> {
   // Días del NEGOCIO, no del teléfono (TZ-06): después de las 7 PM en
   // Colombia el UTC ya es mañana, y con el teléfono en otra zona "hoy" era otro.
@@ -322,6 +308,8 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
       return q.order("created_at").order("id").range(d, h);
     }, { contexto: "No se pudieron cargar las ventas" }),
     supabase.from("clients").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    // Toda cita sin cobrar, de cualquier fecha (lib/porCobrar.ts): la MISMA
+    // consulta y suma que la pantalla Por cobrar, que abre esta tarjeta.
     traerPorCobrar(tenantId, loc),
     // Sin sede activa (negocio sin sedes) no hay nada que nombrar.
     loc
@@ -369,12 +357,13 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
   const avgTicket = paidCount > 0 ? revenue / paidCount : 0;
 
   // Por cobrar: plata comprometida, no ingreso — nunca entra en "Ingresos".
-  const pendingRevenue  = porCobrar.reduce((sum, a) => sum + precioDeLista(a), 0);
-  // Vencidas: la cita ya pasó y nadie la cobró. Se marcan en rojo para que el
-  // negocio decida; hasta que lo haga NO es una pérdida.
-  const overdue         = porCobrar.filter(a => a.appointment_date < hoy);
-  const overdueRevenue  = overdue.reduce((sum, a) => sum + precioDeLista(a), 0);
-  const completedUnpaid = porCobrar.filter(a => a.status === "completed").length;
+  // Vencidas: la cita ya pasó (día del negocio) y nadie la cobró. Se marcan en
+  // rojo para que el negocio decida; hasta que lo haga NO es una pérdida.
+  const resumenPorCobrar = agruparPorCobrar(porCobrar, hoy);
+  const pendingRevenue   = resumenPorCobrar.total;
+  const overdueRevenue   = resumenPorCobrar.vencidas.total;
+  const overdueCount     = resumenPorCobrar.vencidas.citas.length;
+  const completedUnpaid  = resumenPorCobrar.completadasSinCobro;
 
   // Pérdidas: solo lo que el negocio marcó como caído y no se cobró.
   const perdidas       = citasPeriodo.filter(a => (a.status === "cancelled" || a.status === "no_show") && !estaCobrada(a));
@@ -442,7 +431,7 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
     clave: `${p}|${tz}`,
     sede,
     revenue, prevRevenue, apptCount: active.length, confirmed, pending,
-    pendingRevenue, overdueRevenue, overdueCount: overdue.length, completedUnpaid,
+    pendingRevenue, overdueRevenue, overdueCount, completedUnpaid,
     lostRevenue, cancelledCount, noShowCount,
     avgTicket, clients: clientesRes.count ?? 0, revenueSeries, hourly, topServices,
     payments, todayAppts,
@@ -542,7 +531,11 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            <TenantBadge name={tenantName} />
+            {/* Campana de avisos al lado del nombre del negocio (como el portal). */}
+            <View style={s.headerAside}>
+              <TenantBadge name={tenantName} style={s.tenantBadge} />
+              <CampanaAvisos />
+            </View>
           </View>
 
           <View style={s.controlsRow}>
@@ -621,6 +614,7 @@ export default function DashboardScreen() {
                 trendVal={d.pending > 3 ? "atención" : undefined}
                 delay={110}
               />
+              {/* Se toca: abre la lista de citas que suman esta cifra (lib/porCobrar). */}
               <MetricCard
                 icon="wallet-outline"
                 label="Por cobrar"
@@ -628,6 +622,9 @@ export default function DashboardScreen() {
                 sub={porCobrarSub}
                 alert={d.overdueCount > 0}
                 delay={160}
+                onPress={() => router.push(RUTA_POR_COBRAR)}
+                a11yLabel={`Por cobrar: ${fmtMoneyFull(d.pendingRevenue)}${d.overdueCount > 0 ? `, ${fmtMoneyFull(d.overdueRevenue)} vencido` : ""}. Ver detalle`}
+                a11yHint="Muestra de qué citas es y deja cobrarlas"
               />
               <MetricCard
                 icon="close-circle-outline"
@@ -767,6 +764,9 @@ export default function DashboardScreen() {
 
 const s = StyleSheet.create({
   headerRow:   { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  headerAside: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "58%" },
+  // Con la campana al lado el nombre se corta antes, para no apretar el saludo.
+  tenantBadge: { alignSelf: "center", flexShrink: 1, maxWidth: 150 },
   greeting:    { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
   date:        { fontSize: 15.5, fontFamily: Fonts.serifItalic, marginTop: 2, textTransform: "capitalize" },
   sedeChip:    { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: 8 },

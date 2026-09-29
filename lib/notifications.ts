@@ -3,8 +3,8 @@ import Constants from "expo-constants";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
-import { fmt12 } from "./format";
-import { fmtDia, hoyNegocio, instanteDe, zonaActiva } from "./tz";
+import { textoRecordatorioCita } from "./avisos";
+import { hoyNegocio, instanteDe, zonaActiva } from "./tz";
 
 /**
  * Notificaciones del dispositivo.
@@ -15,17 +15,25 @@ import { fmtDia, hoyNegocio, instanteDe, zonaActiva } from "./tz";
  *    login y al cambiar de cuenta (registrarPushDelDispositivo) y se borra del
  *    servidor al cerrar sesión (borrarPushTokenDelServidor), para que el
  *    teléfono no siga recibiendo nombres de clientes de otro negocio.
- *  · Recordatorios locales: avisos AL DUEÑO de sus próximas citas. No son el
- *    recordatorio al cliente (ese lo manda el servidor por WhatsApp con la
- *    plantilla de Ajustes → Recordatorios). Se programan en la hora del
- *    NEGOCIO, se cancelan si la cita ya no está vigente y al cerrar sesión.
+ *  · Recordatorios locales: avisos AL DUEÑO de sus próximas citas ("Recuerda:
+ *    mañana a las 3:00 PM tienes una cita con Juan para Corte."). No son el
+ *    recordatorio al cliente (ese lo manda el servidor por WhatsApp y correo).
+ *    Se programan en la hora del NEGOCIO, se cancelan si la cita ya no está
+ *    vigente y al cerrar sesión, y se pueden apagar en ESTE teléfono desde
+ *    Ajustes → Recordatorios (avisosDeCitaActivos / activarAvisosDeCita).
+ *
+ * TOCAR UNA NOTIFICACIÓN (push o local) abre la campana del Panel: lo hace
+ * useAbrirAvisosAlTocar (lib/useAvisos) con alTocarNotificacion, solo al dueño.
  *
  * ANDROID: sin FCM configurado en Firebase (google-services.json en el build)
  * getExpoPushTokenAsync falla y no llega ningún push remoto. Es una acción
  * del dueño de la cuenta de Firebase/EAS, no se arregla desde el código.
  */
 
-// Cómo se muestran con la app abierta.
+// Cómo se muestran con la app abierta: el push del portal ("Nueva cita 📅",
+// "Cita cancelada ⚠️", "Cita reagendada 🔄") y los avisos locales salen como
+// banner, quedan en el centro de notificaciones y suenan. Se fija al importar
+// este módulo, que carga app/_layout.tsx al arrancar.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -42,8 +50,17 @@ const PREFIJO_CITA = "appt-";
 const ID_RESUMEN = "daily-briefing";
 /** iOS guarda como máximo 64 notificaciones locales pendientes y descarta el resto en silencio. */
 const MAX_RECORDATORIOS = 40;
+/** "0" = este teléfono NO avisa antes de cada cita. Sin valor (o "1") = sí, que es lo normal. */
+const CLAVE_AVISOS_CITA = "zyncra_avisos_cita_telefono";
 
 let tokenEnMemoria: string | null = null;
+let avisosCitaEnMemoria: boolean | null = null;
+/**
+ * Sube al cerrar sesión (cancelarTodasLasNotificaciones). Lo que se esté
+ * programando de esa cuenta (p. ej. el Panel con 40 citas) se detiene y no
+ * deja avisos con nombres de clientes en un teléfono sin sesión.
+ */
+let generacionAvisos = 0;
 
 async function haySesion(): Promise<boolean> {
   try {
@@ -204,9 +221,70 @@ export async function borrarPushTokenDelServidor(tenantId: string): Promise<void
  * nombres de clientes). Para cerrar sesión y eliminar la cuenta.
  */
 export async function cancelarTodasLasNotificaciones(): Promise<void> {
+  generacionAvisos++;
   await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
   await Notifications.dismissAllNotificationsAsync().catch(() => {});
   await Notifications.setBadgeCountAsync(0).catch(() => {});
+}
+
+// ─── Avisos por cita en ESTE teléfono (se pueden apagar) ──────────────────────
+
+/**
+ * ¿Este teléfono le avisa al negocio antes de cada cita? Encendido por
+ * defecto. Se guarda POR DISPOSITIVO: otro teléfono del dueño decide aparte.
+ * Si AsyncStorage no responde se asume encendido (lo de siempre).
+ */
+export async function avisosDeCitaActivos(): Promise<boolean> {
+  if (avisosCitaEnMemoria !== null) return avisosCitaEnMemoria;
+  try {
+    const v = await AsyncStorage.getItem(CLAVE_AVISOS_CITA);
+    // Si mientras se leía el dueño tocó el interruptor, gana lo que eligió:
+    // si no, la lectura vieja lo volvía a encender en memoria.
+    if (avisosCitaEnMemoria !== null) return avisosCitaEnMemoria;
+    avisosCitaEnMemoria = v !== "0";
+    return avisosCitaEnMemoria;
+  } catch {
+    return true;
+  }
+}
+
+/** Cancela todos los avisos "appt-" programados en este teléfono. */
+async function cancelarAvisosDeCitas(): Promise<void> {
+  const programadas = await Notifications.getAllScheduledNotificationsAsync().catch(() => []);
+  for (const n of programadas) {
+    if (n.identifier.startsWith(PREFIJO_CITA)) {
+      await Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {});
+    }
+  }
+}
+
+/** Los cambios del interruptor se aplican en orden (apagar y encender rápido no se pisan). */
+let cambioDeAvisos: Promise<void> = Promise.resolve();
+
+/**
+ * Enciende o apaga los avisos por cita en este teléfono (Ajustes →
+ * Recordatorios). Apagado: cancela los programados y ya no se programan
+ * nuevos. Encendido: los vuelve a programar con refreshAllReminders.
+ */
+export function activarAvisosDeCita(
+  activo: boolean,
+  tenantId?: string | null,
+  timeZone: string = zonaActiva(),
+): Promise<void> {
+  // En memoria al instante: lo que se esté programando en este momento
+  // (p. ej. el Panel) lo ve y se detiene.
+  avisosCitaEnMemoria = activo;
+  const paso = cambioDeAvisos.then(async () => {
+    try {
+      await AsyncStorage.setItem(CLAVE_AVISOS_CITA, activo ? "1" : "0");
+    } catch {
+      // Sin almacenamiento vale para esta sesión (queda en memoria).
+    }
+    if (activo) await refreshAllReminders(tenantId, timeZone);
+    else await cancelarAvisosDeCitas();
+  });
+  cambioDeAvisos = paso.catch(() => {});
+  return paso;
 }
 
 // ─── Recordatorio de una cita ─────────────────────────────────────────────────
@@ -215,17 +293,51 @@ export type AppointmentForNotif = {
   id: string;
   date: string;       // "YYYY-MM-DD" (día del negocio)
   time: string;       // "HH:MM" o "HH:MM:SS" (hora del negocio)
-  clientName: string;
-  serviceName: string;
+  /** Vacío o null = "con un cliente". */
+  clientName?: string | null;
+  /** Vacío o null = el aviso no nombra el servicio. */
+  serviceName?: string | null;
 };
 
 const ESTADOS_VIGENTES = new Set(["pending", "confirmed"]);
 
 /**
+ * Programa el aviso sin revisar sesión ni el interruptor (quien llama ya lo
+ * hizo). `generacion` es la de cuando empezó quien llama: si entretanto se
+ * cerró sesión, no programa (o cancela el que acaba de programar).
+ */
+async function programarAviso(appt: AppointmentForNotif, hoursBefore: number, timeZone: string, generacion: number): Promise<void> {
+  const hhmm = (appt.time ?? "").slice(0, 5);
+  const inicio = instanteDe(appt.date, hhmm, timeZone);
+  if (Number.isNaN(inicio.getTime())) return;
+  const horas = Number.isFinite(hoursBefore) && hoursBefore > 0 ? hoursBefore : 24;
+  const disparo = new Date(inicio.getTime() - horas * 60 * 60 * 1000);
+  if (disparo <= new Date()) return;
+
+  // "hoy / mañana / el sábado 3 de octubre" se calcula desde que SUENA.
+  const { title, body } = textoRecordatorioCita(appt, disparo, timeZone);
+  await asegurarCanalAndroid();
+  if (generacion !== generacionAvisos) return;
+  await Notifications.scheduleNotificationAsync({
+    identifier: `${PREFIJO_CITA}${appt.id}`,
+    content: {
+      title,
+      body,
+      data: { appointmentId: appt.id },
+      ...(Platform.OS === "android" && { channelId: "reminders" }),
+    },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: disparo },
+  }).catch(() => {});
+  // Si lo apagaron o se cerró sesión mientras se programaba, no queda este suelto.
+  if (avisosCitaEnMemoria === false || generacion !== generacionAvisos) await cancelAppointmentReminder(appt.id);
+}
+
+/**
  * Programa (o reprograma) el aviso al dueño `hoursBefore` horas antes de la
  * cita. La hora se interpreta en la zona del NEGOCIO (`timeZone`, por defecto
  * la zona activa): antes era la del teléfono y con el negocio en Madrid y el
- * dueño en Bogotá el aviso llegaba 7 horas corrido.
+ * dueño en Bogotá el aviso llegaba 7 horas corrido. Con los avisos apagados
+ * en este teléfono solo cancela el que hubiera.
  *
  * `messageTemplate` se ignora a propósito: es el texto PARA EL CLIENTE
  * ("¡Hola María! Te recordamos…") y mostrárselo al dueño en su pantalla de
@@ -237,28 +349,11 @@ export async function scheduleAppointmentReminder(
   _messageTemplate?: string,
   timeZone: string = zonaActiva(),
 ): Promise<void> {
+  const generacion = generacionAvisos;
   await cancelAppointmentReminder(appt.id);
   if (!(await haySesion())) return;
-
-  const hhmm = (appt.time ?? "").slice(0, 5);
-  const inicio = instanteDe(appt.date, hhmm, timeZone);
-  if (Number.isNaN(inicio.getTime())) return;
-  const horas = Number.isFinite(hoursBefore) && hoursBefore > 0 ? hoursBefore : 24;
-  const disparo = new Date(inicio.getTime() - horas * 60 * 60 * 1000);
-  if (disparo <= new Date()) return;
-
-  const cuando = `${fmtDia(appt.date, "largo")} a las ${fmt12(hhmm)}`;
-  await asegurarCanalAndroid();
-  await Notifications.scheduleNotificationAsync({
-    identifier: `${PREFIJO_CITA}${appt.id}`,
-    content: {
-      title: "Cita próxima",
-      body: `${appt.clientName || "Cliente"} · ${appt.serviceName || "Servicio"} — ${cuando}`,
-      data: { appointmentId: appt.id },
-      ...(Platform.OS === "android" && { channelId: "reminders" }),
-    },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: disparo },
-  }).catch(() => {});
+  if (!(await avisosDeCitaActivos())) return;
+  await programarAviso(appt, hoursBefore, timeZone, generacion);
 }
 
 export async function cancelAppointmentReminder(appointmentId: string): Promise<void> {
@@ -281,7 +376,8 @@ async function horasAntesDelNegocio(tenantId: string): Promise<number> {
 /**
  * Deja el recordatorio de una cita al día con su estado actual: lo cancela si
  * ya no está pendiente/confirmada y lo reprograma si cambió fecha u hora. Para
- * la agenda al reagendar, cancelar, marcar no-show o completar.
+ * la agenda al reagendar, cancelar, marcar no-show o completar. Con los
+ * avisos apagados en este teléfono solo cancela.
  *
  *   await reprogramarRecordatorioCita(tenantId, {
  *     id, date: "2026-09-30", time: "15:30", clientName, serviceName, status: "confirmed",
@@ -293,6 +389,10 @@ export async function reprogramarRecordatorioCita(
   timeZone: string = zonaActiva(),
 ): Promise<void> {
   if (appt.status && !ESTADOS_VIGENTES.has(appt.status)) {
+    await cancelAppointmentReminder(appt.id);
+    return;
+  }
+  if (!(await avisosDeCitaActivos())) {
     await cancelAppointmentReminder(appt.id);
     return;
   }
@@ -339,8 +439,15 @@ export async function cancelarResumenDiario(): Promise<void> {
  * sin él se resuelve el negocio del dueño con sesión.
  */
 export async function refreshAllReminders(tenantId?: string | null, timeZone: string = zonaActiva()): Promise<void> {
+  const generacion = generacionAvisos;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return;
+
+  // Apagados en este teléfono: no queda ninguno programado.
+  if (!(await avisosDeCitaActivos())) {
+    await cancelarAvisosDeCitas();
+    return;
+  }
 
   let tid = tenantId ?? null;
   if (!tid) {
@@ -374,14 +481,77 @@ export async function refreshAllReminders(tenantId?: string | null, timeZone: st
     }
   }
 
+  // El interruptor se revisó arriba; la sesión también. Cada aviso reemplaza
+  // al de la misma cita (mismo identificador), así los de versiones
+  // anteriores, con el texto para el cliente, se cambian por el nuevo.
   for (const a of appts) {
-    const clientName = (a.clients as { name?: string } | null)?.name ?? "Cliente";
-    const serviceName = (a.services as { name?: string } | null)?.name ?? "Servicio";
-    await scheduleAppointmentReminder(
-      { id: a.id, date: a.appointment_date, time: a.appointment_time, clientName, serviceName },
+    // Lo apagaron, o se cerró sesión, a mitad de camino.
+    if (avisosCitaEnMemoria === false || generacion !== generacionAvisos) break;
+    await cancelAppointmentReminder(a.id);
+    await programarAviso(
+      {
+        id: a.id,
+        date: a.appointment_date,
+        time: a.appointment_time,
+        clientName: (a.clients as { name?: string | null } | null)?.name ?? null,
+        serviceName: (a.services as { name?: string | null } | null)?.name ?? null,
+      },
       horas,
-      undefined,
       timeZone,
+      generacion,
     );
+  }
+}
+
+// ─── Escuchar notificaciones ──────────────────────────────────────────────────
+
+/** Respuestas ya atendidas: el listener y la del arranque en frío pueden traer la misma. */
+const respuestasAtendidas = new Set<string>();
+
+/**
+ * Llama a `alTocar` cuando el usuario toca una notificación (push del portal o
+ * aviso local) y, una sola vez, con la que abrió la app estando cerrada
+ * (arranque en frío). Devuelve la función para dejar de escuchar.
+ *
+ * Para el arranque en frío usa getLastNotificationResponse: en
+ * expo-notifications 0.32 getLastNotificationResponseAsync está deprecada y
+ * solo envuelve a esta. Después de atenderla se borra, para que no vuelva a
+ * abrir la campana si el área del dueño se monta otra vez.
+ */
+export function alTocarNotificacion(alTocar: (datos: Record<string, unknown>) => void): () => void {
+  const atender = (r: Notifications.NotificationResponse | null | undefined) => {
+    if (!r || r.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+    const clave = `${r.notification.request.identifier}|${r.notification.date}`;
+    if (respuestasAtendidas.has(clave)) return;
+    respuestasAtendidas.add(clave);
+    try {
+      Notifications.clearLastNotificationResponse();
+    } catch {
+      // Plataforma sin esa función (web): no hay nada que borrar.
+    }
+    alTocar((r.notification.request.content.data ?? {}) as Record<string, unknown>);
+  };
+
+  let sub: { remove: () => void } | null = null;
+  try {
+    sub = Notifications.addNotificationResponseReceivedListener(atender);
+  } catch {
+    sub = null;
+  }
+  try {
+    atender(Notifications.getLastNotificationResponse());
+  } catch {
+    // Sin módulo nativo (web, tests): no hubo arranque desde una notificación.
+  }
+  return () => sub?.remove();
+}
+
+/** Llama a `alRecibir` cuando llega una notificación con la app abierta (p. ej. para recargar la campana). */
+export function alRecibirNotificacion(alRecibir: () => void): () => void {
+  try {
+    const sub = Notifications.addNotificationReceivedListener(() => alRecibir());
+    return () => sub.remove();
+  } catch {
+    return () => {};
   }
 }
