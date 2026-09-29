@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth";
+import { BILLING_GRACE_DAYS, BILLING_WARNING_DAYS, graceDaysLeft, isSubscriptionBlocked } from "./mora";
 
 /**
  * Estado de la suscripción del negocio.
@@ -23,9 +24,9 @@ import { useAuth } from "./auth";
  */
 export type SubStatus = "trial" | "active" | "overdue" | "suspended" | "cancelled";
 
-/** Espejo de BILLING_WARNING_DAYS / BILLING_GRACE_DAYS en ZyncraSas_v1/src/lib/plans.ts. */
-export const WARNING_DAYS = 5;
-export const GRACE_DAYS = 5;
+/** Espejo de BILLING_WARNING_DAYS / BILLING_GRACE_DAYS del repo web (ver lib/mora.ts). */
+export const WARNING_DAYS = BILLING_WARNING_DAYS;
+export const GRACE_DAYS = BILLING_GRACE_DAYS;
 
 /** Aviso a mostrar antes del bloqueo, o null si no hay nada que advertir. */
 export type SubscriptionNotice =
@@ -191,13 +192,16 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const isPaidStatus = status === "active" || status === "overdue" || status === "suspended";
   const daysToDue = isPaid && isPaidStatus && paidAnchor ? daysFromNow(paidAnchor) : null;
 
-  // Espejo exacto de `showBlocked` en ZyncraSas_v1/src/app/admin/layout.tsx.
-  // El guard de isPaid evita bloquear cuentas de cortesía o manuales.
+  const timing = { status, trial_ends_at: trialEndsAt, current_period_end: periodEnd, is_paid: isPaid };
+
+  // Misma regla que el panel web (isSubscriptionBlocked en src/lib/plans.ts):
+  // manda el estado del cron y, si el cron no corrió, las fechas. Las cuentas
+  // de cortesía o manuales (isPaid false) nunca se bloquean.
   // Se bloquea en cuanto hay un estado en el que confiar (servidor o el
   // último conocido en el teléfono); mientras no, los layouts esperan con
   // un spinner. Si el servidor nunca respondió y no hay nada guardado, se
   // falla abierto al agotar la espera.
-  const blocked = resuelto && isPaid && (status === "suspended" || status === "cancelled");
+  const blocked = resuelto && isSubscriptionBlocked(timing);
 
   let notice: SubscriptionNotice = null;
   if (resuelto && !blocked) {
@@ -205,9 +209,10 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       notice = { kind: "trial-ending", days: Math.max(0, trialDaysLeft) };
     } else if (isPaid && status === "overdue") {
       // En mora: lo que importa no es cuánto lleva vencido sino cuánto le
-      // queda antes de que el cron lo suspenda.
-      const overdue = daysToDue !== null ? Math.max(0, -daysToDue) : 0;
-      notice = { kind: "past-due", days: Math.max(0, GRACE_DAYS - overdue) };
+      // queda antes de que el cron lo suspenda. graceDaysLeft cuenta desde
+      // TRIAL_LAPSE_GRACE_FROM a las pruebas que quedaron atrapadas en
+      // overdue; antes aquí salía "0 días" para siempre.
+      notice = { kind: "past-due", days: Math.max(0, graceDaysLeft(timing) ?? GRACE_DAYS) };
     } else if (isPaid && status === "active" && daysToDue !== null && daysToDue >= 0 && daysToDue <= WARNING_DAYS) {
       notice = { kind: "due-soon", days: daysToDue };
     }
