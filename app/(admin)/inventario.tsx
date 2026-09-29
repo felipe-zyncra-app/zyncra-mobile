@@ -20,6 +20,9 @@ import { exigirFilas, mensajeError, revisar, traerTodo } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { fmt12, fmtMoneyFull } from "@/lib/format";
 import { diaLocalDe, fmtDia, horaLocalDe } from "@/lib/tz";
+import { getActiveLocationId } from "@/lib/active-location";
+import { filtroSedeOGeneral, movimientoEnSede, sedeDeStock } from "@/lib/sedes";
+import { cargarListaSedes, type SedeLite } from "@/components/SedeChip";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,8 @@ interface Product {
   stock_quantity: number;
   low_stock_alert: number;
   is_active: boolean;
+  /** Sede dueña del stock. null = producto viejo sin sede (antes del 29-sep). */
+  location_id: string | null;
 }
 
 type TipoMovimiento = "purchase" | "sale" | "adjustment" | "return" | "courtesy";
@@ -46,7 +51,8 @@ interface Movement {
   quantity: number;
   notes: string | null;
   created_at: string;
-  products?: { name: string; sku: string };
+  location_id: string | null;
+  products?: { name: string; sku: string; location_id: string | null } | null;
 }
 
 type Respuesta<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
@@ -54,7 +60,7 @@ type Respuesta<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
 // Área táctil extra para los botones de solo ícono (CAL-24).
 const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
-const PRODUCT_COLS = "id, sku, name, description, cost_price, sale_price, discount_type, discount_value, stock_quantity, low_stock_alert, is_active";
+const PRODUCT_COLS = "id, sku, name, description, cost_price, sale_price, discount_type, discount_value, stock_quantity, low_stock_alert, is_active, location_id";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -102,10 +108,14 @@ export default function InventarioScreen() {
   const [search, setSearch]      = useState("");
   const [loading, setLoading]    = useState(true);
   const [error, setError]        = useState<unknown>(null);
+  // Sede activa y sedes del negocio de la última carga.
+  const [sedes, setSedes]        = useState<{ activa: string | null; lista: SedeLite[] }>({ activa: null, lista: [] });
 
   const [showModal, setShowModal]   = useState(false);
   const [editing, setEditing]       = useState<Product | null>(null);
   const [form, setForm]             = useState<Partial<Product>>({});
+  // Sede del producto en el modal (null = sin elegir / sin sede).
+  const [sedeForm, setSedeForm]     = useState<string | null>(null);
   const [savingProduct, setSavingProduct] = useState(false);
 
   const [showAdjust, setShowAdjust]       = useState(false);
@@ -123,22 +133,36 @@ export default function InventarioScreen() {
     const turno = guard.nuevo();
     setLoading(true);
     try {
-      const [prods, movRes] = await Promise.all([
-        traerTodo<Product>((d, h) => supabase
-          .from("products")
-          .select(PRODUCT_COLS)
-          .eq("tenant_id", tenantId).eq("is_active", true)
-          .order("name").order("id")
-          .range(d, h) as unknown as Respuesta<Product>, { contexto: "No se pudo cargar el inventario" }),
-        supabase
-          .from("inventory_movements")
-          .select("id, product_id, type, quantity, notes, created_at, products(name, sku)")
-          .eq("tenant_id", tenantId).order("created_at", { ascending: false }).order("id").limit(100),
+      // Con sede activa: los de ESA sede + los que no tienen sede (igual que el
+      // inventario web, auditoría #11). Antes se veían los de todas las sedes.
+      const loc = await getActiveLocationId(tenantId);
+      const [prods, movRes, lista] = await Promise.all([
+        traerTodo<Product>((d, h) => {
+          let q = supabase
+            .from("products")
+            .select(PRODUCT_COLS)
+            .eq("tenant_id", tenantId).eq("is_active", true);
+          if (loc) q = q.or(filtroSedeOGeneral(loc));
+          return q.order("name").order("id").range(d, h) as unknown as Respuesta<Product>;
+        }, { contexto: "No se pudo cargar el inventario" }),
+        (() => {
+          let q = supabase
+            .from("inventory_movements")
+            .select("id, product_id, type, quantity, notes, created_at, location_id, products(name, sku, location_id)")
+            .eq("tenant_id", tenantId);
+          if (loc) q = q.or(filtroSedeOGeneral(loc));
+          return q.order("created_at", { ascending: false }).order("id").limit(100);
+        })(),
+        cargarListaSedes(tenantId, loc),
       ]);
-      const movs = (revisar(movRes, "No se pudieron cargar los movimientos") ?? []) as unknown as Movement[];
+      // Los movimientos sin sede (todos los de antes del 29-sep) se muestran
+      // en la sede de SU producto; si el producto tampoco tiene sede, en todas.
+      const movs = ((revisar(movRes, "No se pudieron cargar los movimientos") ?? []) as unknown as Movement[])
+        .filter(m => movimientoEnSede(m, loc));
       if (!turno.vigente()) return;
       setProducts(prods.map(p => ({ ...p, sku: p.sku ?? "", description: p.description ?? "" })));
       setMovements(movs);
+      setSedes({ activa: loc, lista });
       setError(null);
     } catch (e) {
       if (turno.vigente()) setError(e);
@@ -156,13 +180,18 @@ export default function InventarioScreen() {
     ? products.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
     : products;
 
+  // Con varias sedes se elige la sede de cada producto en el modal (de
+  // entrada, la activa). Con una sola, va a esa sin preguntar.
+  const eligeSede = sedes.lista.length > 1;
+
   const openCreate = () => {
     setEditing(null);
+    setSedeForm(sedes.activa);
     setForm({ sku: genSku(), name: "", description: "", cost_price: 0, sale_price: 0, discount_type: null, discount_value: 0, stock_quantity: 0, low_stock_alert: 5, is_active: true });
     setShowModal(true);
   };
 
-  const openEdit = (p: Product) => { setEditing(p); setForm({ ...p }); setShowModal(true); };
+  const openEdit = (p: Product) => { setEditing(p); setForm({ ...p }); setSedeForm(p.location_id); setShowModal(true); };
 
   const handleSave = async () => {
     if (!tenantId || ocupado.current) return;
@@ -174,15 +203,23 @@ export default function InventarioScreen() {
     if (!(costo >= 0) || !(venta >= 0)) { Alert.alert("Precio inválido", "Los precios no pueden ser negativos."); return; }
     if (!(inicial >= 0) || !(alerta >= 0)) { Alert.alert("Cantidad inválida", "El stock y la alerta deben ser números enteros positivos."); return; }
 
+    // Un producto nuevo SIEMPRE lleva sede (auditoría #11): la elegida en el
+    // modal o la activa. Antes nacía sin sede y la RLS del admin de sede lo rechazaba.
+    if (!editing && eligeSede && !sedeForm) { Alert.alert("Falta la sede", "Elige la sede a la que pertenece este producto."); return; }
+
     ocupado.current = true;
     setSavingProduct(true);
     try {
+      const sedeNueva = eligeSede ? sedeForm : await getActiveLocationId(tenantId);
       if (editing) {
         exigirFilas(await supabase.from("products").update({
           sku: form.sku?.trim() || editing.sku, name: form.name.trim(), description: form.description ?? "",
           cost_price: costo, sale_price: venta,
           discount_type: form.discount_type ?? null, discount_value: form.discount_value ?? 0,
           low_stock_alert: alerta,
+          // Solo cambia si se eligió otra sede (sirve para asignar sede a los
+          // productos viejos sin sede); el stock actual se va con el producto.
+          ...(eligeSede && sedeNueva && sedeNueva !== editing.location_id ? { location_id: sedeNueva } : {}),
         }).eq("id", editing.id).eq("tenant_id", tenantId).select("id"), "No se pudo guardar el producto");
       } else {
         // El producto nace con stock 0 y el movimiento "Stock inicial" lo sube:
@@ -193,11 +230,11 @@ export default function InventarioScreen() {
           description: form.description ?? "", cost_price: costo,
           sale_price: venta, discount_type: form.discount_type ?? null,
           discount_value: form.discount_value ?? 0, stock_quantity: 0,
-          low_stock_alert: alerta, is_active: true,
+          low_stock_alert: alerta, is_active: true, location_id: sedeNueva,
         }).select("id").single(), "No se pudo crear el producto") as { id: string };
         if (inicial > 0) {
           const mov = await supabase.from("inventory_movements").insert({
-            tenant_id: tenantId, product_id: nuevo.id,
+            tenant_id: tenantId, product_id: nuevo.id, location_id: sedeNueva,
             type: "purchase", quantity: inicial, notes: "Stock inicial", unit_cost: costo,
           });
           if (mov.error) {
@@ -267,6 +304,8 @@ export default function InventarioScreen() {
       // valor que había en pantalla y se borraban las ventas hechas mientras.
       const base = {
         tenant_id: tenantId, product_id: adjustTarget.id,
+        // La sede del producto (dueña del stock); uno viejo sin sede toma la activa.
+        location_id: sedeDeStock(adjustTarget.location_id, await getActiveLocationId(tenantId)),
         quantity: delta,
         // Snapshot del costo unitario para valorar cortesías en Finanzas.
         unit_cost: adjustTarget.cost_price ?? null,
@@ -457,6 +496,10 @@ export default function InventarioScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={[s.productName, { color: t.text }]}>{p.name}</Text>
                       <Text style={[s.productSku, { color: t.subtle }]}>{p.sku}</Text>
+                      {eligeSede && !p.location_id ? (
+                        // Los admins de sede no lo ven y su stock no es de ninguna sede.
+                        <Text style={s.sinSede}>Sin sede asignada · edítalo para asignarle una</Text>
+                      ) : null}
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
                         <StockBadge p={p} />
                         <Text style={[s.productPrice, { color: t.text }]}>{fmtMoneyFull(effectivePrice(p))}</Text>
@@ -546,6 +589,34 @@ export default function InventarioScreen() {
                     style={inputStyle} placeholder="Nombre del producto" placeholderTextColor={t.subtle} />
                 </View>
               </View>
+
+              {/* Sede: el stock de un producto es de UNA sede */}
+              {eligeSede && (
+                <View style={s.mField}>
+                  <Text style={[s.fieldLabel, { color: t.subtle }]}>Sede *</Text>
+                  <View style={s.adjustTypes}>
+                    {sedes.lista.map(l => {
+                      const active = sedeForm === l.id;
+                      return (
+                        <TouchableOpacity key={l.id} activeOpacity={0.7}
+                          style={[s.adjustTypeBtn, { backgroundColor: t.bgAlt, borderColor: t.border },
+                            active && { borderColor: Colors.red, backgroundColor: Colors.red + "12" }]}
+                          onPress={() => setSedeForm(l.id)}
+                          accessibilityRole="button" accessibilityState={{ selected: active }}>
+                          <Ionicons name="location-outline" size={14} color={active ? Colors.red : t.muted} />
+                          <Text style={[s.adjustTypeTxt, { color: active ? Colors.red : t.muted },
+                            active && { fontFamily: Fonts.bold }]} numberOfLines={1}>{l.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  <Text style={[s.hint, { color: t.subtle, marginTop: 7, marginBottom: 0 }]}>
+                    {editing
+                      ? (editing.location_id ? "El stock actual se va con el producto si lo cambias de sede." : "Este producto no tiene sede asignada: elige una.")
+                      : "El stock es de esta sede. Si vendes el mismo producto en otra sede, créalo también allá."}
+                  </Text>
+                </View>
+              )}
 
               <View style={s.mField}>
                 <Text style={[s.fieldLabel, { color: t.subtle }]}>Descripción</Text>
@@ -737,6 +808,7 @@ const s = StyleSheet.create({
   productSku:   { fontSize: 10, fontFamily: Fonts.mono, marginTop: 2 },
   productPrice: { fontSize: 13, fontFamily: Fonts.bold, fontVariant: ["tabular-nums"] },
   productDiscount: { fontSize: 11, fontFamily: Fonts.semibold, color: "#10b981" },
+  sinSede:      { fontSize: 10.5, fontFamily: Fonts.semibold, color: "#b45309", marginTop: 2 },
   // gap 8 = el hitSlop de IconButton: con menos, el área extra del botón de la
   // derecha taparía el borde del de la izquierda (tocar cerca del borde de
   // "Editar" abriría "Eliminar").

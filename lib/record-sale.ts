@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { getActiveLocationId } from "./active-location";
 import { esErrorDeRed, mensajeError, nuevoId } from "./db";
 import { verificarContrasena } from "./auth";
+import { filtroSedeOGeneral, preferirCajaDeSede, sedeDeStock } from "./sedes";
 
 /**
  * Registro de un cobro desde el móvil — espejo del POS web
@@ -39,22 +40,29 @@ export type OpenCashSession = { id: string; location_id: string | null };
  * Caja abierta con el mismo alcance que /admin/caja y el POS web: si hay sede
  * activa, la sesión tiene que ser de ESA sede; sin sede, cualquier abierta.
  * `locationId` undefined → se resuelve la sede activa; null → sin filtro de sede.
+ * `incluirGeneral`: la caja general (sin sede) también cuenta, prefiriendo la
+ * de la sede (negocio de una sola sede, ver incluyeCajaGeneral). El cobro no
+ * lo usa: el POS web exige la caja de la sede.
  * Devuelve null si no hay caja abierta y LANZA si la consulta falla (antes un
  * corte de red se leía como "la caja está cerrada").
  */
 export async function findOpenCashSession(
   tenantId: string,
   locationId?: string | null,
+  opciones: { incluirGeneral?: boolean } = {},
 ): Promise<OpenCashSession | null> {
   const loc = locationId === undefined ? await getActiveLocationId(tenantId) : locationId;
   let q = supabase.from("cash_sessions")
     .select("id, location_id")
     .eq("tenant_id", tenantId)
     .is("closed_at", null);
-  if (loc) q = q.eq("location_id", loc);
-  const { data, error } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
+  const conGeneral = !!loc && !!opciones.incluirGeneral;
+  if (loc && conGeneral) q = q.or(filtroSedeOGeneral(loc));
+  else if (loc) q = q.eq("location_id", loc);
+  const { data, error } = await q.order("opened_at", { ascending: false }).limit(conGeneral ? 2 : 1);
   if (error) throw error;
-  return data ? { id: data.id, location_id: (data.location_id as string | null) ?? null } : null;
+  const lista = (data ?? []).map(c => ({ id: c.id, location_id: (c.location_id as string | null) ?? null }));
+  return conGeneral ? preferirCajaDeSede(lista, loc) : lista[0] ?? null;
 }
 
 export interface SaleItemInput {
@@ -66,6 +74,11 @@ export interface SaleItemInput {
   item_type?: "service" | "product";
   /** Costo unitario del producto (para el costo de lo vendido en inventario). */
   unit_cost?: number | null;
+  /**
+   * Sede del producto (dueña del stock): su salida de inventario va a esa sede.
+   * null/undefined = producto viejo sin sede → la de la venta.
+   */
+  location_id?: string | null;
 }
 
 export interface PaymentLine { method: string; amount: number }
@@ -309,7 +322,9 @@ async function registrar(input: RecordSaleInput & { saleId: string }): Promise<R
             reference: saleId,
             notes: `Venta POS${input.note ? ` · ${input.note}` : ""}`,
             unit_cost: i.unit_cost ?? null,
-            ...(saleLocation ? { location_id: saleLocation } : {}),
+            // Sede del producto, o la de la venta si es uno viejo sin sede
+            // (igual que el POS web, auditoría #11).
+            location_id: sedeDeStock(i.location_id, saleLocation),
           })),
         );
         if (error) {
@@ -373,6 +388,15 @@ type MovimientoCaja = {
   cash_sessions: { closed_at: string | null } | null;
 };
 
+type MovimientoStock = {
+  product_id: string;
+  quantity: number;
+  type: string;
+  unit_cost: number | null;
+  location_id: string | null;
+  products: { location_id: string | null } | null;
+};
+
 /**
  * Anula un cobro (DIN-08 / ESQ-20).
  *
@@ -417,7 +441,7 @@ export async function voidSale(
       .select("id, session_id, tenant_id, type, amount, description, category, payment_method, created_at, cash_sessions(closed_at)")
       .eq("pos_sale_id", saleId),
     supabase.from("inventory_movements")
-      .select("product_id, quantity, type, unit_cost, location_id")
+      .select("product_id, quantity, type, unit_cost, location_id, products(location_id)")
       .eq("reference", saleId),
   ]);
   const errLectura = inv.error || gift.error || movs.error || stock.error;
@@ -522,8 +546,12 @@ export async function voidSale(
   const avisos: string[] = [];
 
   // 4. Reponer stock de lo que salió por esta venta (si no se repuso ya).
-  const salidas = (stock.data ?? []).filter(m => m.type === "sale");
-  const yaRepuesto = (stock.data ?? []).some(m => m.type === "return");
+  //    La devolución va a la misma sede que la salida. Las salidas anteriores
+  //    al 29-sep no tienen sede: se usa la del producto y, si tampoco tiene,
+  //    la de la venta (mismo orden que pos-sales/delete del portal).
+  const movsStock = (stock.data ?? []) as unknown as MovimientoStock[];
+  const salidas = movsStock.filter(m => m.type === "sale");
+  const yaRepuesto = movsStock.some(m => m.type === "return");
   if (salidas.length > 0 && !yaRepuesto) {
     const { error } = await supabase.from("inventory_movements").insert(salidas.map(m => ({
       tenant_id: sale.tenant_id,
@@ -533,7 +561,7 @@ export async function voidSale(
       reference: saleId,
       notes: "Anulación de venta POS",
       unit_cost: m.unit_cost ?? null,
-      ...(m.location_id ? { location_id: m.location_id } : {}),
+      location_id: sedeDeStock(m.location_id ?? m.products?.location_id, (sale.location_id as string | null) ?? null),
     })));
     if (error) avisos.push("No se pudo devolver el stock de los productos: ajústalo en Inventario.");
   }
