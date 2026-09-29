@@ -12,7 +12,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.zyncra.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CADisableMinimumFrameDurationOnPhone": true
       }
     },
     "android": {
@@ -33,6 +34,19 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-logo.png",
+          "imageWidth": 96,
+          "resizeMode": "contain",
+          "backgroundColor": "#111118",
+          "dark": {
+            "image": "./assets/splash-logo.png",
+            "backgroundColor": "#111118"
+          }
+        }
+      ],
       [
         "expo-notifications",
         {
