@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, KeyboardAvoidingView, ActivityIndicator, Alert,
+  TextInput, KeyboardAvoidingView, ActivityIndicator, Alert, Switch,
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
-import { mensajeError, revisar } from "@/lib/db";
+import { mensajeError, patchTenantSettings, revisar } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { refreshAllReminders } from "@/lib/notifications";
 import { ScreenHeader } from "@/components/ui";
@@ -59,6 +59,9 @@ function previewText(tmpl: string) {
  *    aprobada en el panel web. No se configura desde aquí.
  *  · message_template es el texto que arma el panel web cuando el dueño
  *    envía un recordatorio A MANO por WhatsApp (wa.me). No sale solo.
+ *  · tenants.settings.email_reminders / whatsapp_reminders apagan esos
+ *    avisos automáticos (ausente = prendido). Los lee el cron del web; son
+ *    los mismos interruptores de Configuración en el panel web.
  */
 export default function RemindersScreen() {
   const router = useRouter();
@@ -76,19 +79,29 @@ export default function RemindersScreen() {
   const [editado, setEditado]       = useState(false);
   const [saving, setSaving]         = useState(false);
   const [savedOk, setSavedOk]       = useState(false);
+  const [emailReminders, setEmailReminders]       = useState(true);
+  const [whatsappReminders, setWhatsappReminders] = useState(true);
 
   const { recargar } = useRecarga(async () => {
     if (!tenantId || editado) return;
     const turno = guard.nuevo();
     try {
       // maybeSingle: un negocio sin fila todavía no es un error.
-      const rs = revisar(
-        await supabase.from("reminder_settings")
+      const [rsRes, tenRes] = await Promise.all([
+        supabase.from("reminder_settings")
           .select("id, hours_before, message_template")
           .eq("tenant_id", tenantId).maybeSingle(),
-        "No se pudo cargar la configuración de recordatorios",
-      ) as { id: string; hours_before: number | null; message_template: string | null } | null;
+        supabase.from("tenants").select("settings").eq("id", tenantId).maybeSingle(),
+      ]);
+      const rs = revisar(rsRes, "No se pudo cargar la configuración de recordatorios") as
+        { id: string; hours_before: number | null; message_template: string | null } | null;
+      // Sin leer los interruptores no se deja guardar: se escribirían los
+      // valores por defecto (prendidos) encima de lo que eligió el dueño.
+      const ten = revisar(tenRes, "No se pudo cargar la configuración de recordatorios") as
+        { settings?: Record<string, unknown> | null } | null;
       if (!turno.vigente()) return;
+      setEmailReminders(ten?.settings?.email_reminders !== false);
+      setWhatsappReminders(ten?.settings?.whatsapp_reminders !== false);
       if (rs) {
         setHours(rs.hours_before ?? 24);
         const tpl = rs.message_template || DEFAULT_TEMPLATE;
@@ -117,6 +130,8 @@ export default function RemindersScreen() {
           .select("id"),
         "No se pudo guardar la configuración",
       );
+      // Fusión atómica (patch_tenant_settings): solo se tocan estas dos llaves.
+      await patchTenantSettings(tenantId, { email_reminders: emailReminders, whatsapp_reminders: whatsappReminders });
       setEditado(false);
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 2000);
@@ -203,12 +218,22 @@ export default function RemindersScreen() {
                   </View>
                   <Text style={s.cardTitle}>Lo envía Zyncra, sin que hagas nada</Text>
                 </View>
-                <View style={{ gap: 8 }}>
-                  <InfoLinea s={s} icono="mail-outline" texto="Correo 24 horas y 2 horas antes de la cita, si el cliente tiene correo." />
-                  <InfoLinea s={s} icono="logo-whatsapp" texto="WhatsApp 2 horas antes, solo si conectaste tu WhatsApp y elegiste una plantilla aprobada en el panel web." />
+                <View style={{ gap: 14 }}>
+                  <InterruptorAviso
+                    s={s} t={t} icono="mail-outline" titulo="Por correo"
+                    texto="24 horas y 2 horas antes de la cita, si el cliente tiene correo."
+                    valor={emailReminders}
+                    onCambio={v => { setEditado(true); setEmailReminders(v); }}
+                  />
+                  <InterruptorAviso
+                    s={s} t={t} icono="logo-whatsapp" titulo="Por WhatsApp"
+                    texto="2 horas antes, solo si conectaste tu WhatsApp y elegiste una plantilla aprobada en el panel web."
+                    valor={whatsappReminders}
+                    onCambio={v => { setEditado(true); setWhatsappReminders(v); }}
+                  />
                 </View>
                 <Text style={s.help}>
-                  Los horarios y el texto de estos avisos son fijos: no cambian con lo que configures en esta pantalla.
+                  Los horarios y el texto de estos avisos son fijos. Apagados, Zyncra deja de enviarlos a todos tus clientes.
                 </Text>
               </View>
             </Animated.View>
@@ -320,11 +345,24 @@ export default function RemindersScreen() {
   );
 }
 
-function InfoLinea({ s, icono, texto }: { s: Estilos; icono: React.ComponentProps<typeof Ionicons>["name"]; texto: string }) {
+function InterruptorAviso({ s, t, icono, titulo, texto, valor, onCambio }: {
+  s: Estilos; t: ThemeColors; icono: React.ComponentProps<typeof Ionicons>["name"];
+  titulo: string; texto: string; valor: boolean; onCambio: (v: boolean) => void;
+}) {
   return (
     <View style={s.infoLine}>
-      <Ionicons name={icono} size={14} color={Colors.success} style={{ marginTop: 2 }} />
-      <Text style={s.infoText}>{texto}</Text>
+      <Ionicons name={icono} size={14} color={valor ? Colors.success : t.subtle} style={{ marginTop: 2 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={[s.infoText, { fontFamily: Fonts.semibold }]}>{titulo}</Text>
+        <Text style={[s.infoText, { color: t.muted, fontSize: 12.5 }]}>{texto}</Text>
+      </View>
+      <Switch
+        value={valor}
+        onValueChange={onCambio}
+        trackColor={{ false: t.lineStrong, true: Colors.success + "99" }}
+        thumbColor={valor ? Colors.success : t.subtle}
+        accessibilityLabel={`Recordatorio automático ${titulo.toLowerCase()}`}
+      />
     </View>
   );
 }

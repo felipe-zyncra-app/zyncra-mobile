@@ -24,13 +24,24 @@ import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { exigirFilas, mensajeError, revisar, traerTodo } from "@/lib/db";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
+import { cargarListaSedes, sedeDeFila, type SedeLite } from "@/components/SedeChip";
+import { useSedeActiva } from "@/lib/active-location";
 
-type DayConfig = { enabled: boolean; start: string; end: string };
+/**
+ * El descanso no se edita aquí, pero viaja intacto: antes se descartaba al
+ * leer y al guardar, así que editar el horario propio de un profesional le
+ * borraba el descanso (y con él el break_soft) que venía del panel web o del
+ * horario del negocio.
+ */
+type Descanso = { break_start?: string | null; break_end?: string | null; break_soft?: boolean | null };
+type DayConfig = { enabled: boolean; start: string; end: string } & Descanso;
 type ProSchedule = { mon: DayConfig; tue: DayConfig; wed: DayConfig; thu: DayConfig; fri: DayConfig; sat: DayConfig; sun: DayConfig };
 type Pro = {
   id: string; name: string; role: string; is_active: boolean | null; user_id: string | null;
   email: string | null; photo_url: string | null; avatar_url: string | null;
   schedule?: unknown; permissions?: unknown;
+  /** Sede donde atiende. null = ficha vieja sin sede (antes del 29-sep): trabaja en todas. */
+  location_id?: string | null;
 };
 
 const DAYS: { key: keyof ProSchedule; label: string; largo: string }[] = [
@@ -60,25 +71,32 @@ function horarioBase(): ProSchedule {
 
 function buildSched(raw: unknown, base: ProSchedule = horarioBase()): ProSchedule {
   if (!raw || typeof raw !== "object") return base;
-  const r = raw as Record<string, { open?: boolean; enabled?: boolean; start?: string; end?: string } | undefined>;
+  const r = raw as Record<string, ({ open?: boolean; enabled?: boolean; start?: string; end?: string } & Descanso) | undefined>;
   const merged: ProSchedule = { ...base };
   // Formato canónico (el que leen la reserva online y la agenda): claves "0".."6" con {open,start,end}
   for (let d = 0; d < 7; d++) {
     const c = r[String(d)];
-    if (c) merged[DOW_KEYS[d]] = { enabled: !!(c.open ?? c.enabled), start: c.start ?? "09:00", end: c.end ?? "18:00" };
+    if (c) merged[DOW_KEYS[d]] = { enabled: !!(c.open ?? c.enabled), start: c.start ?? "09:00", end: c.end ?? "18:00", ...descansoDe(c) };
   }
   // Formato legado del editor móvil: claves mon..sun con {enabled}
   for (const k of Object.keys(base) as (keyof ProSchedule)[]) {
     const c = r[k];
-    if (c) merged[k] = { enabled: !!c.enabled, start: c.start ?? "09:00", end: c.end ?? "18:00" };
+    if (c) merged[k] = { enabled: !!c.enabled, start: c.start ?? "09:00", end: c.end ?? "18:00", ...descansoDe(c) };
   }
   return merged;
 }
 
+function descansoDe(c: Descanso): Descanso {
+  if (!c.break_start || !c.break_end) return {};
+  return { break_start: c.break_start, break_end: c.break_end, ...(typeof c.break_soft === "boolean" ? { break_soft: c.break_soft } : {}) };
+}
+
 // Se guarda siempre en el formato canónico para que la reserva online del web y la agenda lo respeten
-function toCanonical(sched: ProSchedule): Record<string, { open: boolean; start: string; end: string }> {
-  const out: Record<string, { open: boolean; start: string; end: string }> = {};
-  DOW_KEYS.forEach((k, dow) => { out[String(dow)] = { open: sched[k].enabled, start: sched[k].start, end: sched[k].end }; });
+function toCanonical(sched: ProSchedule): Record<string, { open: boolean; start: string; end: string } & Descanso> {
+  const out: Record<string, { open: boolean; start: string; end: string } & Descanso> = {};
+  DOW_KEYS.forEach((k, dow) => {
+    out[String(dow)] = { open: sched[k].enabled, start: sched[k].start, end: sched[k].end, ...descansoDe(sched[k]) };
+  });
   return out;
 }
 
@@ -186,8 +204,9 @@ function subirFoto(uri: string, tenantId: string, proId: string): Promise<Subida
   });
 }
 
-function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
+function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved }: {
   visible: boolean; pro: Pro | null; tenantId: string;
+  sedes: readonly SedeLite[]; sedeActiva: string | null;
   onClose: () => void; onSaved: () => Promise<void> | void;
 }) {
   const { t } = useTheme();
@@ -211,6 +230,10 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
   const [bizCargando, setBizCargando] = useState(false);
   const [bizError, setBizError]     = useState(false);
   const [perms, setPerms]           = useState<StaffPermissions>(DEFAULT_PERMISSIONS);
+  // Sede donde atiende ("" = sin elegir / sin sede). Con varias sedes la elige
+  // el dueño; con una sola va a esa, igual que el panel web.
+  const [sedeId, setSedeId]         = useState("");
+  const eligeSede = sedes.length > 1;
 
   useEffect(() => {
     if (!visible) return;
@@ -243,6 +266,11 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       });
   }, [visible, pro, tenantId, guardHorario]);
 
+  // Aparte: la sede activa llega después de abrir el modal (se lee del teléfono).
+  useEffect(() => {
+    if (visible) setSedeId(pro ? (pro.location_id ?? "") : (sedeActiva ?? ""));
+  }, [visible, pro, sedeActiva]);
+
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -267,6 +295,16 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
       Alert.alert("Revisa el horario", `El ${malo} la hora de salida debe ser después de la de entrada.`);
       return;
     }
+    // Una ficha nueva SIEMPRE lleva sede (auditoría #12 del web, 29-sep): sin
+    // location_id desaparecía de la agenda de la sede y de "Sin preferencia"
+    // en la reserva, que filtran por sede.
+    const sedeNueva: string | null = eligeSede
+      ? (sedeId || null)
+      : (sedeActiva ?? (sedes.length === 1 ? sedes[0].id : null));
+    if (!isEdit && eligeSede && !sedeNueva) {
+      Alert.alert("Elige la sede", "Elige la sede donde atiende este profesional.");
+      return;
+    }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -274,6 +312,9 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
         schedule: useCustomSched ? toCanonical(proSched) : null,
         permissions: perms,
       };
+      // Al editar solo cambia la sede si el dueño eligió otra (sirve para
+      // asignarla a las fichas viejas en NULL).
+      if (isEdit ? eligeSede && sedeNueva && sedeNueva !== pro?.location_id : true) payload.location_id = sedeNueva;
       let proId: string;
       if (isEdit) {
         exigirFilas(
@@ -438,6 +479,34 @@ function ProModal({ visible, pro, tenantId, onClose, onSaved }: {
 
             <Text style={[s.fieldLabel, { marginTop: 16, color: t.muted }]}>Cargo / Especialidad</Text>
             <TextInput style={inputStyle} value={role} onChangeText={setRole} placeholder="Ej: Estilista, Barbero..." placeholderTextColor={t.subtle} autoCapitalize="words" accessibilityLabel="Cargo" />
+
+            {eligeSede && (
+              <>
+                <Text style={[s.fieldLabel, { marginTop: 16, color: t.muted }]}>Sede{isEdit ? "" : " *"}</Text>
+                <View style={s.sedeRow}>
+                  {sedes.map(l => {
+                    const activa = sedeId === l.id;
+                    return (
+                      <TouchableOpacity
+                        key={l.id}
+                        style={[s.sedeChip, { borderColor: activa ? Colors.blue : t.lineStrong, backgroundColor: activa ? Colors.blue + "18" : "transparent" }]}
+                        onPress={() => setSedeId(l.id)}
+                        activeOpacity={0.75}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: activa }}
+                      >
+                        <Text style={[s.sedeChipText, { color: activa ? Colors.blue : t.text }]}>{l.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={[s.switchSub, { color: t.subtle, marginTop: 6 }]}>
+                  {isEdit && !pro?.location_id && !sedeId
+                    ? "Sin sede asignada: sale en todas. Elige la sede donde atiende."
+                    : "Sale en la agenda y en la reserva en línea de esta sede. Sus citas ya agendadas no cambian de sede."}
+                </Text>
+              </>
+            )}
 
             <View style={{ marginTop: 28 }}>
               <Text style={[s.fieldLabel, { marginBottom: 12, color: t.muted }]}>Cuenta de acceso</Text>
@@ -634,6 +703,14 @@ export default function TeamScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState<unknown>(null);
   const [modal, setModal]           = useState<{ visible: boolean; pro: Pro | null }>({ visible: false, pro: null });
+  const { locationId: sedeActiva } = useSedeActiva(tenantId);
+  const [sedes, setSedes]           = useState<SedeLite[]>([]);
+  useEffect(() => {
+    if (!tenantId) return;
+    let vigente = true;
+    cargarListaSedes(tenantId, sedeActiva).then(l => { if (vigente) setSedes(l); });
+    return () => { vigente = false; };
+  }, [tenantId, sedeActiva]);
 
   const { recargar } = useRecarga(async () => {
     if (!tenantId) return;
@@ -641,7 +718,7 @@ export default function TeamScreen() {
     try {
       const filas = await traerTodo<Pro>((d, h) =>
         supabase.from("professionals")
-          .select("id, name, role, is_active, user_id, email, photo_url, avatar_url, schedule, permissions")
+          .select("id, name, role, is_active, user_id, email, photo_url, avatar_url, schedule, permissions, location_id")
           .eq("tenant_id", tenantId).order("name").order("id").range(d, h),
       { contexto: "No se pudo cargar tu equipo" });
       if (!turno.vigente()) return;
@@ -690,6 +767,14 @@ export default function TeamScreen() {
                 <View style={[s.activeBadge, { backgroundColor: Colors.red + "14" }]}>
                   <Ionicons name="lock-closed" size={10} color={Colors.red} />
                   <Text style={[s.badgeText, { color: Colors.red }]}>Sin acceso</Text>
+                </View>
+              )}
+              {sedes.length > 1 && (
+                <View style={[s.activeBadge, { backgroundColor: p.location_id ? t.chipBg : "#d9770618" }]}>
+                  <Ionicons name="location-outline" size={10} color={p.location_id ? t.muted : "#d97706"} />
+                  <Text style={[s.badgeText, { color: p.location_id ? t.muted : "#d97706" }]}>
+                    {p.location_id ? sedeDeFila(sedes, p.location_id) : "Sin sede asignada"}
+                  </Text>
                 </View>
               )}
               {!!p.schedule && (
@@ -758,6 +843,8 @@ export default function TeamScreen() {
           visible={modal.visible}
           pro={modal.pro}
           tenantId={tenantId}
+          sedes={sedes}
+          sedeActiva={sedeActiva}
           onClose={() => setModal({ visible: false, pro: null })}
           onSaved={recargar}
         />
@@ -772,6 +859,9 @@ const s = StyleSheet.create({
   role:             { fontSize: 12, fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
   activeBadge:      { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: Colors.success + "14", borderRadius: Radius.full, paddingHorizontal: 7, paddingVertical: 3 },
   badgeText:        { fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold" },
+  sedeRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sedeChip:         { borderWidth: 1.5, borderRadius: Radius.full, paddingHorizontal: 14, paddingVertical: 8, minHeight: 38, justifyContent: "center" },
+  sedeChipText:     { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold" },
   inactiveBadge:    { borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3 },
   inactiveBadgeText:{ fontSize: 10, fontFamily: "SpaceGrotesk_600SemiBold" },
   empty:            { borderRadius: Radius.xl, borderWidth: 1, padding: 48, alignItems: "center", marginTop: 20 },
