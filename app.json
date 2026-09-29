@@ -2,7 +2,13 @@
   "expo": {
     "name": "Zyncra",
     "slug": "zyncra-mobile",
-    "version": "1.2.3",
+    "version": "1.2.4",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8629d2ca-d800-438b-ad2f-583c7f7bf977"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
