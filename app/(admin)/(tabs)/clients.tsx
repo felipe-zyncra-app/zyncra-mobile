@@ -25,6 +25,7 @@ import {
 } from "@/lib/loyalty";
 import { COUNTRIES, DEFAULT_COUNTRY_ISO, countryByIso, flagEmoji, separarTelefono, telefonoParaGuardar } from "@/lib/countries";
 import { buscarClientePorTelefono } from "@/lib/useClientSearch";
+import { validarCorreoCliente } from "@/lib/contacto";
 import { useListaClientes } from "@/lib/useListaClientes";
 import { ErrorDB, exigirFilas, mensajeError, revisar, traerTodo } from "@/lib/db";
 import { useGuardRespuestas } from "@/lib/useRecarga";
@@ -166,7 +167,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
       return;
     }
     const mail = email.trim().toLowerCase();
-    if (mail && !/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(mail)) {
+    if (mail && !validarCorreoCliente(mail).ok) {
       Alert.alert("Correo inválido", "Revisa el correo (ej: nombre@gmail.com) o déjalo vacío.");
       return;
     }

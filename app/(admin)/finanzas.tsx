@@ -20,6 +20,7 @@ import { fmtMoneyFull, fmt12 } from "@/lib/format";
 import { mensajeError, revisar, traerTodo, traerTodoDetalle } from "@/lib/db";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { findOpenCashSession } from "@/lib/record-sale";
+import { incluyeCajaGeneral } from "@/lib/sedes";
 import { getActiveLocationId } from "@/lib/active-location";
 import { type PaymentLine } from "@/lib/pos-payments";
 import { desglosePorMedio, lineasDePago, montoDe } from "@/lib/ingresos";
@@ -178,11 +179,15 @@ function totalCobrado(sales: Sale[]): number {
   return sales.reduce((a, s) => a + montoDe(s), 0);
 }
 
-/** Caja abierta de la sede activa con TODOS sus movimientos (DIN-07 / CAL-13 / ESQ-22). */
-async function cargarCaja(tenantId: string): Promise<{ session: CashSession | null; movements: CashMovement[] }> {
+/**
+ * Caja abierta de la sede activa con TODOS sus movimientos (DIN-07 / CAL-13 / ESQ-22).
+ * Con una sola sede también cuenta la caja general sin sede, igual que la
+ * pantalla de Caja y el Resumen web (incluyeCajaGeneral).
+ */
+async function cargarCaja(tenantId: string, loc: string | null, sedes: readonly SedeLite[]): Promise<{ session: CashSession | null; movements: CashMovement[] }> {
   // findOpenCashSession filtra por la sede activa y toma la más reciente: con
   // una caja abierta por sede, maybeSingle() sobre todas fallaba (PGRST116).
-  const abierta = await findOpenCashSession(tenantId);
+  const abierta = await findOpenCashSession(tenantId, loc, { incluirGeneral: incluyeCajaGeneral(loc, sedes.length) });
   if (!abierta) return { session: null, movements: [] };
   const session = revisar(
     await supabase.from("cash_sessions").select("id, opened_at, opening_amount, closing_amount").eq("id", abierta.id).single(),
@@ -669,7 +674,7 @@ export default function FinanzasScreen() {
     const r = rangoPersonalizado(sumarDias(hoy, -(Math.max(dias, DIAS_GRAFICO) - 1)), hoy, timezone);
     try {
       const loc = await getActiveLocationId(tenantId);
-      const [ventasRes, cajaRes, sedes] = await Promise.all([
+      const [ventasRes, { cajaRes, sedes }] = await Promise.all([
         // Paginado: el servidor corta en 1000 filas (antes limit(500) en silencio).
         // Se traen todas las sedes y el alcance se aplica en memoria: cambiar
         // entre "esta sede" y "todas" no vuelve a consultar.
@@ -684,8 +689,8 @@ export default function FinanzasScreen() {
             .order("id")
             .range(d, h),
         { contexto: "No se pudieron cargar las ventas" }),
-        cargarCaja(tenantId),
-        cargarListaSedes(tenantId, loc),
+        // La caja necesita saber cuántas sedes hay (caja general con una sola).
+        cargarListaSedes(tenantId, loc).then(async lista => ({ sedes: lista, cajaRes: await cargarCaja(tenantId, loc, lista) })),
       ]);
       if (!turno.vigente()) return;
       const todas = ventasRes.filas as unknown as Sale[];

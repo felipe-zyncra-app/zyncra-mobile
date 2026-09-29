@@ -320,7 +320,7 @@ export default function ScheduleScreen() {
                               value={conDescanso}
                               onValueChange={v => update(day.key, v
                                 ? { break_start: "12:30", break_end: "13:00" }
-                                : { break_start: null, break_end: null })}
+                                : { break_start: null, break_end: null, break_soft: null })}
                               trackColor={{ false: t.lineStrong, true: Colors.success + "99" }}
                               thumbColor={conDescanso ? Colors.success : t.subtle}
                               accessibilityLabel={`Descanso el ${day.label.toLowerCase()}`}
@@ -335,6 +335,26 @@ export default function ScheduleScreen() {
                                 <View style={s.timeLine} />
                               </View>
                               <TimePicker s={s} label="Hasta" value={cfg.break_end!} onChange={v => update(day.key, { break_end: v })} />
+                            </View>
+                          )}
+                          {conDescanso && (
+                            <View style={[s.breakHead, { marginTop: 10 }]}>
+                              <View style={{ flex: 1, paddingRight: 10 }}>
+                                <Text style={s.breakLabel}>Solo corta la grilla</Text>
+                                <Text style={s.breakHint}>
+                                  {cfg.break_soft
+                                    ? "Los turnos se reinician al terminar el descanso, pero un servicio largo puede empezar antes y seguir de largo."
+                                    : "Ningún servicio puede pisar el descanso."}
+                                </Text>
+                              </View>
+                              <Switch
+                                value={!!cfg.break_soft}
+                                // null y no false al apagarlo: es el valor por defecto, igual que el panel web.
+                                onValueChange={v => update(day.key, { break_soft: v || null })}
+                                trackColor={{ false: t.lineStrong, true: Colors.success + "99" }}
+                                thumbColor={cfg.break_soft ? Colors.success : t.subtle}
+                                accessibilityLabel={`El descanso del ${day.label.toLowerCase()} solo corta la grilla`}
+                              />
                             </View>
                           )}
                         </View>
@@ -393,6 +413,7 @@ function crearEstilos(t: ThemeColors) {
     breakBlock:    { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: t.line },
     breakHead:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     breakLabel:    { fontSize: 12.5, fontFamily: Fonts.bold, color: t.muted, textTransform: "uppercase", letterSpacing: 0.6 },
+    breakHint:     { fontSize: 11.5, fontFamily: Fonts.regular, color: t.muted, marginTop: 3, lineHeight: 16 },
 
     savedToast:    { position: "absolute", bottom: 110, left: 20, right: 20, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line, borderRadius: Radius.lg, padding: 14, zIndex: 10 },
     savedText:     { fontSize: 14, fontFamily: Fonts.semibold, color: Colors.success },

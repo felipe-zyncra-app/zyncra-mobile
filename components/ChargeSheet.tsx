@@ -10,6 +10,8 @@ import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { useClientSearch, type ClientLite } from "@/lib/useClientSearch";
 import { recordSale, type SaleItemInput } from "@/lib/record-sale";
+import { getActiveLocationId } from "@/lib/active-location";
+import { filtroSedeOGeneral } from "@/lib/sedes";
 import { fmtMoneyFull, fmt12, enlaceWhatsApp } from "@/lib/format";
 import { diaLocalDe, horaLocalDe, fmtDia, esHoy } from "@/lib/tz";
 import { mensajeError, nuevoId } from "@/lib/db";
@@ -112,6 +114,8 @@ type Service = { id: string; name: string; price: number };
 type Product = {
   id: string; name: string; sale_price: number; cost_price: number | null;
   discount_type: string | null; discount_value: number | null; stock_quantity: number;
+  /** Sede dueña del stock (null = producto viejo sin sede). */
+  location_id: string | null;
 };
 type CartItem = {
   key: string;
@@ -124,6 +128,8 @@ type CartItem = {
   unitCost?: number | null;
   /** Stock disponible (productos): tope de cantidad en el carrito. */
   maxQty?: number;
+  /** Sede del producto: su salida de stock va a esa sede, no a la de la pantalla. */
+  locationId?: string | null;
 };
 type SplitLine = { method: string; amount: string };
 type Estado = "cargando" | "listo" | "error";
@@ -206,13 +212,20 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const cargarCatalogo = async () => {
     setCatalogo("cargando");
     const apertura = aperturaRef.current;
+    // Productos de la sede del cobro (la de la cita o la activa, igual que
+    // recordSale) + los viejos sin sede, como el POS web (auditoría #11):
+    // antes salían los de todas las sedes y se vendía el stock de otra sucursal.
+    const tg = targetRef.current;
+    const loc = (tg?.kind === "appointment" ? tg.appt.locationId : null) ?? await getActiveLocationId(tenantId).catch(() => null);
+    let qProd = supabase.from("products")
+      .select("id, name, sale_price, cost_price, discount_type, discount_value, stock_quantity, location_id")
+      .eq("tenant_id", tenantId).eq("is_active", true);
+    if (loc) qProd = qProd.or(filtroSedeOGeneral(loc));
     const [svc, prod] = await Promise.all([
       // select("*"): services.is_active llega con la migración; antes de
       // aplicarla, pedir la columna rompería la consulta. Se filtra aquí.
       supabase.from("services").select("*").eq("tenant_id", tenantId).order("name"),
-      supabase.from("products")
-        .select("id, name, sale_price, cost_price, discount_type, discount_value, stock_quantity")
-        .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+      qProd.order("name"),
     ]);
     if (apertura !== aperturaRef.current) return;
     const err = svc.error || prod.error;
@@ -304,6 +317,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
       return [...prev, {
         key: `prod-${p.id}`, serviceId: null, productId: p.id, itemType: "product",
         name: p.name, price: productPrice(p), qty: 1, unitCost: p.cost_price, maxQty: p.stock_quantity,
+        locationId: p.location_id ?? null,
       }];
     });
   };
@@ -351,6 +365,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         service_id: i.serviceId, product_id: i.productId,
         item_type: i.itemType === "product" ? "product" : "service",
         unit_cost: i.unitCost ?? null,
+        location_id: i.locationId ?? null,
       }));
       const res = await recordSale({
         saleId: saleIdRef.current,

@@ -1,4 +1,4 @@
-import { recordSale, voidSale, type RecordSaleInput } from "@/lib/record-sale";
+import { findOpenCashSession, recordSale, voidSale, type RecordSaleInput } from "@/lib/record-sale";
 
 // Base en memoria con lo justo del query builder de supabase-js, para probar
 // cobro y anulación: errores, compensación e idempotencia (D8).
@@ -10,7 +10,7 @@ const mockDb: { t: Record<string, Fila[]>; fallas: Falla[]; seq: number } = { t:
 function mockReset() {
   mockDb.t = {
     pos_sales: [], pos_sale_items: [], cash_movements: [], inventory_movements: [],
-    appointments: [], cash_sessions: [], invoices: [], gift_card_transactions: [],
+    appointments: [], cash_sessions: [], invoices: [], gift_card_transactions: [], products: [],
   };
   mockDb.fallas = [];
 }
@@ -30,6 +30,12 @@ jest.mock("@/lib/supabase", () => {
       let filas = tabla.filter(pasa).map(r => ({ ...r }));
       if (st.tabla === "cash_movements") {
         filas = filas.map(r => ({ ...r, cash_sessions: { closed_at: mockDb.t.cash_sessions.find(s => s.id === r.session_id)?.closed_at ?? null } }));
+      }
+      if (st.tabla === "inventory_movements") {
+        filas = filas.map(r => {
+          const p = mockDb.t.products.find(x => x.id === r.product_id);
+          return { ...r, products: p ? { location_id: p.location_id ?? null } : null };
+        });
       }
       if (st.limit) filas = filas.slice(0, st.limit);
       if (st.count) out = { data: null, error: null, count: filas.length };
@@ -67,6 +73,12 @@ jest.mock("@/lib/supabase", () => {
       neq: (c: string, v: any) => { st.filtros.push((r: Fila) => r[c] !== v); return api; },
       in: (c: string, vs: any[]) => { st.filtros.push((r: Fila) => vs.includes(r[c])); return api; },
       is: (c: string, v: any) => { st.filtros.push((r: Fila) => (r[c] ?? null) === v); return api; },
+      // Solo la forma que usa la app: "col.eq.valor,col.is.null".
+      or: (f: string) => {
+        const conds = f.split(",").map(x => x.split("."));
+        st.filtros.push((r: Fila) => conds.some(([c, op, v]) => op === "is" ? (r[c] ?? null) === null : r[c] === v));
+        return api;
+      },
       order: () => api,
       limit: (n: number) => { st.limit = n; return api; },
       maybeSingle: () => { st.single = "maybe"; return Promise.resolve(ejecutar(st)); },
@@ -162,6 +174,51 @@ describe("recordSale", () => {
     expect(a).toEqual(b);
     expect(mockDb.t.pos_sales).toHaveLength(1);
     expect(mockDb.t.cash_movements).toHaveLength(1);
+  });
+});
+
+describe("sedes en el inventario (auditoría #11)", () => {
+  beforeEach(() => {
+    mockDb.t.cash_sessions = [{ id: "caja-a", tenant_id: T, location_id: "sede-a", closed_at: null, opened_at: "2026-09-29T13:00:00Z" }];
+  });
+
+  test("la salida de stock va a la sede del producto; uno viejo sin sede, a la de la venta", async () => {
+    const r = await recordSale(venta({
+      locationId: "sede-a",
+      items: [
+        { name: "Cera", price: 20000, quantity: 1, product_id: "p1", item_type: "product", location_id: "sede-b" },
+        { name: "Gel", price: 10000, quantity: 2, product_id: "p2", item_type: "product", location_id: null },
+      ],
+    }));
+    expect(r.ok).toBe(true);
+    expect(mockDb.t.inventory_movements.map(m => [m.product_id, m.location_id])).toEqual([["p1", "sede-b"], ["p2", "sede-a"]]);
+  });
+
+  test("anular una venta vieja sin sede en el stock: la devolución va a la sede del producto o, si no tiene, a la de la venta", async () => {
+    mockDb.t.products.push({ id: "p1", location_id: "sede-b" }, { id: "p2", location_id: null });
+    mockDb.t.pos_sales.push({ id: "v-vieja", tenant_id: T, location_id: "sede-a", appointment_id: null, total: 30000 });
+    mockDb.t.inventory_movements.push(
+      { id: "s1", product_id: "p1", type: "sale", quantity: -1, reference: "v-vieja", location_id: null },
+      { id: "s2", product_id: "p2", type: "sale", quantity: -2, reference: "v-vieja", location_id: null },
+    );
+    const r = await voidSale("v-vieja");
+    expect(r).toEqual({ ok: true });
+    const devoluciones = mockDb.t.inventory_movements.filter(m => m.type === "return");
+    expect(devoluciones.map(m => [m.product_id, m.quantity, m.location_id])).toEqual([["p1", 1, "sede-b"], ["p2", 2, "sede-a"]]);
+  });
+});
+
+describe("findOpenCashSession", () => {
+  test("por defecto solo la caja de la sede: la general (sin sede) no cuenta", async () => {
+    mockDb.t.cash_sessions = [{ id: "general", tenant_id: T, location_id: null, closed_at: null }];
+    expect(await findOpenCashSession(T, "sede-a")).toBeNull();
+  });
+
+  test("con incluirGeneral cuenta la general, pero primero la de la sede", async () => {
+    mockDb.t.cash_sessions = [{ id: "general", tenant_id: T, location_id: null, closed_at: null }];
+    expect(await findOpenCashSession(T, "sede-a", { incluirGeneral: true })).toEqual({ id: "general", location_id: null });
+    mockDb.t.cash_sessions.push({ id: "caja-a", tenant_id: T, location_id: "sede-a", closed_at: null });
+    expect(await findOpenCashSession(T, "sede-a", { incluirGeneral: true })).toEqual({ id: "caja-a", location_id: "sede-a" });
   });
 });
 

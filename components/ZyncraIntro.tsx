@@ -1,191 +1,259 @@
 import { useEffect, useRef } from "react";
-import { View, StyleSheet, Dimensions, Image } from "react-native";
+import { View, StyleSheet, Image, Pressable } from "react-native";
 import Animated, {
-  useSharedValue, useAnimatedStyle,
+  useSharedValue, useAnimatedStyle, useReducedMotion,
   withTiming, withSequence, withDelay,
-  FadeInDown, FadeIn, ZoomIn,
+  FadeInDown, FadeIn,
   Easing,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { LinearGradient } from "expo-linear-gradient";
 import { Colors, Gradients } from "@/constants/theme";
 
-const { height } = Dimensions.get("window");
-const LETTERS = ["Z", "y", "n", "c", "r", "a"];
-const BAR_W = 148;
+/**
+ * Intro de marca de la PRIMERA apertura (la decide useIntroPrimeraVez en
+ * app/_layout.tsx; las demás aperturas solo ven el splash nativo).
+ *
+ * Por qué así (2026-09-29):
+ * - El primer cuadro es IDÉNTICO al splash nativo (app.json → expo-splash-screen:
+ *   fondo Colors.ink y assets/splash-logo.png de 96 pt con esquinas de 24 pt,
+ *   centrado en la pantalla). Antes el logo entraba con ZoomIn desde la nada
+ *   sobre un splash por defecto: se veía el salto de nativo a JS.
+ * - Se puede saltar con un toque: es una intro, no un bloqueo.
+ * - Con "Reducir movimiento" solo hay fundidos (sin subir el logo, ni pulso,
+ *   ni barrido) y dura menos.
+ * - Solo transform y opacity en el hilo de UI. El brillo del logo es una capa
+ *   con la sombra ya pintada a la que solo se le anima la opacidad; animar
+ *   shadowRadius/shadowOpacity repinta la sombra en cada cuadro.
+ * - Curvas de salida fuertes, nunca ease-in: la salida anterior arrancaba
+ *   lenta justo cuando el usuario quiere entrar.
+ */
 
-// Coreografía (ms) — corta y sin tiempo muerto: el logo entra casi de inmediato
+const EASE_OUT    = Easing.bezier(0.23, 1, 0.32, 1);
+const EASE_IN_OUT = Easing.bezier(0.77, 0, 0.175, 1);
+
+const LETTERS = ["Z", "y", "n", "c", "r", "a"];
+const LOGO    = 96;   // = imageWidth del splash nativo
+const RADIUS  = 24;   // = esquinas de assets/splash-logo.png (24/96)
+const LIFT    = 44;   // cuánto sube el logo para dejar sitio a la marca
+const BAR_W   = 148;
+
+// Coreografía (ms). Todo arranca desde el cuadro del splash, sin tiempo muerto.
 const T = {
-  logo:    80,    // logo entra con spring
-  ring:    340,   // pulso único al "aterrizar" el logo
-  word:    380,   // letras en cascada
-  bar:     760,   // barrido del gradiente de marca bajo el wordmark
-  tagline: 980,   // tagline
-  exit:    1780,  // fade de salida
-  done:    2200,  // onDone
+  ring:    120,   // pulso único + brillo
+  lift:    180,   // el logo sube
+  word:    400,   // letras en cascada
+  stagger: 35,
+  bar:     700,   // barrido del gradiente de marca
+  tagline: 840,
+  exit:    1480,  // fundido de salida
+  exitMs:  280,
+  skipMs:  180,   // salida al tocar
+  safety:  3500,  // por si una animación no llega a su callback
 };
 
-// Pulso único que se expande detrás del logo cuando aterriza
+// Con "Reducir movimiento": marca y lema aparecen juntos y se sale antes.
+const T_REDUCED = { word: 120, exit: 1000 };
+
 function LandingRing() {
-  const scale = useSharedValue(0.6);
+  const scale = useSharedValue(1);
   const opacity = useSharedValue(0);
 
   useEffect(() => {
-    opacity.value = withDelay(T.ring, withSequence(
-      withTiming(0.7, { duration: 80 }),
-      withTiming(0, { duration: 820, easing: Easing.out(Easing.cubic) }),
-    ));
-    scale.value = withDelay(T.ring, withTiming(3.4, { duration: 900, easing: Easing.out(Easing.cubic) }));
-    // Shared values: referencia estable, el efecto corre una sola vez.
+    opacity.set(withDelay(T.ring, withSequence(
+      withTiming(0.6, { duration: 80 }),
+      withTiming(0, { duration: 720, easing: EASE_OUT }),
+    )));
+    scale.set(withDelay(T.ring, withTiming(2.6, { duration: 800, easing: EASE_OUT })));
   }, [opacity, scale]);
 
   const st = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: scale.value }],
+    opacity: opacity.get(),
+    transform: [{ scale: scale.get() }],
   }));
 
-  return (
-    <Animated.View style={[st, {
-      position: "absolute", width: 96, height: 96,
-      borderRadius: 48, borderWidth: 1.5, borderColor: "rgba(251,15,5,0.55)",
-    }]} />
-  );
+  return <Animated.View pointerEvents="none" style={[s.ring, st]} />;
 }
 
-export default function ZyncraIntro({ onDone }: { onDone: () => void }) {
+export default function ZyncraIntro({ onDone, onReady }: {
+  onDone: () => void;
+  /** Primer cuadro pintado: el padre oculta el splash nativo sin fundido. */
+  onReady?: () => void;
+}) {
+  const reduced = useReducedMotion();
+
   const exitOpacity = useSharedValue(1);
   const exitScale   = useSharedValue(1);
-  const logoGlow    = useSharedValue(0);
+  const lift        = useSharedValue(0);
+  const glow        = useSharedValue(0);
   const barX        = useSharedValue(-BAR_W);
-  // El padre pasa onDone como flecha nueva en cada render; si fuera dependencia
-  // del efecto, cada re-render reiniciaría la animación y el temporizador.
-  const onDoneRef = useRef(onDone);
-  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
+
+  // El padre pasa flechas nuevas en cada render; como dependencias del efecto
+  // reiniciarían la coreografía.
+  const onDoneRef  = useRef(onDone);
+  const onReadyRef = useRef(onReady);
+  useEffect(() => { onDoneRef.current = onDone; onReadyRef.current = onReady; }, [onDone, onReady]);
+
+  const finished = useRef(false);
+  const finish = () => {
+    if (finished.current) return;
+    finished.current = true;
+    onDoneRef.current();
+  };
+  const readySent = useRef(false);
+  const ready = () => {
+    if (readySent.current) return;
+    readySent.current = true;
+    onReadyRef.current?.();
+  };
 
   useEffect(() => {
-    // Un solo pulso de glow al aterrizar el logo, luego reposo tenue
-    logoGlow.value = withDelay(T.ring, withSequence(
-      withTiming(0.9,  { duration: 280 }),
-      withTiming(0.25, { duration: 650 }),
-    ));
-    // Barrido del gradiente de marca (izquierda → derecha)
-    barX.value = withDelay(T.bar, withTiming(0, { duration: 460, easing: Easing.out(Easing.cubic) }));
-    // Salida: el overlay se desvanece con un leve acercamiento
-    exitOpacity.value = withDelay(T.exit, withTiming(0, { duration: 420, easing: Easing.in(Easing.cubic) }));
-    exitScale.value   = withDelay(T.exit, withTiming(1.05, { duration: 420, easing: Easing.in(Easing.cubic) }));
+    const exitAt = reduced ? T_REDUCED.exit : T.exit;
+    if (!reduced) {
+      glow.set(withDelay(T.ring, withSequence(
+        withTiming(1,    { duration: 240, easing: EASE_OUT }),
+        withTiming(0.35, { duration: 600, easing: EASE_OUT }),
+      )));
+      lift.set(withDelay(T.lift, withTiming(-LIFT, { duration: 560, easing: EASE_IN_OUT })));
+      barX.set(withDelay(T.bar, withTiming(0, { duration: 420, easing: EASE_OUT })));
+      exitScale.set(withDelay(exitAt, withTiming(1.03, { duration: T.exitMs, easing: EASE_OUT })));
+    } else {
+      barX.set(0);
+    }
+    exitOpacity.set(withDelay(exitAt, withTiming(0, { duration: T.exitMs, easing: EASE_OUT }, done => {
+      "worklet";
+      if (done) scheduleOnRN(finish);
+    })));
 
-    const t = setTimeout(() => onDoneRef.current(), T.done);
+    const t = setTimeout(finish, T.safety);
     return () => clearTimeout(t);
-  }, [logoGlow, barX, exitOpacity, exitScale]);
+    // Una sola vez al montar: reduced no cambia durante la intro.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const exitStyle = useAnimatedStyle(() => ({
-    opacity: exitOpacity.value,
-    transform: [{ scale: exitScale.value }],
-  }));
+  // Un toque salta la intro: reemplazar la animación de salida cancela la
+  // programada.
+  const skip = () => {
+    exitOpacity.set(withTiming(0, { duration: T.skipMs, easing: EASE_OUT }, done => {
+      "worklet";
+      if (done) scheduleOnRN(finish);
+    }));
+  };
 
-  const logoGlowStyle = useAnimatedStyle(() => ({
-    shadowOpacity: logoGlow.value * 0.8,
-    shadowRadius: 20 + logoGlow.value * 26,
+  const rootStyle = useAnimatedStyle(() => ({
+    opacity: exitOpacity.get(),
+    transform: [{ scale: exitScale.get() }],
   }));
+  const logoStyle = useAnimatedStyle(() => ({ transform: [{ translateY: lift.get() }] }));
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glow.get() }));
+  const barStyle  = useAnimatedStyle(() => ({ transform: [{ translateX: barX.get() }] }));
 
-  const barStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: barX.value }],
-  }));
+  const wordAt = reduced ? T_REDUCED.word : T.word;
+  // La marca queda justo debajo del logo ya subido; sin movimiento, debajo del
+  // logo en su sitio.
+  const wordTop = LOGO / 2 + (reduced ? 18 : 18 - LIFT);
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, s.bg, exitStyle]}>
+    <Animated.View style={[StyleSheet.absoluteFill, s.bg, rootStyle]} onLayout={ready}>
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={skip}
+        accessibilityRole="button"
+        accessibilityLabel="Saltar la introducción"
+      >
+        {/* Luz ambiental estática: profundidad sin movimiento */}
+        <View pointerEvents="none" style={[s.ambientBlob, { top: -110, left: -70, backgroundColor: "rgba(251,15,5,0.10)" }]} />
+        <View pointerEvents="none" style={[s.ambientBlob, { bottom: -90, right: -90, backgroundColor: "rgba(0,39,254,0.12)" }]} />
 
-      {/* Luz ambiental estática — apenas perceptible, da profundidad sin ruido */}
-      <View style={[s.ambientBlob, { top: -110, left: -70, backgroundColor: "rgba(251,15,5,0.10)" }]} />
-      <View style={[s.ambientBlob, { bottom: -90, right: -90, backgroundColor: "rgba(0,39,254,0.12)" }]} />
-
-      <View style={s.center}>
-
-        <LandingRing />
-
-        {/* Logo */}
-        <Animated.View
-          entering={ZoomIn.delay(T.logo).springify().stiffness(200).damping(14)}
-          style={[s.logoWrap, logoGlowStyle]}>
+        {/* Logo: mismo tamaño y posición que el splash nativo */}
+        <Animated.View pointerEvents="none" style={[s.logoAnchor, logoStyle]}>
+          {!reduced && <LandingRing />}
+          <Animated.View style={[s.glow, glowStyle]} />
           <View style={s.logoBox}>
-            <Image
-              source={require("../assets/zyncra-logo.png")}
-              style={{ width: 96, height: 96, borderRadius: 22 }}
-              resizeMode="cover"
-            />
+            <Image source={require("../assets/splash-logo.png")} style={s.logoImg} resizeMode="cover" />
           </View>
         </Animated.View>
 
-        {/* Wordmark en cascada */}
-        <View style={s.wordRow}>
-          {LETTERS.map((l, i) => (
-            <Animated.Text
-              key={i}
-              entering={FadeInDown
-                .delay(T.word + i * 45)
-                .springify()
-                .stiffness(300)
-                .damping(20)}
-              style={[s.letter, i === 0 && s.letterBig]}>
-              {l}
-            </Animated.Text>
-          ))}
+        {/* Marca, barrido y lema */}
+        <View pointerEvents="none" style={[s.wordBlock, { marginTop: wordTop }]}>
+          <View style={s.wordRow}>
+            {LETTERS.map((l, i) => (
+              <Animated.Text
+                key={i}
+                entering={reduced
+                  ? FadeIn.delay(wordAt).duration(260).easing(EASE_OUT)
+                  : FadeInDown.withInitialValues({ transform: [{ translateY: 10 }] })
+                      .delay(wordAt + i * T.stagger).duration(380).easing(EASE_OUT)}
+                style={[s.letter, i === 0 && s.letterBig]}>
+                {l}
+              </Animated.Text>
+            ))}
+          </View>
+
+          <View style={s.barTrack}>
+            <Animated.View style={barStyle}>
+              <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.barFill} />
+            </Animated.View>
+          </View>
+
+          <Animated.Text
+            entering={FadeIn.delay(reduced ? T_REDUCED.word : T.tagline).duration(reduced ? 260 : 360).easing(EASE_OUT)}
+            style={s.tagline}>
+            Gestiona tu negocio inteligente
+          </Animated.Text>
         </View>
-
-        {/* Firma de gradiente de la marca — barrido de izquierda a derecha */}
-        <View style={s.barTrack}>
-          <Animated.View style={barStyle}>
-            <LinearGradient
-              colors={Gradients.brand}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={s.barFill}
-            />
-          </Animated.View>
-        </View>
-
-        {/* Tagline */}
-        <Animated.Text entering={FadeIn.delay(T.tagline).duration(520)} style={s.tagline}>
-          Gestiona tu negocio inteligente
-        </Animated.Text>
-
-      </View>
-
+      </Pressable>
     </Animated.View>
   );
 }
 
 const s = StyleSheet.create({
   bg: {
-    backgroundColor: Colors.ink,
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: Colors.ink,   // = backgroundColor del splash nativo
     zIndex: 999,
   },
   ambientBlob: {
     position: "absolute",
     width: 340, height: 340, borderRadius: 170,
   },
-  center: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    marginTop: -height * 0.02,
+  // Centro exacto de la pantalla, igual que el splash nativo.
+  logoAnchor: {
+    position: "absolute",
+    top: "50%", left: "50%",
+    width: LOGO, height: LOGO,
+    marginTop: -LOGO / 2, marginLeft: -LOGO / 2,
+    alignItems: "center", justifyContent: "center",
   },
-  logoWrap: {
-    shadowColor: "#fb0f05",
+  ring: {
+    position: "absolute",
+    width: LOGO, height: LOGO, borderRadius: LOGO / 2,
+    borderWidth: 1.5, borderColor: "rgba(251,15,5,0.55)",
+  },
+  // Sombra pintada una vez; solo cambia su opacidad.
+  glow: {
+    position: "absolute",
+    width: LOGO, height: LOGO, borderRadius: RADIUS,
+    backgroundColor: Colors.ink,
+    shadowColor: Colors.red,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 20,
-    elevation: 20,
-    borderRadius: 30,
+    shadowOpacity: 0.9,
+    shadowRadius: 34,
+    elevation: 24,
   },
   logoBox: {
-    width: 96, height: 96, borderRadius: 24,
+    width: LOGO, height: LOGO, borderRadius: RADIUS,
     overflow: "hidden",
+  },
+  logoImg: { width: LOGO, height: LOGO },
+  wordBlock: {
+    position: "absolute",
+    top: "50%", left: 0, right: 0,
+    alignItems: "center",
+    gap: 14,
   },
   wordRow: {
     flexDirection: "row",
     alignItems: "baseline",
-    marginTop: 4,
   },
   letter: {
     fontSize: 32,
@@ -215,6 +283,5 @@ const s = StyleSheet.create({
     color: "rgba(255,255,255,0.45)",
     letterSpacing: 1.2,
     textTransform: "uppercase",
-    marginTop: 2,
   },
 });

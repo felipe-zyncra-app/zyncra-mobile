@@ -21,7 +21,8 @@ import { getActiveLocationId } from "@/lib/active-location";
 import { exigirFilas, mensajeError, revisar, traerTodo, traerPorIds } from "@/lib/db";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { leerMonto, totalesCaja, esIngresoHuerfano } from "@/lib/dinero";
-import { cargarListaSedes, nombreSede } from "@/components/SedeChip";
+import { cargarListaSedes, nombreSede, type SedeLite } from "@/components/SedeChip";
+import { filtroSedeOGeneral, incluyeCajaGeneral, preferirCajaDeSede } from "@/lib/sedes";
 
 type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
@@ -46,13 +47,25 @@ const EGRESO_CATS  = ["Arriendo", "Nómina", "Insumos", "Servicios públicos", "
 const COLS_SESION = "id, location_id, opening_amount, opening_note, opened_at, closed_at, closing_amount, closing_note";
 const COLS_MOV    = "id, session_id, type, amount, description, category, payment_method, created_at, pos_sale_id, layaway_payment_id";
 
-/** Caja abierta de la sede activa (misma regla que /admin/caja y el POS web). */
-async function cajaAbierta(tenantId: string): Promise<Session | null> {
+/**
+ * Sede de la caja y si la caja general (sin sede) cuenta como suya: solo en un
+ * negocio de una sola sede, donde las cajas viejas se abrieron sin sede y no
+ * había otra forma de verlas ni de cerrarlas (web TabCaja, 29-sep).
+ */
+async function alcanceCaja(tenantId: string): Promise<{ loc: string | null; sedes: SedeLite[]; incluirGeneral: boolean }> {
   const loc = await getActiveLocationId(tenantId);
+  const sedes = await cargarListaSedes(tenantId, loc);
+  return { loc, sedes, incluirGeneral: incluyeCajaGeneral(loc, sedes.length) };
+}
+
+/** Caja abierta de la sede activa (misma regla que /admin/caja y el POS web). */
+async function cajaAbierta(tenantId: string, loc: string | null, incluirGeneral: boolean): Promise<Session | null> {
   let q = supabase.from("cash_sessions").select(COLS_SESION).eq("tenant_id", tenantId).is("closed_at", null);
-  if (loc) q = q.eq("location_id", loc);
-  const data = revisar(await q.order("opened_at", { ascending: false }).limit(1).maybeSingle(), "No se pudo revisar la caja");
-  return (data as Session | null) ?? null;
+  if (loc && incluirGeneral) q = q.or(filtroSedeOGeneral(loc));
+  else if (loc) q = q.eq("location_id", loc);
+  const data = (revisar(await q.order("opened_at", { ascending: false }).limit(incluirGeneral ? 2 : 1), "No se pudo revisar la caja") ?? []) as Session[];
+  // Con la general incluida puede haber dos abiertas: primero la de la sede, que es la que usa el POS.
+  return incluirGeneral ? preferirCajaDeSede(data, loc) : data[0] ?? null;
 }
 
 export default function CajaScreen() {
@@ -74,6 +87,8 @@ export default function CajaScreen() {
   // De qué sede es la caja (solo con varias sedes: DIN-12). Una caja es un
   // cajón físico: siempre es la de la sede activa, nunca "todas".
   const [sede, setSede]             = useState<string | null>(null);
+  // Negocio de una sola sede: sus cajas viejas sin sede se muestran como "Caja general".
+  const [conGeneral, setConGeneral] = useState(false);
 
   // Apertura
   const [openAmt, setOpenAmt]       = useState("");
@@ -107,8 +122,8 @@ export default function CajaScreen() {
     if (!tenantId) return;
     const turno = guard.nuevo();
     try {
-      const loc = await getActiveLocationId(tenantId);
-      const [sesion, sedes] = await Promise.all([cajaAbierta(tenantId), cargarListaSedes(tenantId, loc)]);
+      const { loc, sedes, incluirGeneral } = await alcanceCaja(tenantId);
+      const sesion = await cajaAbierta(tenantId, loc, incluirGeneral);
       // Todos los movimientos (sin tope): el saldo y el arqueo tienen que
       // cuadrar con el cierre aunque la sesión tenga cientos.
       const movs = sesion
@@ -121,6 +136,7 @@ export default function CajaScreen() {
         : [];
       if (!turno.vigente()) return;
       setSede(nombreSede(sedes, loc));
+      setConGeneral(incluirGeneral);
       setSession(sesion);
       if (!sesion) setCloseModal(false);
       setMovements(movs);
@@ -136,10 +152,11 @@ export default function CajaScreen() {
     if (!tenantId) return;
     const turno = guardHist.nuevo();
     try {
-      const loc = await getActiveLocationId(tenantId);
+      const { loc, incluirGeneral } = await alcanceCaja(tenantId);
       let q = supabase.from("cash_sessions").select(COLS_SESION)
         .eq("tenant_id", tenantId).not("closed_at", "is", null);
-      if (loc) q = q.eq("location_id", loc);
+      if (loc && incluirGeneral) q = q.or(filtroSedeOGeneral(loc));
+      else if (loc) q = q.eq("location_id", loc);
       const ss = (revisar(await q.order("opened_at", { ascending: false }).limit(30), "No se pudo cargar el historial de caja") ?? []) as Session[];
       const mvs = ss.length === 0 ? [] : await traerPorIds<Pick<Movement, "session_id" | "type" | "amount" | "payment_method">>(
         ss.map(x => x.id),
@@ -190,7 +207,8 @@ export default function CajaScreen() {
     ocupado.current = true;
     setOpening(true);
     try {
-      const yaAbierta = await cajaAbierta(tenantId);
+      const { loc: locationId, incluirGeneral } = await alcanceCaja(tenantId);
+      const yaAbierta = await cajaAbierta(tenantId, locationId, incluirGeneral);
       if (yaAbierta) {
         Alert.alert(
           "La caja ya está abierta",
@@ -200,7 +218,6 @@ export default function CajaScreen() {
         return;
       }
       // Sede activa: el POS exige caja abierta EN LA SEDE ACTIVA para cobrar.
-      const locationId = await getActiveLocationId(tenantId);
       revisar(await supabase.from("cash_sessions").insert({
         tenant_id: tenantId, opening_amount: amt, opening_note: openNote.trim() || null,
         ...(locationId ? { location_id: locationId } : {}),
@@ -387,9 +404,19 @@ export default function CajaScreen() {
             <View style={s.statusDot} />
             <Text style={s.statusText}>
               Caja abierta desde {abiertaHoy ? "las " : "el "}{cuandoAbrio}
+              {conGeneral && !session.location_id ? " · Caja general" : ""}
               {session.opening_note ? ` · ${session.opening_note}` : ""}
             </Text>
           </View>
+
+          {conGeneral && !session.location_id && (
+            <View style={s.warnBox}>
+              <Ionicons name="alert-circle-outline" size={18} color="#d97706" />
+              <Text style={s.warnText}>
+                Esta caja se abrió sin sede y el POS no cobra en ella. Ciérrala y abre la caja de nuevo para seguir cobrando.
+              </Text>
+            </View>
+          )}
 
           {huerfanos.length > 0 && (
             <View style={s.warnBox}>
@@ -515,6 +542,7 @@ export default function CajaScreen() {
                       <Text style={s.histDate}>{fmtDia(dia, "corto")}</Text>
                       <Text style={s.histTime}>
                         {fmt12(horaLocalDe(h.session.opened_at, timezone))} → {h.session.closed_at ? fmt12(horaLocalDe(h.session.closed_at, timezone)) : "—"}
+                        {conGeneral && !h.session.location_id ? "  ·  Caja general" : ""}
                         {h.session.opening_note ? `  ·  ${h.session.opening_note}` : ""}
                       </Text>
                     </View>
