@@ -58,6 +58,35 @@ export function parsePorcentaje(texto: string | null | undefined): number {
   return Math.min(n, 100);
 }
 
+/**
+ * Un monto como texto para un campo editable, que leerMonto vuelve a leer
+ * igual: sin centavos "40000"; con centavos "12.50" o "12".
+ */
+export function montoATexto(n: number, opciones: { decimales?: boolean } = {}): string {
+  const decimales = opciones.decimales ?? !monedaSinDecimales();
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return decimales ? n.toFixed(2).replace(/\.00$/, "") : String(Math.round(n));
+}
+
+/**
+ * Con qué suele pagar un cliente en efectivo, para los atajos de "Recibe" en
+ * la hoja de cobro: el total redondeado hacia arriba a 5, 10, 20, 50 y 100
+ * (en miles si la moneda no usa centavos, como el peso), sin repetir y solo
+ * los que superan el total. "Exacto" va aparte.
+ *   $35.000 → $40.000, $50.000, $100.000
+ */
+export function sugerenciasEfectivo(total: number, opciones: { decimales?: boolean; max?: number } = {}): number[] {
+  if (!Number.isFinite(total) || total <= 0) return [];
+  const unidad = (opciones.decimales ?? !monedaSinDecimales()) ? 1 : 1000;
+  const out: number[] = [];
+  for (const billete of [5, 10, 20, 50, 100]) {
+    const paso = billete * unidad;
+    const v = Math.ceil(total / paso) * paso;
+    if (v > total && !out.includes(v)) out.push(v);
+  }
+  return out.sort((a, b) => a - b).slice(0, opciones.max ?? 3);
+}
+
 // ─── Caja ────────────────────────────────────────────────────────────────────
 
 export type MovimientoCaja = {

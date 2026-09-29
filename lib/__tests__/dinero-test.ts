@@ -1,6 +1,7 @@
 import {
   leerMonto, parseMonto, parsePorcentaje, monedaSinDecimales,
   totalesCaja, esIngresoHuerfano, agruparPorItem, metodoAFactus, prorratearPrecios,
+  montoATexto, sugerenciasEfectivo,
 } from "@/lib/dinero";
 import { configurarMoneda } from "@/lib/format";
 
@@ -93,5 +94,38 @@ describe("facturación", () => {
     expect(precios[0] + precios[1]).toBe(52000);
     expect(diferencia).toBe(0);
     expect(prorratearPrecios(items, 65000).precios).toEqual([50000, 15000]);
+  });
+});
+
+describe("efectivo en la hoja de cobro", () => {
+  test("sugiere los billetes que siguen al total, sin repetir", () => {
+    expect(sugerenciasEfectivo(35000, { decimales: false })).toEqual([40000, 50000, 100000]);
+    expect(sugerenciasEfectivo(48000, { decimales: false })).toEqual([50000, 60000, 100000]);
+    expect(sugerenciasEfectivo(8000, { decimales: false })).toEqual([10000, 20000, 50000]);
+  });
+
+  test("nunca sugiere el total exacto ni algo menor (Exacto va aparte)", () => {
+    for (const total of [5000, 20000, 100000, 250000]) {
+      for (const v of sugerenciasEfectivo(total, { decimales: false })) expect(v).toBeGreaterThan(total);
+    }
+    expect(sugerenciasEfectivo(250000, { decimales: false })).toEqual([260000, 300000]);
+  });
+
+  test("con centavos usa billetes de 5, 10, 20…", () => {
+    expect(sugerenciasEfectivo(12.5, { decimales: true })).toEqual([15, 20, 50]);
+  });
+
+  test("sin total no hay sugerencias", () => {
+    expect(sugerenciasEfectivo(0)).toEqual([]);
+    expect(sugerenciasEfectivo(Number.NaN)).toEqual([]);
+  });
+
+  test("montoATexto se vuelve a leer igual", () => {
+    expect(montoATexto(40000, { decimales: false })).toBe("40000");
+    expect(leerMonto(montoATexto(40000, { decimales: false }), { decimales: false })).toBe(40000);
+    expect(montoATexto(12.5, { decimales: true })).toBe("12.50");
+    expect(leerMonto(montoATexto(12.5, { decimales: true }), { decimales: true })).toBe(12.5);
+    expect(montoATexto(20, { decimales: true })).toBe("20");
+    expect(montoATexto(0)).toBe("");
   });
 });
