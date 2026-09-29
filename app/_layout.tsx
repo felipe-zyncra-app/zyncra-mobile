@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, SpaceGrotesk_400Regular, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk";
 import { JetBrainsMono_500Medium, JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono";
@@ -16,6 +17,26 @@ import ZyncraIntro from "@/components/ZyncraIntro";
 import { liberarPushPendiente, registrarPushDelDispositivo, scheduleDailyBriefing } from "@/lib/notifications";
 
 const CLAVE_INTRO = "zyncra_intro_vista";
+
+// Splash nativo (app.json → expo-splash-screen) visible hasta que la app tenga
+// algo real que mostrar: fuentes cargadas, marca de la intro leída y sesión
+// resuelta. Antes el sistema lo quitaba solo y se veían el spinner de
+// PantallaCargando y luego la app (dos saltos en cada arranque en frío).
+SplashScreen.preventAutoHideAsync().catch(() => {});
+// Si algo se cuelga (red, AsyncStorage), no dejar al usuario mirando el logo.
+const SPLASH_MAX_MS = 5000;
+let splashOculto = false;
+/**
+ * Arranque normal: fundido corto (150 ms: se ve decenas de veces al día).
+ * Primera apertura: sin fundido, porque el primer cuadro de ZyncraIntro es el
+ * mismo splash y cualquier fundido se vería como parpadeo.
+ */
+function ocultarSplash(conFundido: boolean) {
+  if (splashOculto) return;
+  splashOculto = true;
+  SplashScreen.setOptions(conFundido ? { duration: 150, fade: true } : { duration: 0, fade: false });
+  SplashScreen.hideAsync().catch(() => {});
+}
 
 /**
  * Lo que depende de QUIÉN tiene la sesión. Antes el token push se registraba
@@ -68,6 +89,14 @@ function useIntroPrimeraVez(): { estado: "pendiente" | "mostrar" | "no"; termina
 function AppContent() {
   const { t } = useTheme();
   const intro = useIntroPrimeraVez();
+  const { estado } = useAuth();
+
+  // Sin intro: se quita el splash cuando la sesión ya decidió a dónde ir, así
+  // la primera pantalla que se ve es la de verdad y no el spinner. Con intro:
+  // lo quita la intro al pintar su primer cuadro (onReady).
+  useEffect(() => {
+    if (intro.estado === "no" && estado !== "cargando") ocultarSplash(true);
+  }, [intro.estado, estado]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -82,12 +111,16 @@ function AppContent() {
       {/* Mientras se lee la marca de la intro (unos ms) se tapa con el fondo
           para no mostrar un cuadro de la app y luego la intro encima. */}
       {intro.estado === "pendiente" && <View style={[StyleSheet.absoluteFill, { backgroundColor: t.bg }]} />}
-      {intro.estado === "mostrar" && <ZyncraIntro onDone={intro.terminar} />}
+      {intro.estado === "mostrar" && <ZyncraIntro onDone={intro.terminar} onReady={() => ocultarSplash(false)} />}
     </GestureHandlerRootView>
   );
 }
 
 function Raiz() {
+  useEffect(() => {
+    const t = setTimeout(() => ocultarSplash(true), SPLASH_MAX_MS);
+    return () => clearTimeout(t);
+  }, []);
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular,
     SpaceGrotesk_600SemiBold,
