@@ -16,13 +16,15 @@ export type EstadoCupos = "cargando" | "error" | "cerrado" | "listo";
  * leía como "día libre" y se ofrecían todos, AGE-X1).
  */
 export default function SelectorHora({
-  estado, error, onReintentar, cupos, seleccionada, onSeleccionar, bloqueos,
+  estado, error, onReintentar, cupos, ocupados = [], seleccionada, onSeleccionar, bloqueos,
   avisoHora, mensajeCerrado, horarioPorDefecto, onConfigurarHorario,
 }: {
   estado: EstadoCupos;
   error?: unknown;
   onReintentar: () => void;
   cupos: string[];
+  /** Cupos de la grilla ya tomados: se muestran tachados y no se pueden elegir. */
+  ocupados?: string[];
   seleccionada: string | null;
   onSeleccionar: (hora: string) => void;
   /** Ausencias y cierres del día (se listan para que se entienda el hueco). */
@@ -36,6 +38,8 @@ export default function SelectorHora({
 }) {
   const { t } = useTheme();
   const box = [s.box, { backgroundColor: t.cardSolid, borderColor: t.line }];
+  const tomados = new Set(ocupados);
+  const grilla = [...new Set([...cupos, ...ocupados])].sort();
 
   return (
     <View>
@@ -86,20 +90,27 @@ export default function SelectorHora({
         </View>
       ) : (
         <View style={{ gap: 8 }}>
-          {chunk(cupos, 3).map((row, ri) => (
+          {chunk(grilla, 3).map((row, ri) => (
             <View key={ri} style={{ flexDirection: "row", gap: 8 }}>
               {row.map(h => {
-                const activo = seleccionada === h;
+                const tomado = tomados.has(h);
+                const activo = !tomado && seleccionada === h;
                 return (
                   <TouchableOpacity
                     key={h}
-                    style={[s.slot, { backgroundColor: activo ? Colors.red : t.cardSolid, borderColor: activo ? Colors.red : t.line }]}
+                    style={[s.slot, {
+                      backgroundColor: activo ? Colors.red : tomado ? t.chipBg : t.cardSolid,
+                      borderColor: activo ? Colors.red : t.line,
+                    }]}
                     onPress={() => onSeleccionar(h)}
+                    disabled={tomado}
                     activeOpacity={0.75}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: activo }}
+                    accessibilityState={{ selected: activo, disabled: tomado }}
+                    accessibilityLabel={tomado ? `${fmt12(h)}, ocupado` : fmt12(h)}
                   >
-                    <Text style={[s.slotText, { color: activo ? "white" : t.text }]}>{fmt12(h)}</Text>
+                    <Text style={[s.slotText, { color: activo ? "white" : tomado ? t.subtle : t.text },
+                      tomado && { textDecorationLine: "line-through" }]}>{fmt12(h)}</Text>
                   </TouchableOpacity>
                 );
               })}

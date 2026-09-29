@@ -14,12 +14,13 @@ import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import {
-  avisosDeHorario, cargarCatalogoAgenda, effectiveDayHours, esHorarioOcupado, mensajeErrorCita,
-  minsToTime, profesionalesDeLaSede, timeToMins, verificarCupo,
+  avisosDeHorario, cargarCatalogoAgenda, effectiveDayHours, esHorarioOcupado, filtrarServicios, mensajeErrorCita,
+  minsToTime, profesionalesDeLaSede, servicioPorCodigo, timeToMins, verificarCupo,
   type CatalogoAgenda, type ProfesionalAgenda, type ServicioAgenda,
 } from "@/lib/scheduling";
 import { buscarClientePorTelefono, useClientSearch } from "@/lib/useClientSearch";
 import { DEFAULT_COUNTRY_ISO, telefonoParaGuardar } from "@/lib/countries";
+import { correoClienteObligatorio, validarCorreoCliente } from "@/lib/contacto";
 import { fmt12, fmtMoneyFull, fmtTelefono, localDateStr } from "@/lib/format";
 import { getActiveLocationId } from "@/lib/active-location";
 import { ErrorDB, exigirFilas, mensajeError, nuevoId, revisar } from "@/lib/db";
@@ -77,9 +78,14 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
   const [selectedPro, setSelectedPro]         = useState<ProfesionalAgenda | null>(null);
   const [clientSearch, setClientSearch]       = useState("");
+  const [serviceQuery, setServiceQuery]       = useState("");
   const [isNewClient, setIsNewClient]         = useState(false);
   const [newClientName, setNewClientName]     = useState("");
   const [newClientPhone, setNewClientPhone]   = useState("");
+  const [newClientEmail, setNewClientEmail]   = useState("");
+  // Correo obligatorio al crear cliente (ver correoClienteObligatorio). Se
+  // relee al abrir; si esa lectura falla se queda con lo último conocido.
+  const [emailRequired, setEmailRequired]     = useState(true);
   const [apptFields, setApptFields]           = useState<ApptField[]>([]);
   const [fieldsError, setFieldsError]         = useState<unknown>(null);
   const [fieldValues, setFieldValues]         = useState<Record<string, string>>({});
@@ -99,13 +105,17 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setLoading(true);
     setLoadError(null);
     try {
-      const [cat, loc, clis] = await Promise.all([
+      const [cat, loc, clis, ten] = await Promise.all([
         cargarCatalogoAgenda(tenantId),
         getActiveLocationId(tenantId),
         supabase.from("clients").select("id, name, phone").eq("tenant_id", tenantId).order("name").order("id").limit(150),
+        supabase.from("tenants").select("settings").eq("id", tenantId).maybeSingle(),
       ]);
       const lista = revisar(clis, "No se pudieron cargar los clientes") ?? [];
       if (!turno.vigente()) return;
+      if (!ten.error) {
+        setEmailRequired(correoClienteObligatorio((ten.data as { settings?: Record<string, unknown> | null } | null)?.settings));
+      }
       setCatalogo(cat);
       setSede(loc);
       setClients(lista.map((c: { id: string; name: string; phone: string | null }) => ({ ...c, phone: c.phone ?? "" })));
@@ -133,8 +143,10 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setSelectedService(null);
     setSelectedTime(null);
     setClientSearch("");
+    setServiceQuery("");
     setNewClientName("");
     setNewClientPhone("");
+    setNewClientEmail("");
     setIsNewClient(false);
     setFieldValues({});
     setSelectedDay(base);
@@ -168,6 +180,17 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     [catalogo, sede],
   );
   const servicios = useMemo(() => (catalogo?.servicios ?? []).filter(x => x.activo), [catalogo]);
+  const serviciosVisibles = useMemo(() => {
+    const lista = filtrarServicios(servicios, serviceQuery);
+    // El elegido no desaparece aunque el texto ya no lo nombre.
+    return selectedService && !lista.some(x => x.id === selectedService.id) ? [selectedService, ...lista] : lista;
+  }, [servicios, serviceQuery, selectedService]);
+  const buscarServicio = (v: string) => {
+    setServiceQuery(v);
+    // Un código exacto (el que se le asigna en el admin) elige el servicio solo.
+    const exacto = servicioPorCodigo(servicios, v);
+    if (exacto) setSelectedService(exacto);
+  };
 
   const cupos = useCuposDelDia({
     tenantId,
@@ -199,10 +222,14 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   // Sin selector de país aquí: Colombia por defecto, y "+52…" respeta el país escrito.
   const telNuevo = newClientPhone.trim() ? telefonoParaGuardar(DEFAULT_COUNTRY_ISO, newClientPhone) : null;
   const telNuevoValido = !!telNuevo?.valido;
+  // Correo del cliente nuevo: si se escribe, siempre tiene que ser válido;
+  // vacío solo vale donde es opcional.
+  const correoNuevo = newClientEmail.trim();
+  const correoNuevoValido = correoNuevo ? validarCorreoCliente(correoNuevo).ok : !emailRequired;
 
   const clientName = isNewClient ? newClientName.trim() : (selectedClient?.name ?? "");
   const canStep0   = selectedPro !== null;
-  const canStep1   = isNewClient ? newClientName.trim().length >= 2 && telNuevoValido : selectedClient !== null;
+  const canStep1   = isNewClient ? newClientName.trim().length >= 2 && telNuevoValido && correoNuevoValido : selectedClient !== null;
   const canStep2   = selectedService !== null;
   const requiredFieldsOk = apptFields.every(f => !f.required || (fieldValues[f.id] ?? "").trim().length > 0);
   const canSave    = selectedTime !== null && requiredFieldsOk && selectedDay >= hoy;
@@ -233,6 +260,22 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       Alert.alert("Teléfono no válido", "Revisa el número. Si es de otro país, escríbelo con el indicativo (por ejemplo +52…).");
       return null;
     }
+    // Vacío se guarda como NULL, nunca "": el cron y la confirmación miran
+    // `email` a secas y un "" no debe contar como correo.
+    let email: string | null = null;
+    if (newClientEmail.trim()) {
+      const check = validarCorreoCliente(newClientEmail);
+      if (!check.ok) {
+        Alert.alert("Correo no válido", emailRequired
+          ? "Revisa el correo: no parece válido (ej. nombre@gmail.com)."
+          : "Revisa el correo (ej. nombre@gmail.com) o déjalo vacío: es opcional.");
+        return null;
+      }
+      email = check.valor ?? null;
+    } else if (emailRequired) {
+      Alert.alert("Falta el correo", "Escribe el correo del cliente: ahí le llegan la confirmación y el recordatorio.");
+      return null;
+    }
     const ofrecerExistente = async (c: Client) => {
       const usar = await confirmar(
         "Ese teléfono ya está registrado",
@@ -246,7 +289,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
     const { data, error } = await supabase
       .from("clients")
-      .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: tel.phone, phone_country_code: tel.countryCode })
+      .insert({ tenant_id: tenantId, name: newClientName.trim(), phone: tel.phone, phone_country_code: tel.countryCode, email })
       .select("id, name, phone")
       .single();
     if (error) {
@@ -522,6 +565,22 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                             ? `Se guardará como ${fmtTelefono(telNuevo!.phone, { indicativo: telNuevo!.countryCode })}`
                             : "Obligatorio: con él se identifica al cliente y se le envían los recordatorios."}
                       </Text>
+                      <Text style={[s.fieldLabel, { marginTop: 14 }]}>{emailRequired ? "Correo" : "Correo (opcional)"}</Text>
+                      <TextInput
+                        style={[s.input, !!correoNuevo && !correoNuevoValido && { borderColor: Colors.red }]}
+                        value={newClientEmail}
+                        onChangeText={setNewClientEmail}
+                        placeholder="Ej: juan@gmail.com"
+                        placeholderTextColor={t.subtle}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      {!!correoNuevo && !correoNuevoValido ? (
+                        <Text style={[s.hint, { color: Colors.red }]}>
+                          {emailRequired ? "Correo no válido (ej. nombre@gmail.com)." : "Correo no válido. Corrígelo o déjalo vacío."}
+                        </Text>
+                      ) : null}
                     </View>
                   ) : (
                     <>
@@ -577,7 +636,34 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
             {/* ── STEP 2: SERVICE ── */}
             {step === 2 && (
-              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+                {servicios.length > 0 && (
+                  <View style={[s.searchBar, Shadow.sm]}>
+                    <Text style={{ fontSize: 15, color: t.subtle }}>🔍</Text>
+                    <TextInput
+                      style={s.searchInput}
+                      value={serviceQuery}
+                      onChangeText={buscarServicio}
+                      placeholder="Código o nombre (ej. 101)"
+                      placeholderTextColor={t.subtle}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      returnKeyType="search"
+                      accessibilityLabel="Buscar servicio por código o nombre"
+                    />
+                    {serviceQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => setServiceQuery("")} accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={HIT_SLOP}>
+                        <Text style={{ color: t.subtle, fontSize: 16 }}>✕</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+                {servicios.length > 0 && serviciosVisibles.length === 0 && (
+                  <View style={[s.card, { alignItems: "center", paddingVertical: 32 }, Shadow.sm]}>
+                    <Text style={s.emptyTitle}>Ningún servicio coincide</Text>
+                    <Text style={s.emptySub}>Revisa el código o busca por nombre</Text>
+                  </View>
+                )}
                 {servicios.length === 0 ? (
                   <View style={[s.card, { alignItems: "center", paddingVertical: 40 }, Shadow.sm]}>
                     <Text style={{ fontSize: 40, marginBottom: 12 }}>✂️</Text>
@@ -585,7 +671,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     <Text style={s.emptySub}>Agrega servicios desde Ajustes para poder agendar</Text>
                   </View>
                 ) : (
-                  servicios.map((svc, i) => (
+                  serviciosVisibles.map((svc, i) => (
                     <Animated.View key={svc.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
                       <TouchableOpacity
                         style={[s.svcCard, Shadow.sm, selectedService?.id === svc.id && s.cardActive]}
@@ -595,7 +681,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         accessibilityState={{ selected: selectedService?.id === svc.id }}
                       >
                         <View style={{ flex: 1 }}>
-                          <Text style={[s.svcName, selectedService?.id === svc.id && { color: Colors.red }]}>{svc.name}</Text>
+                          <Text style={[s.svcName, selectedService?.id === svc.id && { color: Colors.red }]}>
+                            {svc.code ? <Text style={s.svcCode}>{svc.code} · </Text> : null}{svc.name}
+                          </Text>
                           <Text style={s.svcMeta}>⏱ {svc.duracion} min</Text>
                         </View>
                         <View style={{ alignItems: "flex-end", gap: 6 }}>
@@ -638,6 +726,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     error={cupos.error}
                     onReintentar={cupos.recargar}
                     cupos={cupos.cupos}
+                    ocupados={cupos.ocupados}
                     seleccionada={selectedTime}
                     onSeleccionar={setSelectedTime}
                     bloqueos={cupos.bloqueos}
@@ -788,6 +877,7 @@ function crearEstilos(t: ThemeColors) {
     input:      { fontSize: 15, fontFamily: Fonts.semibold, color: t.text, backgroundColor: t.inputBg, borderWidth: 1.5, borderColor: t.inputBorder, borderRadius: Radius.md, padding: 12 },
     hint:       { fontSize: 11.5, fontFamily: Fonts.regular, color: t.subtle, marginTop: 6, lineHeight: 16 },
 
+    svcCode:     { fontFamily: Fonts.bold, color: t.muted },
     searchBar:   { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 12, gap: 8 },
     searchInput: { flex: 1, fontSize: 14, fontFamily: Fonts.regular, color: t.text },
 

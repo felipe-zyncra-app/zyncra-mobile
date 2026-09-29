@@ -138,7 +138,7 @@ describe("catálogo", () => {
 
   test("un servicio archivado queda inactivo; sin la columna (antes de la migración) cuenta como activo", () => {
     expect(aServicioAgenda({ id: "s1", name: "Corte", price: "25000", duration_min: 45 })).toEqual({
-      id: "s1", name: "Corte", price: 25000, duracion: 45, activo: true,
+      id: "s1", name: "Corte", price: 25000, duracion: 45, activo: true, code: null,
     });
     expect(aServicioAgenda({ id: "s2", name: "Tinte", price: 0, duration_minutes: 90, is_active: false }).activo).toBe(false);
     expect(aServicioAgenda({ id: "s3", name: "Barba", is_active: null }).activo).toBe(true);

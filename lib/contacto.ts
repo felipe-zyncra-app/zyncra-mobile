@@ -40,14 +40,14 @@ export interface Resultado {
 
 const FORMA_CORREO = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 
-export function validarCorreo(entrada: unknown): Resultado {
+function revisarCorreo(entrada: unknown, bloquearFalsos: boolean): Resultado {
   const correo = typeof entrada === "string" ? entrada.trim().toLowerCase() : "";
   if (!correo)                    return { ok: false, error: "El correo es obligatorio." };
   if (correo.length > 254)        return { ok: false, error: "El correo es demasiado largo." };
   if (!FORMA_CORREO.test(correo)) return { ok: false, error: "Escribe un correo válido (ej: nombre@gmail.com)." };
 
   const dominio = correo.split("@")[1];
-  if (DOMINIOS_FALSOS.has(dominio)) {
+  if (bloquearFalsos && DOMINIOS_FALSOS.has(dominio)) {
     return { ok: false, error: "Necesitamos un correo real: ahí te enviamos el código de verificación." };
   }
   const extension = dominio.split(".").pop() ?? "";
@@ -55,6 +55,38 @@ export function validarCorreo(entrada: unknown): Resultado {
     return { ok: false, error: "Escribe un correo válido (ej: nombre@gmail.com)." };
   }
   return { ok: true, valor: correo };
+}
+
+/** Correo del dueño de un negocio (registro, inicio de sesión, equipo). */
+export function validarCorreo(entrada: unknown): Resultado {
+  return revisarCorreo(entrada, true);
+}
+
+/**
+ * Correo de un CLIENTE del negocio (Nueva cita, ficha del cliente): la misma
+ * forma, sin la lista de dominios falsos. Esa lista trae mail.com / email.com,
+ * que son buzones reales (GMX): con validarCorreo una clienta con
+ * "ana@mail.com" no se podía crear. Gemelo de validarCorreoCliente en web.
+ */
+export function validarCorreoCliente(entrada: unknown): Resultado {
+  return revisarCorreo(entrada, false);
+}
+
+/**
+ * ¿Hay que pedir el correo al crear un cliente desde Nueva cita?
+ *
+ * Por defecto sí (la confirmación y el recordatorio por correo lo necesitan).
+ * Un estudio de prótesis capilares (el primero fue Imperio Capilar,
+ * 2026-09-29) agenda a gente que por discreción no deja todos sus datos:
+ * exigir el correo solo hacía que el equipo inventara uno. Un valor explícito
+ * en tenants.settings.client_email_required manda en ambos sentidos; si no
+ * hay, decide el módulo de prótesis (settings.protesis_enabled). Misma regla
+ * que NewAppointmentModal del panel web.
+ */
+export function correoClienteObligatorio(settings: Record<string, unknown> | null | undefined): boolean {
+  const explicito = (settings as { client_email_required?: unknown } | null | undefined)?.client_email_required;
+  if (typeof explicito === "boolean") return explicito;
+  return (settings as { protesis_enabled?: unknown } | null | undefined)?.protesis_enabled !== true;
 }
 
 /**

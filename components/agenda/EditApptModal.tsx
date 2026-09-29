@@ -419,6 +419,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
                     error={cupos.error}
                     onReintentar={cupos.recargar}
                     cupos={cupos.cupos}
+                    ocupados={cupos.ocupados}
                     seleccionada={selectedTime}
                     onSeleccionar={setSelectedTime}
                     bloqueos={cupos.bloqueos}

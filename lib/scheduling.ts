@@ -316,6 +316,8 @@ export type ServicioAgenda = {
   duracion: number;
   /** false si el servicio está archivado (services.is_active, llega con la migración). */
   activo: boolean;
+  /** Código que el negocio le asigna en el admin (services.code, ej. "101"). */
+  code?: string | null;
 };
 
 export type ProfesionalAgenda = {
@@ -346,7 +348,25 @@ export function aServicioAgenda(s: Crudo): ServicioAgenda {
     price: Number(s.price ?? 0) || 0,
     duracion: duracionServicio(s as ConDuracion),
     activo: s.is_active !== false,
+    code: typeof s.code === "string" && s.code.trim() ? s.code.trim() : null,
   };
+}
+
+/**
+ * Buscador del paso "Servicio" de Nueva cita: por nombre o por código, igual
+ * que el panel web. Sin texto devuelve la lista entera.
+ */
+export function filtrarServicios<T extends Pick<ServicioAgenda, "name" | "code">>(lista: readonly T[], texto: string): T[] {
+  const q = texto.trim().toLowerCase();
+  if (!q) return [...lista];
+  return lista.filter(x => x.name.toLowerCase().includes(q) || (x.code ?? "").toLowerCase().includes(q));
+}
+
+/** El servicio cuyo código es EXACTAMENTE lo tecleado (se elige solo), o null. */
+export function servicioPorCodigo<T extends Pick<ServicioAgenda, "code">>(lista: readonly T[], texto: string): T | null {
+  const q = texto.trim().toLowerCase();
+  if (!q) return null;
+  return lista.find(x => (x.code ?? "").toLowerCase() === q) ?? null;
 }
 
 /**
@@ -453,6 +473,13 @@ export function choqueCon(inicio: number, duracion: number, ocupados: Ocupado[])
 }
 
 /** Cupos de la grilla que no se cruzan con citas ni bloqueos. */
+/**
+ * Margen mínimo antes de ofrecer un cupo de HOY en Nueva cita. Mismo valor que
+ * MIN_LEAD_MIN del panel web y de la reserva pública: sin él se podía agendar
+ * a las 3:00 estando a las 2:58.
+ */
+export const MIN_LEAD_MIN = 30;
+
 export function cuposLibres(slots: string[], ocupados: Ocupado[], duracion: number): string[] {
   return slots.filter(s => !choqueCon(timeToMins(s), duracion, ocupados));
 }
