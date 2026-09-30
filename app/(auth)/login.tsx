@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, TextInput, StyleSheet,
   KeyboardAvoidingView, ScrollView, Pressable,
-  Image, Dimensions, ActivityIndicator,
+  ActivityIndicator,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import Animated, {
-  FadeInDown, FadeIn, useSharedValue, useAnimatedStyle, withSpring,
+  FadeInDown, useSharedValue, useAnimatedStyle, withTiming, withRepeat,
+  useReducedMotion, cancelAnimation, interpolateColor,
 } from "react-native-reanimated";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -16,29 +18,66 @@ import { useAuth } from "@/lib/auth";
 import { Config } from "@/lib/config";
 import { validarCorreo } from "@/lib/contacto";
 import { traducirErrorAuth } from "@/lib/cuenta";
-import { Colors } from "@/constants/theme";
+import { Colors, Gradients } from "@/constants/theme";
+import {
+  Aurora, AnilloTrazo, Aparece, LogoBrillo, PalabraZyncra, useSacudida, EASE_OUT,
+} from "@/components/Marca";
 
-const { height } = Dimensions.get("window");
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Coreografía de entrada (ms). La intro de la primera apertura termina con un
+// fundido hacia aquí, así que la marca "sigue" en el mismo sitio de la escena.
+const E = {
+  anillo: 80, brillo: 460, palabra: 220, lema: 480,
+  tarjeta: 380, campos: 520, paso: 60,
+};
 
 /** Si en este tiempo no se resolvió la cuenta, se suelta el botón con un mensaje. */
 const TOPE_ENTRADA_MS = 25_000;
 
-function SolidButton({ label, labelCargando, onPress, loading }: {
-  label: string; labelCargando: string; onPress: () => void; loading?: boolean;
+/**
+ * Botón principal con el degradado de la marca. Se hunde al apoyar el dedo
+ * (no al soltarlo) y, mientras espera la respuesta, un brillo lo recorre en
+ * bucle para que se note que está trabajando.
+ */
+function SolidButton({ label, labelCargando, onPress, loading, reduced }: {
+  label: string; labelCargando: string; onPress: () => void; loading?: boolean; reduced: boolean;
 }) {
   const scale = useSharedValue(1);
-  const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const brillo = useSharedValue(-1);
+  const [ancho, setAncho] = useState(0);
+
+  useEffect(() => {
+    if (!loading || reduced) { cancelAnimation(brillo); brillo.set(-1); return; }
+    brillo.set(-1);
+    brillo.set(withRepeat(withTiming(1, { duration: 1100, easing: EASE_OUT }), -1, false));
+    return () => cancelAnimation(brillo);
+  }, [loading, reduced, brillo]);
+
+  const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
+  const banda = useAnimatedStyle(() => ({ transform: [{ translateX: brillo.get() * ancho }, { rotate: "18deg" }] }));
+
   return (
     <AnimatedPressable
-      style={[anim, btn.solid, loading && { opacity: 0.75 }]}
-      onPressIn={() => { if (!loading) scale.value = withSpring(0.97, { stiffness: 400 }); }}
-      onPressOut={() => { scale.value = withSpring(1,    { stiffness: 400 }); }}
+      style={[anim, btn.solid, loading && { opacity: 0.85 }]}
+      onLayout={e => setAncho(e.nativeEvent.layout.width)}
+      onPressIn={() => { if (!loading) scale.set(withTiming(0.97, { duration: 110, easing: EASE_OUT })); }}
+      onPressOut={() => { scale.set(withTiming(1, { duration: 160, easing: EASE_OUT })); }}
       onPress={onPress}
       // Mientras carga no se puede volver a enviar (antes permitía varios envíos seguidos).
       disabled={loading}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!loading, busy: !!loading }}>
+      <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+      {loading && !reduced && (
+        <Animated.View pointerEvents="none" style={[btn.banda, banda]}>
+          <LinearGradient
+            colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.35)", "rgba(255,255,255,0)"]}
+            start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+      )}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         {loading && <ActivityIndicator size="small" color="white" />}
         <Text style={btn.label}>{loading ? labelCargando : label}</Text>
@@ -47,9 +86,35 @@ function SolidButton({ label, labelCargando, onPress, loading }: {
   );
 }
 
+/**
+ * Caja de un campo: al enfocarlo, el borde y el fondo pasan a la marca con
+ * una transición (no de golpe), y se enciende un halo pintado una vez.
+ */
+function CajaCampo({ activo, children }: { activo: boolean; children: React.ReactNode }) {
+  const k = useSharedValue(activo ? 1 : 0);
+  useEffect(() => {
+    k.set(withTiming(activo ? 1 : 0, { duration: 180, easing: EASE_OUT }));
+  }, [activo, k]);
+  const haloSt = useAnimatedStyle(() => ({ opacity: k.get() }));
+  const cajaSt = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(k.get(), [0, 1], ["rgba(255,255,255,0.09)", Colors.red]),
+    backgroundColor: interpolateColor(k.get(), [0, 1], ["rgba(255,255,255,0.07)", "rgba(251,15,5,0.07)"]),
+  }));
+  return (
+    <View style={{ marginBottom: 18 }}>
+      <Animated.View pointerEvents="none" style={[s.halo, haloSt]} />
+      <Animated.View style={[s.inputRow, cajaSt]}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function LoginScreen() {
   const router = useRouter();
   const { estado } = useAuth();
+  const reduced = useReducedMotion();
+  const { estilo: sacudidaSt, sacudir } = useSacudida(reduced);
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [error,    setError]    = useState<string | null>(null);
@@ -62,6 +127,9 @@ export default function LoginScreen() {
   const [recuperando, setRecuperando] = useState(false);
   const [enviandoRec, setEnviandoRec] = useState(false);
   const tope = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cada error nuevo sacude la tarjeta: dice "no" sin tener que leer.
+  useEffect(() => { if (error) sacudir(); }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El registro se abre ENCIMA del login, que sigue montado. Sin saber si
   // está a la vista, el efecto de abajo lo sacaba del registro en cuanto el
@@ -138,19 +206,14 @@ export default function LoginScreen() {
     }
   };
 
+  const campoEn = (i: number) => E.campos + i * E.paso;
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }}>
       <StatusBar style="light" />
 
       <View style={s.bg}>
-        {/* Ambient blobs */}
-        <View style={[s.blob, { top: -100, left: -70,  backgroundColor: "rgba(251,15,5,0.2)"   }]} />
-        <View style={[s.blob, { top: height * 0.3, right: -90, backgroundColor: "rgba(0,39,254,0.16)" }]} />
-        <View style={[s.blob, { bottom: -80, left: -50, backgroundColor: "rgba(0,39,254,0.16)" }]} />
-
-        {/* Corner accents */}
-        <View style={[s.corner, s.cornerTL]} />
-        <View style={[s.corner, s.cornerBR]} />
+        <Aurora reduced={reduced} intensidad={0.85} />
 
         <ScrollView automaticallyAdjustKeyboardInsets
           contentContainerStyle={s.scroll}
@@ -158,23 +221,29 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}>
 
           {/* ── Logo section ───────────────────────────────────────── */}
-          <Animated.View entering={FadeIn.duration(800)} style={s.logoSection}>
+          <View style={s.logoSection}>
             <View style={s.logoWrap}>
-              <Image
-                source={require("../../assets/zyncra-logo.png")}
-                style={s.logoImg}
-                resizeMode="cover"
-              />
+              <AnilloTrazo size={150} empiezaEn={E.anillo} dura={760} reduced={reduced} />
               <View style={s.logoGlow} />
+              <LogoBrillo size={88} radius={22} brilloEn={E.brillo} reduced={reduced} />
             </View>
-            <Text style={s.appName}>Zyncra</Text>
-            <Text style={s.tagline}>GESTIONA TU NEGOCIO INTELIGENTE</Text>
-          </Animated.View>
+            <PalabraZyncra empiezaEn={E.palabra} reduced={reduced} escalonado={36} />
+            <Aparece empiezaEn={E.lema} reduced={reduced} sube={6}>
+              <Text style={s.tagline}>GESTIONA TU NEGOCIO INTELIGENTE</Text>
+            </Aparece>
+          </View>
 
           {/* ── Form card ──────────────────────────────────────────── */}
-          <Animated.View
-            entering={FadeInDown.delay(180).duration(600).springify()}
-            style={s.card}>
+          <Aparece empiezaEn={E.tarjeta} reduced={reduced} sube={28} dura={680}>
+          <Animated.View style={[s.card, sacudidaSt]}>
+            {/* Filo de luz con el degradado de la marca */}
+            <LinearGradient
+              pointerEvents="none"
+              colors={["rgba(251,15,5,0)", "rgba(251,15,5,0.85)", "rgba(0,39,254,0.85)", "rgba(0,39,254,0)"]}
+              locations={[0, 0.3, 0.7, 1]}
+              start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+              style={s.cardFilo}
+            />
 
             <Text style={s.heading} accessibilityRole="header">
               {recuperando ? "Recupera tu contraseña" : "Bienvenido de vuelta"}
@@ -184,22 +253,22 @@ export default function LoginScreen() {
             </Text>
 
             {error && (
-              <Animated.View entering={FadeInDown.duration(300)} style={s.errorBox} accessibilityRole="alert">
+              <Animated.View entering={FadeInDown.duration(260).easing(EASE_OUT)} style={s.errorBox} accessibilityRole="alert">
                 <Ionicons name="alert-circle-outline" size={15} color="#ff6060" style={{ marginRight: 6 }} />
                 <Text style={s.errorText}>{error}</Text>
               </Animated.View>
             )}
             {aviso && (
-              <Animated.View entering={FadeInDown.duration(300)} style={s.avisoBox} accessibilityLiveRegion="polite">
+              <Animated.View entering={FadeInDown.duration(260).easing(EASE_OUT)} style={s.avisoBox} accessibilityLiveRegion="polite">
                 <Ionicons name="mail-outline" size={15} color="#5eead4" style={{ marginRight: 6 }} />
                 <Text style={s.avisoText}>{aviso}</Text>
               </Animated.View>
             )}
 
             {/* Email */}
-            <Animated.View entering={FadeInDown.delay(300).duration(400)}>
-              <Text style={s.label}>Correo electrónico</Text>
-              <View style={[s.inputRow, focused === "email" && s.inputRowFocused]}>
+            <Aparece empiezaEn={campoEn(0)} reduced={reduced}>
+              <Text style={[s.label, focused === "email" && s.labelFocused]}>Correo electrónico</Text>
+              <CajaCampo activo={focused === "email"}>
                 <Ionicons
                   name="mail-outline" size={17}
                   color={focused === "email" ? Colors.red : "rgba(255,255,255,0.3)"}
@@ -220,12 +289,12 @@ export default function LoginScreen() {
                   onFocus={() => setFocused("email")}
                   onBlur={() => setFocused(null)}
                 />
-              </View>
-            </Animated.View>
+              </CajaCampo>
+            </Aparece>
 
             {recuperando ? (
               <View style={{ marginTop: 4 }}>
-                <SolidButton label="Enviar enlace" labelCargando="Enviando…" onPress={enviarRecuperacion} loading={enviandoRec} />
+                <SolidButton label="Enviar enlace" labelCargando="Enviando…" onPress={enviarRecuperacion} loading={enviandoRec} reduced={reduced} />
                 <Pressable style={s.forgotLink} onPress={() => { setRecuperando(false); setError(null); }} accessibilityRole="button">
                   <Text style={s.forgotText}>Volver a iniciar sesión</Text>
                 </Pressable>
@@ -233,9 +302,9 @@ export default function LoginScreen() {
             ) : (
             <>
             {/* Password */}
-            <Animated.View entering={FadeInDown.delay(370).duration(400)}>
-              <Text style={s.label}>Contraseña</Text>
-              <View style={[s.inputRow, focused === "password" && s.inputRowFocused]}>
+            <Aparece empiezaEn={campoEn(1)} reduced={reduced}>
+              <Text style={[s.label, focused === "password" && s.labelFocused]}>Contraseña</Text>
+              <CajaCampo activo={focused === "password"}>
                 <Ionicons
                   name="lock-closed-outline" size={17}
                   color={focused === "password" ? Colors.red : "rgba(255,255,255,0.3)"}
@@ -264,8 +333,8 @@ export default function LoginScreen() {
                     color="rgba(255,255,255,0.35)"
                   />
                 </Pressable>
-              </View>
-            </Animated.View>
+              </CajaCampo>
+            </Aparece>
 
             <Pressable
               style={s.forgotInline}
@@ -276,30 +345,30 @@ export default function LoginScreen() {
             </Pressable>
 
             {/* CTA */}
-            <Animated.View entering={FadeInDown.delay(440).duration(400)} style={{ marginTop: 8 }}>
-              <SolidButton label="Iniciar sesión" labelCargando="Entrando…" onPress={handleLogin} loading={loading} />
-            </Animated.View>
+            <Aparece empiezaEn={campoEn(2)} reduced={reduced} style={{ marginTop: 8 }}>
+              <SolidButton label="Iniciar sesión" labelCargando="Entrando…" onPress={handleLogin} loading={loading} reduced={reduced} />
+            </Aparece>
             </>
             )}
 
             {/* Alta de negocio. Recoge datos y crea la cuenta: no muestra planes
                 ni precios, y no cobra nada dentro de la app. */}
-            <Animated.View entering={FadeInDown.delay(500).duration(400)}>
+            <Aparece empiezaEn={campoEn(3)} reduced={reduced}>
               <Pressable style={s.registerLink} onPress={() => router.push("/(auth)/register")} accessibilityRole="button">
                 <Text style={s.registerLinkText}>
                   ¿No tienes cuenta? <Text style={s.registerLinkStrong}>Regístrate gratis</Text>
                 </Text>
               </Pressable>
-            </Animated.View>
+            </Aparece>
 
             {/* Aviso para colaboradores: las cuentas de staff no se crean aquí,
                 las da de alta el dueño del negocio desde Ajustes → Equipo. */}
-            <Animated.View entering={FadeInDown.delay(560).duration(400)} style={s.accessNote}>
+            <Aparece empiezaEn={campoEn(4)} reduced={reduced} style={s.accessNote}>
               <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.35)" style={{ marginTop: 1 }} />
               <Text style={s.accessNoteText}>
                 ¿Trabajas en un negocio que ya usa Zyncra? No te registres aquí: pide tu acceso al administrador.
               </Text>
-            </Animated.View>
+            </Aparece>
 
             <Pressable
               style={s.legalLink}
@@ -309,6 +378,7 @@ export default function LoginScreen() {
             </Pressable>
 
           </Animated.View>
+          </Aparece>
         </ScrollView>
       </View>
     </KeyboardAvoidingView>
@@ -321,7 +391,17 @@ const btn = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
+    overflow: "hidden",
     backgroundColor: Colors.red,
+    shadowColor: Colors.red,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+  },
+  banda: {
+    position: "absolute",
+    top: -20, bottom: -20, left: 0,
+    width: 70,
   },
   label: {
     color: "white",
@@ -337,26 +417,6 @@ const s = StyleSheet.create({
     flex: 1,
     backgroundColor: "#07071a",
   },
-  blob: {
-    position: "absolute",
-    width: 300, height: 300,
-    borderRadius: 150,
-  },
-  corner: {
-    position: "absolute",
-    width: 28, height: 28,
-    borderColor: "rgba(251,15,5,0.28)",
-  },
-  cornerTL: {
-    top: 52, left: 22,
-    borderTopWidth: 1.5, borderLeftWidth: 1.5,
-    borderTopLeftRadius: 6,
-  },
-  cornerBR: {
-    bottom: 52, right: 22,
-    borderBottomWidth: 1.5, borderRightWidth: 1.5,
-    borderBottomRightRadius: 6,
-  },
   scroll: {
     flexGrow: 1,
     paddingBottom: 48,
@@ -365,38 +425,28 @@ const s = StyleSheet.create({
   // Logo
   logoSection: {
     alignItems: "center",
-    paddingTop: 88,
-    paddingBottom: 52,
+    paddingTop: 72,
+    paddingBottom: 40,
   },
+  // Caja del tamaño del anillo, con el logo centrado.
   logoWrap: {
-    marginBottom: 20,
-    shadowColor: "#fb0f05",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 28,
-    elevation: 20,
+    width: 150, height: 150,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: 2,
   },
-  logoImg: {
-    width: 96, height: 96,
-    borderRadius: 24,
-  },
+  // Halo pintado una vez detrás del logo.
   logoGlow: {
     position: "absolute",
-    top: -10, left: -10, right: -10, bottom: -10,
-    borderRadius: 34,
-    shadowColor: "#0027fe",
+    width: 88, height: 88, borderRadius: 22,
+    backgroundColor: "#07071a",
+    shadowColor: Colors.red,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 22,
-  },
-  appName: {
-    fontSize: 30,
-    fontFamily: "SpaceGrotesk_700Bold",
-    color: "white",
-    letterSpacing: -0.8,
-    marginBottom: 6,
+    shadowOpacity: 0.6,
+    shadowRadius: 30,
+    elevation: 20,
   },
   tagline: {
+    marginTop: 6,
     fontSize: 9.5,
     fontFamily: "SpaceGrotesk_600SemiBold",
     color: "rgba(255,255,255,0.32)",
@@ -412,6 +462,12 @@ const s = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.09)",
     borderRadius: 26,
     padding: 28,
+    overflow: "hidden",
+  },
+  cardFilo: {
+    position: "absolute",
+    top: 0, left: 24, right: 24,
+    height: 1,
   },
   heading: {
     fontSize: 22,
@@ -433,6 +489,18 @@ const s = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.3,
   },
+  labelFocused: { color: "rgba(255,255,255,0.85)" },
+  // Halo del campo enfocado: sombra pintada una vez, solo cambia su opacidad.
+  halo: {
+    position: "absolute",
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 14,
+    backgroundColor: "#07071a",
+    shadowColor: Colors.red,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+  },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -442,11 +510,6 @@ const s = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 13,
-    marginBottom: 18,
-  },
-  inputRowFocused: {
-    borderColor: Colors.red,
-    backgroundColor: "rgba(251,15,5,0.07)",
   },
   input: {
     flex: 1,
