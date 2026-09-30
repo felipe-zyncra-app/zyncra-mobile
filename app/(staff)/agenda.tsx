@@ -5,6 +5,7 @@ import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { enviarCorreoCita } from "@/lib/correo-cita";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
@@ -251,6 +252,8 @@ export default function StaffAgendaScreen() {
       Alert.alert("No se pudo cambiar el estado", mensajeError(e));
       return;
     }
+    // Correo de cancelación al cliente, como el calendario web. No se espera.
+    if (status === "cancelled" && appt.status !== "cancelled") void enviarCorreoCita("cancellation", appt.id);
     await recargar();
   };
 

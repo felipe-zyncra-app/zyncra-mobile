@@ -8,6 +8,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { cambioAvisable, enviarCorreoCita } from "@/lib/correo-cita";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
@@ -242,6 +243,13 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
         serviceName: selectedService.name,
         status: appt.status,
       }, timezone).catch(() => {});
+
+      // Correo de cambio al cliente si cambió algo que tiene que saber y la
+      // cita sigue vigente. No se espera.
+      if (appt.status !== "cancelled" && appt.status !== "no_show"
+        && cambioAvisable(appt, payload)) {
+        void enviarCorreoCita("modification", appt.id);
+      }
 
       onSaved();
       onClose();

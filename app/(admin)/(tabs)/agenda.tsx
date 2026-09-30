@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { enviarCorreoCita } from "@/lib/correo-cita";
 import { Colors, Fonts, Gradients, Radius } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
@@ -305,6 +306,9 @@ export default function AgendaScreen() {
       Alert.alert("No se pudo cambiar el estado", mensajeError(e));
       return;
     }
+
+    // Correo de cancelación al cliente, como el calendario web. No se espera.
+    if (status === "cancelled" && appt.status !== "cancelled") void enviarCorreoCita("cancellation", appt.id);
 
     // Recordatorio solo DESPUÉS de que el cambio se guardó: se cancela si ya
     // no está vigente (cancelada, no asistió) y se reprograma si se reactivó.

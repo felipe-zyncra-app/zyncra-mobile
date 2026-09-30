@@ -33,6 +33,10 @@ export const Config = {
      *  Públicos: no piden auth, van con rate-limit por IP. */
     sendOtp: `${WEB_URL}/api/auth/send-otp`,
     verifyOtp: `${WEB_URL}/api/auth/verify-otp`,
+    /** Correo al cliente al crear, cambiar o cancelar una cita. Mismo endpoint
+     *  que el panel (src/app/api/send-confirmation): con sesión, body
+     *  { type, manageToken }; el servidor saca de la base todo lo demás. */
+    sendConfirmation: `${WEB_URL}/api/send-confirmation`,
   },
   urls: {
     booking: `${WEB_URL}/book/`,

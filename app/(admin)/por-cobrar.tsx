@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { enviarCorreoCita } from "@/lib/correo-cita";
 import { Colors, Fonts, Radius } from "@/constants/theme";
 import { STATUS_META } from "@/constants/status";
 import { useTheme, type ThemeColors } from "@/lib/theme";
@@ -189,6 +190,8 @@ export default function PorCobrarScreen() {
         await supabase.from("appointments").update({ status }).eq("id", c.id).eq("tenant_id", negocio).select("id"),
         "No se pudo cambiar el estado de la cita",
       );
+      // Correo de cancelación al cliente, como el calendario web. No se espera.
+      if (status === "cancelled") void enviarCorreoCita("cancellation", c.id);
       return true;
     } catch (e) {
       Alert.alert("No se pudo cambiar el estado", mensajeError(e));

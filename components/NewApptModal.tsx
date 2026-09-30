@@ -13,6 +13,7 @@ import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
+import { enviarCorreoCita } from "@/lib/correo-cita";
 import {
   avisosDeHorario, cargarCatalogoAgenda, effectiveDayHours, esHorarioOcupado, filtrarServicios, mensajeErrorCita,
   minsToTime, profesionalesDeLaSede, servicioPorCodigo, timeToMins, verificarCupo,
@@ -435,6 +436,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         serviceName: selectedService.name,
         status: "pending",
       }, timezone).catch(() => {});
+
+      // Correo de confirmación al cliente, como el panel web. No se espera.
+      void enviarCorreoCita("confirmation", apptId);
 
       onSuccess();
       onClose();

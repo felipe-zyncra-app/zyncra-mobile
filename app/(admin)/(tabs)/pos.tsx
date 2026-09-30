@@ -9,6 +9,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { enviarCorreoCita } from "@/lib/correo-cita";
 import { getActiveLocationId } from "@/lib/active-location";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { STATUS_META } from "@/constants/status";
@@ -172,6 +173,8 @@ export default function PosScreen() {
           "No se pudo cambiar el estado de la cita",
         );
         cancelarRecordatorioCita(a.id).catch(() => {});
+        // Correo de cancelación al cliente, como el calendario web. No se espera.
+        if (status === "cancelled") void enviarCorreoCita("cancellation", a.id);
       }
     } catch (e) {
       Alert.alert("No se cambió el estado", mensajeError(e));
