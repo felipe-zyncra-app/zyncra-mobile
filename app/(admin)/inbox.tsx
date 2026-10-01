@@ -175,6 +175,14 @@ function ChatModal({ chat, tenantId, timezone, onClose, onChanged, suscribirMens
     if (!error) onChangedRef.current();
   }, [tenantId, phone]);
 
+  // El servidor guarda el mensaje y DESPUÉS sube el contador (wa_chat_touch):
+  // si se marcaba leído al recibir el mensaje, el +1 llegaba luego y el chat
+  // abierto quedaba con "1 sin leer". Con el chat en pantalla, lo que sume ya
+  // está leído (igual que el panel web).
+  useEffect(() => {
+    if (chat.unread > 0) marcarLeido();
+  }, [chat.unread, marcarLeido]);
+
   const recibir = useCallback((nuevos: MensajeChat[]) => {
     if (nuevos.length === 0) return;
     const conocidos = new Set(mensajesRef.current.map(m => m.id));
@@ -314,43 +322,71 @@ function ChatModal({ chat, tenantId, timezone, onClose, onChanged, suscribirMens
     }
   };
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || sending || !abierta) return;
+  // Envío que quedó en duda (tope vencido o corte de red): pudo llegar a
+  // WhatsApp aunque la app no supo. Si se reenvía el mismo texto se reusa su
+  // id y el servidor lo reconoce en vez de mandarlo dos veces.
+  const enDuda = useRef<{ text: string; id: string } | null>(null);
+
+  const enviar = async (text: string, idReintento?: string): Promise<boolean> => {
+    const id = idReintento ?? (enDuda.current?.text === text ? enDuda.current.id : nuevoId());
     setSending(true);
     try {
       const res = await authedFetch(Config.api.whatsappSend, {
         method: "POST",
         timeoutMs: Config.timeouts.chat,
-        body: JSON.stringify({ tenant_id: tenantId, phone, text, client_msg_id: nuevoId() }),
+        body: JSON.stringify({ tenant_id: tenantId, phone, text, client_msg_id: id }),
       });
       const json = await res.json().catch(() => ({}));
+      // El servidor respondió: el resultado ya no está en duda.
+      enDuda.current = null;
       if (!res.ok) {
         Alert.alert("No se pudo enviar", typeof json.error === "string" ? json.error : "Inténtalo de nuevo.");
-        return;
+        return false;
       }
-      setDraft("");
       const guardado = json?.message as MensajeChat | undefined;
       if (guardado && typeof guardado.id === "string") recibir([guardado]);
       else await sondear();
       onChangedRef.current();
+      return true;
     } catch (e) {
+      if (!idReintento) enDuda.current = { text, id };
       if (esTimeout(e)) {
-        // Un tope vencido no significa que no se envió: evitar el doble envío.
-        Alert.alert("Sin respuesta del servidor", "Puede que el mensaje sí se haya enviado. Revisa la conversación antes de reenviarlo.");
+        Alert.alert("Sin respuesta del servidor", "Puede que el mensaje sí se haya enviado. Si lo envías otra vez, no le llegará repetido.");
         sondear();
       } else {
         Alert.alert("No se pudo enviar", mensajeError(e));
       }
+      return false;
     } finally {
       setSending(false);
     }
   };
 
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending || !abierta) return;
+    if (await enviar(text)) setDraft("");
+  };
+
+  // Mensaje que WhatsApp no entregó: se reenvía con su id como client_msg_id,
+  // igual que "Reintentar" en el panel web.
+  const reintentar = (m: MensajeChat) => {
+    if (sending || !abierta) return;
+    enviar(m.body, m.id);
+  };
+
+  // "Hanna también está respondiendo" (como en el panel): al escribir con
+  // Hanna activa, el cliente recibe las dos respuestas.
+  const pausarYResponder = () => { if (!botPaused) toggleBot(); };
+
   const title = chat.client_name || fmtTelefono(`+${phone}`);
   // Lista invertida: el más nuevo abajo sin tener que desplazar a mano, y
   // sin saltar al final cada vez que llega algo mientras se lee el historial.
-  const invertidos = useMemo(() => messages.slice().reverse(), [messages]);
+  // Un fallido ya reenviado se oculta: el reenvío trae su id como client_msg_id.
+  const invertidos = useMemo(() => {
+    const reenviados = new Set(messages.map(m => m.client_msg_id).filter((x): x is string => !!x));
+    return messages.filter(m => !(m.status === "failed" && reenviados.has(m.id))).reverse();
+  }, [messages]);
 
   const renderMsg = ({ item, index }: { item: MensajeChat; index: number }) => {
     const isOut = item.direction === "out";
@@ -389,6 +425,12 @@ function ChatModal({ chat, tenantId, timezone, onClose, onChanged, suscribirMens
                 esto la burbuja parecía enviada (COM-23). */}
             {fallo && (
               <Text style={c.failText}>{item.error || "WhatsApp no entregó este mensaje."}</Text>
+            )}
+            {fallo && item.sender === "human" && abierta && (
+              <TouchableOpacity onPress={() => reintentar(item)} disabled={sending} style={c.retryBtn}
+                accessibilityRole="button" accessibilityLabel="Reintentar el envío">
+                <Text style={c.retryText}>Reintentar</Text>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -491,6 +533,18 @@ function ChatModal({ chat, tenantId, timezone, onClose, onChanged, suscribirMens
                   : <Ionicons name="send" size={18} color="white" />}
               </TouchableOpacity>
             </View>
+            {!botPaused && abierta && draft.trim().length > 0 && (
+              <View style={c.hannaWarn}>
+                <View style={[c.dot, { backgroundColor: HANNA }]} />
+                <Text style={[c.hannaWarnText, { color: mode === "dark" ? "#d8b4fe" : "#7c3aed" }]}>
+                  Hanna también está respondiendo este chat.
+                </Text>
+                <TouchableOpacity onPress={pausarYResponder} disabled={guardandoBot} hitSlop={6}
+                  style={c.hannaWarnBtn} accessibilityRole="button" accessibilityLabel="Pausar a Hanna y responder yo">
+                  <Text style={[c.hannaWarnBtnText, { color: mode === "dark" ? "#d8b4fe" : "#7c3aed" }]}>Pausar y responder yo</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -858,6 +912,12 @@ const c = StyleSheet.create({
   metaRow:   { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 4, marginTop: 3 },
   time:      { fontSize: 10, fontFamily: "SpaceGrotesk_400Regular" },
   failText:  { fontSize: 11, fontFamily: "SpaceGrotesk_600SemiBold", color: "#ef4444", marginTop: 4 },
+  retryBtn:  { alignSelf: "flex-start", backgroundColor: "#ef4444", borderRadius: 6, paddingHorizontal: 9, paddingVertical: 3, marginTop: 6 },
+  retryText: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
+  hannaWarn: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, marginHorizontal: 4 },
+  hannaWarnText: { flex: 1, fontSize: 11.5, fontFamily: "SpaceGrotesk_400Regular" },
+  hannaWarnBtn: { backgroundColor: "rgba(168,85,247,0.12)", borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4 },
+  hannaWarnBtnText: { fontSize: 11, fontFamily: "SpaceGrotesk_700Bold" },
   // En una lista invertida, VirtualizedList ya le aplica la inversión al vacío.
   empty:     { textAlign: "center", marginTop: 40, fontFamily: "SpaceGrotesk_400Regular" },
   inputBar:  { paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 1 },

@@ -19,10 +19,12 @@ export type MensajeChat = {
   /** Motivo cuando Meta no entregó el mensaje (status = failed). */
   error?: string | null;
   sender_name?: string | null;
+  /** Id que generó quien envió. En un reintento es el id del mensaje que falló. */
+  client_msg_id?: string | null;
 };
 
-/** Columnas que pide la app (mismas que el panel web, sin client_msg_id). */
-export const COLUMNAS_MENSAJE = "id,phone,direction,sender,body,created_at,status,error,sender_name";
+/** Columnas que pide la app (las mismas que el panel web). */
+export const COLUMNAS_MENSAJE = "id,phone,direction,sender,body,created_at,status,error,sender_name,client_msg_id";
 
 export type ChatResumen = {
   tenant_id: string;
