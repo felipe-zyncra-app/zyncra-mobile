@@ -101,6 +101,49 @@ type CartItem = LineaCarrito;
 type SplitLine = { method: string; amount: string };
 type Estado = "cargando" | "listo" | "error";
 
+/**
+ * Cantidad o valor por unidad de una línea del cobro, escritos a mano (igual
+ * que el POS web). Los servicios que se cobran por cantidad —los injertos de
+ * Imperio Capilar, 300 a $2.000 c/u, con el servicio en $0 "según
+ * cotización"— no se podían cobrar: el + iba de a uno y el precio era el del
+ * catálogo. Guarda el texto mientras se escribe para que borrar no salte a 1.
+ */
+export function CampoLinea({ value, onCommit, leer, aTexto, min = 0, max, ancho, etiqueta, placeholder, decimal, colores }: {
+  value: number; onCommit: (n: number) => void;
+  leer: (s: string) => number | null; aTexto: (n: number) => string;
+  min?: number; max?: number; ancho: number; etiqueta: string; placeholder?: string; decimal?: boolean;
+  colores: { texto: string; borde: string; fondo: string; tenue: string };
+}) {
+  const [txt, setTxt] = useState(aTexto(value));
+  // Si el valor cambia desde afuera (el +/−, el tope de stock), se refleja.
+  const [visto, setVisto] = useState(value);
+  if (visto !== value) {
+    setVisto(value);
+    if ((leer(txt) ?? 0) !== value) setTxt(aTexto(value));
+  }
+  const limitar = (n: number) => Math.max(min, max != null ? Math.min(max, n) : n);
+  return (
+    <TextInput
+      value={txt} placeholder={placeholder} placeholderTextColor={colores.tenue}
+      accessibilityLabel={etiqueta} selectTextOnFocus
+      keyboardType={decimal ? "decimal-pad" : "number-pad"}
+      onChangeText={v => {
+        setTxt(v);
+        const n = leer(v);
+        if (n != null) onCommit(limitar(n));
+      }}
+      onEndEditing={() => { const n = limitar(leer(txt) ?? min); onCommit(n); setTxt(aTexto(n)); }}
+      style={[s.lineInput, { width: ancho, color: colores.texto, borderColor: colores.borde, backgroundColor: colores.fondo }]}
+    />
+  );
+}
+
+export const leerCantidad = (v: string): number | null => {
+  const d = v.replace(/\D/g, "");
+  return d ? Number(d) : null;
+};
+export const cantidadATexto = (n: number) => (n > 0 ? String(n) : "");
+
 // Espejo de productEffectivePrice del POS web y effectivePrice de inventario.tsx
 function productPrice(p: Product): number {
   const d = Number(p.discount_value ?? 0);
@@ -358,6 +401,14 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const changeQty = (key: string, delta: number) => setCart(prev => prev
     .map(i => i.key === key ? { ...i, qty: Math.min(i.qty + delta, i.maxQty ?? Infinity) } : i)
     .filter(i => i.qty > 0));
+  // Cantidad escrita (p. ej. 300 injertos); los productos no pasan de su stock.
+  const setQty = (key: string, qty: number) => setCart(prev => prev
+    .map(i => i.key === key ? { ...i, qty: Math.max(1, Math.min(qty, i.maxQty ?? Infinity)) } : i));
+  // Valor por unidad de un servicio o ítem libre (los de precio variable).
+  const setPrecio = (key: string, price: number) => setCart(prev => prev
+    .map(i => i.key === key ? { ...i, price: Math.max(0, price) } : i));
+  const leerPrecio = (v: string) => leerMonto(v, { decimales: conDecimales });
+  const precioATexto = (n: number) => montoATexto(n, { decimales: conDecimales });
 
   // ── Propina y vendedor (nómina) ──
   const opcionesPara = useMemo(() => equipoConCita(equipo, proCita), [equipo, proCita]);
@@ -729,11 +780,23 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
             <View style={s.cartRowMain}>
               <View style={{ flex: 1 }}>
                 <Text style={[s.cartName, { color: t.text }]} numberOfLines={1}>{i.name}</Text>
-                <Text style={[s.cartSub, { color: esTip ? Colors.success : t.muted }]}>
-                  {esTip
-                    ? "Propina · sin descuento"
-                    : `${fmtMoneyFull(i.price)}${i.itemType === "product" ? " · producto" : ""}${tope ? " · sin más stock" : ""}`}
-                </Text>
+                {i.itemType === "service" || i.itemType === "free" ? (
+                  <View style={s.precioRow}>
+                    <CampoLinea value={i.price} onCommit={n => setPrecio(i.key, n)} leer={leerPrecio} aTexto={precioATexto}
+                      ancho={96} decimal={conDecimales} placeholder="Valor" etiqueta={`Valor por unidad de ${i.name}`}
+                      colores={{ texto: t.text, borde: t.border, fondo: t.cardSolid, tenue: t.subtle }} />
+                    <Text style={[s.cartSub, { color: t.muted, marginTop: 0 }]}>c/u</Text>
+                  </View>
+                ) : (
+                  <Text style={[s.cartSub, { color: esTip ? Colors.success : t.muted }]}>
+                    {esTip
+                      ? "Propina · sin descuento"
+                      : `${fmtMoneyFull(i.price)}${i.itemType === "product" ? " · producto" : ""}${tope ? " · sin más stock" : ""}`}
+                  </Text>
+                )}
+                {i.itemType === "service" && i.price <= 0 && (
+                  <Text style={[s.cartSub, { color: "#d97706", fontFamily: Fonts.semibold }]}>Escribe el valor por unidad y la cantidad.</Text>
+                )}
                 {conVendedor && (
                   <TouchableOpacity onPress={() => setVendedorDe(eligiendo ? null : i.key)} hitSlop={6} style={s.vendedorBtn}
                     accessibilityRole="button" accessibilityState={{ expanded: eligiendo }}
@@ -757,7 +820,9 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                       accessibilityRole="button" accessibilityLabel={i.qty === 1 ? `Quitar ${i.name}` : `Una unidad menos de ${i.name}`}>
                       <Ionicons name={i.qty === 1 ? "trash-outline" : "remove"} size={15} color={Colors.red} />
                     </TouchableOpacity>
-                    <Text style={[s.qtyText, { color: t.text }]}>{i.qty}</Text>
+                    <CampoLinea value={i.qty} onCommit={n => setQty(i.key, n)} leer={leerCantidad} aTexto={cantidadATexto}
+                      min={1} max={i.maxQty ?? undefined} ancho={48} etiqueta={`Cantidad de ${i.name}`}
+                      colores={{ texto: t.text, borde: t.border, fondo: t.cardSolid, tenue: t.subtle }} />
                     <TouchableOpacity onPress={() => changeQty(i.key, 1)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
                       disabled={tope} accessibilityRole="button" accessibilityLabel={`Una unidad más de ${i.name}`} accessibilityState={{ disabled: tope }}>
                       <Ionicons name="add" size={15} color={tope ? t.subtle : t.text} />
@@ -1178,6 +1243,8 @@ const s = StyleSheet.create({
   qtyBox:        { flexDirection: "row", alignItems: "center", gap: 6 },
   qtyBtn:        { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   qtyText:       { fontSize: 14, fontFamily: Fonts.bold, minWidth: 18, textAlign: "center" },
+  lineInput:     { borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 6, paddingVertical: 4, fontSize: 13, fontFamily: Fonts.monoBold, textAlign: "center" },
+  precioRow:     { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
   cartLineTotal: { fontSize: 13, fontFamily: Fonts.bold, minWidth: 74, textAlign: "right" },
   tabs:          { flexDirection: "row", gap: 8, marginBottom: 10 },
   tab:           { flex: 1, borderWidth: 1, borderRadius: Radius.full, paddingVertical: 8, alignItems: "center" },
