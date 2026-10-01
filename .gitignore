@@ -67,3 +67,6 @@ store.config.json
 *play-store*.json
 google-services.json
 *-key.json
+
+# Capturas de pantalla locales
+Capturas/
