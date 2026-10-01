@@ -330,7 +330,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "finanzas",
-    label: "Reportes y comisiones",
+    label: "Reportes y nómina",
     description: "Ingresos, rendimiento y pagos al equipo.",
     iconName: "ChartBar",
     articles: [
@@ -351,15 +351,18 @@ export const HELP_CATEGORIES: HelpCategory[] = [
       },
       {
         slug: "comisiones-equipo",
-        title: "Cómo calcular y pagar comisiones",
-        description: "Cuánto le corresponde a cada profesional.",
+        title: "Cómo liquidar la nómina del equipo",
+        description: "Básico, comisiones por servicio y por productos, propinas y bonificaciones de cada profesional.",
         category: "finanzas",
-        readMinutes: 2,
+        readMinutes: 3,
         steps: [
-          paso("Abre Comisiones", "Ve a Ajustes → Comisiones."),
-          paso("Define la regla de cada profesional", "Elige el tipo de comisión y el valor, y guarda."),
-          paso("Elige el período", "La tabla muestra los ingresos y la comisión de cada profesional en ese período."),
-          paso("Liquida", "Toca Liquidar para registrar el pago. Queda en el historial de liquidaciones."),
+          paso("Abre Nómina", "Ve a Ajustes → Nómina. Es la misma nómina del panel web: lo que veas aquí y allá coincide."),
+          paso("Configura el pago de cada uno",
+            "En Reglas define el básico de cada profesional (mensual, quincenal o semanal, y desde cuándo se cuenta), su comisión general de servicios (% o fijo por cita) y su % por productos. Si un servicio paga distinto, ponle su propia comisión."),
+          paso("Anota bonificaciones, propinas y adelantos",
+            "En Novedades anota bonificaciones y descuentos o adelantos. Las propinas que registras en Caja (categoría Propina) o al cobrar, con su profesional, se anotan solas."),
+          paso("Revisa y liquida",
+            "En Resumen elige la quincena, el mes o la semana. Verás por profesional las citas atendidas, lo vendido y lo pendiente por pagar; al tocarlo, el detalle cita por cita. Liquidar registra el pago y deja la colilla en Historial. Solo cuentan las citas completadas o cobradas."),
         ],
       },
     ],

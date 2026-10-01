@@ -37,6 +37,10 @@ export const Config = {
      *  que el panel (src/app/api/send-confirmation): con sesión, body
      *  { type, manageToken }; el servidor saca de la base todo lo demás. */
     sendConfirmation: `${WEB_URL}/api/send-confirmation`,
+    /** Nómina del equipo: resumen, liquidar, liquidaciones, anular. El cálculo
+     *  vive solo en el servidor (src/app/api/nomina) para que web y app
+     *  muestren lo mismo. Ver lib/nomina.ts. */
+    nomina: `${WEB_URL}/api/nomina`,
   },
   urls: {
     booking: `${WEB_URL}/book/`,

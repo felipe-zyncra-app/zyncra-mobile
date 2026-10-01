@@ -47,7 +47,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
       { icon: "bar-chart-outline",     label: "Reportes",            sub: "Ingresos, servicios y rendimiento", route: "/(admin)/reports" },
       { icon: "stats-chart-outline",   label: "Módulo financiero",   sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
       { icon: "wallet-outline",        label: "Sistema de caja",     sub: "Apertura, cierre y movimientos",    route: "/(admin)/caja" },
-      { icon: "ribbon-outline",        label: "Comisiones",          sub: "Lo que le pagas a tu equipo",       route: "/(admin)/commissions" },
+      { icon: "ribbon-outline",        label: "Nómina",              sub: "Básico, comisiones y pagos del equipo", route: "/(admin)/commissions" },
       { icon: "document-text-outline", label: "Factura electrónica", sub: "Facturas DIAN vía Factus",          route: "/(admin)/invoices" },
     ],
   },

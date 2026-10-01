@@ -13,17 +13,12 @@ import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
-import { fmtMoneyFull } from "@/lib/format";
-import { hoyNegocio, rangoDePeriodo, fmtDia, etiquetaRango, type RangoNegocio } from "@/lib/tz";
-import { ErrorDB, mensajeError, revisar, traerTodo } from "@/lib/db";
+import { ErrorDB, mensajeError, revisar } from "@/lib/db";
 import { AVISO_ELIMINAR_CUENTA_EQUIPO, estadoServidorCuentas } from "@/lib/cuenta";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
-import type { VentaResumen } from "@/lib/ingresos";
-import {
-  colorDeProfesional, completadasSinCobro, describirRegla, totalesEntre,
-  type ReglaComision, type Totales,
-} from "@/lib/comisiones";
+import { colorDeProfesional } from "@/lib/comisiones";
 import ErrorState from "@/components/ErrorState";
+import MiNomina from "@/components/nomina/MiNomina";
 import { ListRow } from "@/components/ui";
 
 // Apple 5.1.1(i): la política de privacidad tiene que poder abrirse desde la
@@ -41,36 +36,11 @@ function abrirEnlace(url: string) {
 // consulta y el perfil se quedaba en "..." para siempre.
 type StaffInfo = { id: string; name: string; role: string | null; email: string | null };
 
-type CitaStaff = {
-  id: string;
-  appointment_date: string;
-  status: string | null;
-  pos_sales: VentaResumen[] | null;
-};
-
-type Comisiones = {
-  /**
-   * false mientras el servidor no deje al staff leer SUS reglas y SUS ventas
-   * (migración pendiente, D4). Antes se mostraba "$0 · Sin regla" aunque la
-   * regla existiera: cifras falsas (DIN-03 / ESQ-16 / AJU-X3).
-   */
-  disponible: boolean;
-  rule: ReglaComision | null;
-  mes: Totales;
-  semana: Totales;
-  rangoMes: RangoNegocio;
-  rangoSemana: RangoNegocio;
-  /** Completadas del mes (se muestra aunque no haya datos de cobro). */
-  completadasMes: number;
-  sinCobroMes: number;
-};
-
 /**
- * La migración que agrega mi_negocio() es la misma que abre al staff sus reglas
- * de comisión y sus ventas, y la que evita que borrar la cuenta de un
- * colaborador arrastre las citas del negocio. Si la RPC aún no existe, esas
- * cosas tampoco (D18: funcionar antes y después de la migración). Tres
- * estados, compartidos con AccountBlocked: ver lib/cuenta.ts.
+ * La migración que agrega mi_negocio() es la que evita que borrar la cuenta
+ * de un colaborador arrastre las citas del negocio. Si la RPC aún no existe,
+ * eso tampoco (D18: funcionar antes y después de la migración). Tres estados,
+ * compartidos con AccountBlocked: ver lib/cuenta.ts.
  */
 const estadoServidor = estadoServidorCuentas;
 
@@ -81,9 +51,10 @@ export default function StaffProfileScreen() {
   const { tenant, timezone, ready } = useTenant();
   const guard = useGuardRespuestas();
   const [info, setInfo] = useState<StaffInfo | null>(null);
-  const [comm, setComm] = useState<Comisiones | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Sube al deslizar para refrescar: Mi nómina se recarga con el perfil.
+  const [versionNomina, setVersionNomina] = useState(0);
   const [borrando, setBorrando] = useState(false);
   const [saliendo, setSaliendo] = useState(false);
 
@@ -91,55 +62,14 @@ export default function StaffProfileScreen() {
     if (!user || !tenantId) return;
     const turno = guard.nuevo();
     try {
-      // Periodos en la zona del NEGOCIO (AJU-08 / TZ-01): con toISOString la
-      // semana iba de martes a lunes después de las 7 PM, y en Madrid el mes
-      // empezaba el último día del mes anterior.
-      const hoy = hoyNegocio(timezone);
-      const rangoMes = rangoDePeriodo("mes", timezone, hoy);
-      const rangoSemana = rangoDePeriodo("semana", timezone, hoy);
-      const desde = rangoMes.desde < rangoSemana.desde ? rangoMes.desde : rangoSemana.desde;
-      const hasta = rangoMes.hasta > rangoSemana.hasta ? rangoMes.hasta : rangoSemana.hasta;
-
       // El tenant sale de useAuth (el embed tenants(...) vuelve null para el
       // staff por RLS y dejaba tenant_id = "": ESQ-16).
       let proQ = supabase.from("professionals").select("id, name, role, email");
       proQ = professionalId ? proQ.eq("id", professionalId) : proQ.eq("user_id", user.id).eq("tenant_id", tenantId);
       const pro = (revisar(await proQ.limit(1), "No se pudo cargar tu perfil") ?? [])[0] as StaffInfo | undefined;
       if (!pro) throw new ErrorDB({ code: "PGRST116", message: "" }, "No se encontró tu perfil en el negocio");
-
-      const [ruleRes, citas, servidor] = await Promise.all([
-        supabase.from("commission_rules").select("type, value")
-          .eq("professional_id", pro.id).eq("tenant_id", tenantId).maybeSingle(),
-        traerTodo<CitaStaff>((d, h) =>
-          supabase.from("appointments")
-            // Ventas embebidas: con la migración el staff lee las de SUS citas.
-            .select("id, appointment_date, status, pos_sales(total)")
-            .eq("professional_id", pro.id)
-            .eq("tenant_id", tenantId)
-            .gte("appointment_date", desde)
-            .lte("appointment_date", hasta)
-            .order("appointment_date").order("id").range(d, h),
-        { contexto: "No se pudieron cargar tus citas" }),
-        estadoServidor(),
-      ]);
-      const rule = revisar(ruleRes, "No se pudo cargar tu regla de comisión") as ReglaComision | null;
-      // Si no se pudo revisar, mejor el aviso que un "$0 · Sin regla" que
-      // quizá sea falso.
-      const disponible = servidor.estado === "actualizado";
-
-      const delMes = citas.filter(c => c.appointment_date >= rangoMes.desde && c.appointment_date <= rangoMes.hasta);
       if (!turno.vigente()) return;
       setInfo({ ...pro, email: pro.email ?? user.email ?? null });
-      setComm({
-        disponible,
-        rule,
-        mes: totalesEntre(citas, rule, rangoMes.desde, rangoMes.hasta),
-        semana: totalesEntre(citas, rule, rangoSemana.desde, rangoSemana.hasta),
-        rangoMes,
-        rangoSemana,
-        completadasMes: delMes.filter(c => c.status === "completed").length,
-        sinCobroMes: completadasSinCobro(delMes),
-      });
       setError(null);
     } catch (e) {
       if (turno.vigente()) setError(e);
@@ -150,7 +80,12 @@ export default function StaffProfileScreen() {
     alCambiarSede: false,
   });
 
-  const onRefresh = async () => { setRefreshing(true); await recargar(); setRefreshing(false); };
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setVersionNomina(v => v + 1);
+    await recargar();
+    setRefreshing(false);
+  };
 
   const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Seguro que quieres salir?", [
@@ -233,81 +168,6 @@ export default function StaffProfileScreen() {
     : "?";
   const avatarColor = info ? colorDeProfesional(info.id) : Colors.red;
   const tenantName = tenant?.name ?? "Tu negocio";
-  const nombreMes = comm ? fmtDia(comm.rangoMes.desde, "mes-anio").split(" ")[0] : "";
-
-  const renderComisiones = () => {
-    if (!comm) return <ActivityIndicator color={Colors.red} style={{ paddingVertical: 24 }} />;
-    if (!comm.disponible) {
-      return (
-        <View style={{ gap: 10 }}>
-          <View style={s.commMain}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.commLabel}>Citas completadas del mes</Text>
-              <Text style={s.commAmount}>{comm.completadasMes}</Text>
-            </View>
-            <View style={[s.commIcon, { backgroundColor: Colors.blue + "14" }]}>
-              <Ionicons name="calendar-outline" size={24} color={Colors.blue} />
-            </View>
-          </View>
-          <View style={s.notice}>
-            <Ionicons name="information-circle-outline" size={15} color={Colors.blue} />
-            <Text style={s.noticeTxt}>
-              El detalle de tus comisiones aparecerá aquí con una próxima actualización de Zyncra. Mientras tanto, consulta el valor con el administrador del negocio.
-            </Text>
-          </View>
-        </View>
-      );
-    }
-    const m = comm.mes;
-    return (
-      <>
-        <View style={s.commMain}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.commLabel}>Comisión del mes</Text>
-            <Text style={s.commAmount}>{fmtMoneyFull(m.comision)}</Text>
-            {comm.rule ? (
-              <Text style={s.commRule}>{describirRegla(comm.rule, fmtMoneyFull)}</Text>
-            ) : (
-              <Text style={[s.commRule, { color: t.subtle }]}>Sin regla configurada: pídesela al administrador</Text>
-            )}
-          </View>
-          <View style={[s.commIcon, { backgroundColor: Colors.success + "14" }]}>
-            <Ionicons name="cash-outline" size={24} color={Colors.success} />
-          </View>
-        </View>
-
-        <View style={s.commGrid}>
-          <View style={s.commStat}>
-            <Text style={s.commStatVal}>{m.citas}</Text>
-            <Text style={s.commStatLabel}>Citas cobradas</Text>
-          </View>
-          <View style={s.commStatDivider} />
-          <View style={s.commStat}>
-            <Text style={s.commStatVal}>{fmtMoneyFull(m.ingresos)}</Text>
-            <Text style={s.commStatLabel}>Cobrado</Text>
-          </View>
-        </View>
-
-        {/* Reparto: cuánto es para mí vs. cuánto se queda el negocio */}
-        <View style={s.splitRow}>
-          <View style={[s.splitCell, { backgroundColor: Colors.success + "14" }]}>
-            <Text style={[s.splitVal, { color: Colors.success }]}>{fmtMoneyFull(m.comision)}</Text>
-            <Text style={s.splitLabel}>Para mí</Text>
-          </View>
-          <View style={[s.splitCell, { backgroundColor: t.chipBg }]}>
-            <Text style={[s.splitVal, { color: t.muted }]}>{fmtMoneyFull(Math.max(0, m.ingresos - m.comision))}</Text>
-            <Text style={s.splitLabel}>Para el negocio</Text>
-          </View>
-        </View>
-
-        {comm.sinCobroMes > 0 ? (
-          <Text style={s.sinCobro}>
-            {comm.sinCobroMes} cita{comm.sinCobroMes !== 1 ? "s" : ""} completada{comm.sinCobroMes !== 1 ? "s" : ""} sin cobro: no suman hasta que se cobren.
-          </Text>
-        ) : null}
-      </>
-    );
-  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -334,36 +194,21 @@ export default function StaffProfileScreen() {
         contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.red} />}
       >
-        {error && !comm ? (
+        {error && !info ? (
           // Antes un fallo dejaba el nombre en "..." y el spinner girando sin fin.
           <View style={{ minHeight: 260 }}>
             <ErrorState error={error} onRetry={recargar} />
           </View>
-        ) : (
-          <>
-            {/* Comisiones del mes */}
-            <Animated.View entering={FadeInDown.delay(80).duration(400)}>
-              <Text style={s.sectionLabel}>Mis comisiones{nombreMes ? ` · ${nombreMes}` : ""}</Text>
-              <View style={[s.commCard, Shadow.sm]}>{renderComisiones()}</View>
-            </Animated.View>
-
-            {/* Esta semana (lunes a domingo del negocio) */}
-            {comm && comm.disponible && (
-              <Animated.View entering={FadeInDown.delay(140).duration(400)} style={{ marginTop: 12 }}>
-                <View style={[s.weekCard, Shadow.sm]}>
-                  <View style={[s.weekIconBox, { backgroundColor: Colors.blue + "14" }]}>
-                    <Ionicons name="calendar-outline" size={16} color={Colors.blue} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.weekLabel}>Esta semana · {etiquetaRango(comm.rangoSemana)}</Text>
-                    <Text style={s.weekSub}>{comm.semana.citas} citas · {fmtMoneyFull(comm.semana.ingresos)} cobrados</Text>
-                  </View>
-                  <Text style={s.weekAmount}>{fmtMoneyFull(comm.semana.comision)}</Text>
-                </View>
-              </Animated.View>
-            )}
-          </>
-        )}
+        ) : tenantId && ready ? (
+          // Mi nómina: la calcula el servidor (/api/nomina), igual que el panel
+          // web del dueño. Antes aquí se calculaba una comisión local que no
+          // coincidía con la del negocio. Espera a `ready`: los periodos van
+          // en la zona del negocio.
+          <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+            <Text style={s.sectionLabel}>Mi nómina</Text>
+            <MiNomina tenantId={tenantId} timezone={timezone} version={versionNomina} />
+          </Animated.View>
+        ) : null}
 
         {/* Info de cuenta */}
         <Animated.View entering={FadeInDown.delay(200).duration(400)} style={{ marginTop: 20 }}>
@@ -443,32 +288,6 @@ function crearEstilos(t: ThemeColors) {
     businessText: { fontSize: 12, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.85)" },
 
     sectionLabel: { fontSize: 11, fontFamily: Fonts.mono, color: t.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
-
-    commCard:   { backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line, borderRadius: Radius.lg, padding: 16, overflow: "hidden" },
-    commMain:   { flexDirection: "row", alignItems: "flex-start", gap: 14, marginBottom: 16 },
-    commLabel:  { fontSize: 11, fontFamily: Fonts.mono, color: t.muted, textTransform: "uppercase", letterSpacing: 0.5 },
-    commAmount: { fontSize: 32, fontFamily: Fonts.bold, color: t.text, letterSpacing: -1, marginTop: 4 },
-    commRule:   { fontSize: 12, fontFamily: Fonts.regular, color: Colors.success, marginTop: 4 },
-    commIcon:   { width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-    commGrid:   { flexDirection: "row", borderTopWidth: 1, borderTopColor: t.line, paddingTop: 14 },
-    commStat:   { flex: 1, alignItems: "center", gap: 2 },
-    commStatDivider: { width: 1, backgroundColor: t.line, alignSelf: "stretch" },
-    commStatVal:   { fontSize: 16, fontFamily: Fonts.bold, color: t.text },
-    commStatLabel: { fontSize: 11, fontFamily: Fonts.regular, color: t.muted },
-    sinCobro:   { fontSize: 11.5, fontFamily: Fonts.regular, color: "#d97706", marginTop: 12, lineHeight: 16 },
-    notice:     { flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: Colors.blue + "12", padding: 12, borderRadius: Radius.md },
-    noticeTxt:  { flex: 1, fontSize: 12, fontFamily: Fonts.regular, color: t.text, lineHeight: 17 },
-
-    splitRow:   { flexDirection: "row", gap: 8, marginTop: 12 },
-    splitCell:  { flex: 1, borderRadius: Radius.md, padding: 10, alignItems: "center", gap: 2 },
-    splitVal:   { fontSize: 14, fontFamily: Fonts.bold },
-    splitLabel: { fontSize: 10, fontFamily: Fonts.regular, color: t.muted },
-
-    weekCard:    { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line, borderRadius: Radius.lg, padding: 14 },
-    weekIconBox: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-    weekLabel:   { fontSize: 13, fontFamily: Fonts.semibold, color: t.text },
-    weekSub:     { fontSize: 11, fontFamily: Fonts.regular, color: t.muted, marginTop: 2 },
-    weekAmount:  { fontSize: 16, fontFamily: Fonts.bold, color: Colors.blue },
 
     card:     { backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line, borderRadius: Radius.lg, overflow: "hidden" },
     infoRow:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },

@@ -250,6 +250,7 @@ export type Database = {
           id: string
           location_id: string | null
           manage_token: string | null
+          notes: string | null
           professional_id: string | null
           series_id: string | null
           service_id: string | null
@@ -266,6 +267,7 @@ export type Database = {
           id?: string
           location_id?: string | null
           manage_token?: string | null
+          notes?: string | null
           professional_id?: string | null
           series_id?: string | null
           service_id?: string | null
@@ -282,6 +284,7 @@ export type Database = {
           id?: string
           location_id?: string | null
           manage_token?: string | null
+          notes?: string | null
           professional_id?: string | null
           series_id?: string | null
           service_id?: string | null
@@ -555,6 +558,7 @@ export type Database = {
           layaway_payment_id: string | null
           payment_method: string | null
           pos_sale_id: string | null
+          professional_id: string | null
           session_id: string
           tenant_id: string
           type: string
@@ -568,6 +572,7 @@ export type Database = {
           layaway_payment_id?: string | null
           payment_method?: string | null
           pos_sale_id?: string | null
+          professional_id?: string | null
           session_id: string
           tenant_id: string
           type: string
@@ -581,6 +586,7 @@ export type Database = {
           layaway_payment_id?: string | null
           payment_method?: string | null
           pos_sale_id?: string | null
+          professional_id?: string | null
           session_id?: string
           tenant_id?: string
           type?: string
@@ -598,6 +604,13 @@ export type Database = {
             columns: ["pos_sale_id"]
             isOneToOne: false
             referencedRelation: "pos_sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_movements_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
             referencedColumns: ["id"]
           },
           {
@@ -1223,8 +1236,12 @@ export type Database = {
           paid_at: string
           period_end: string
           period_start: string
+          product_commission: number | null
+          product_sales_total: number | null
           professional_id: string
           revenue_total: number
+          service_commission: number | null
+          statement_id: string | null
           tenant_id: string
         }
         Insert: {
@@ -1236,8 +1253,12 @@ export type Database = {
           paid_at?: string
           period_end: string
           period_start: string
+          product_commission?: number | null
+          product_sales_total?: number | null
           professional_id: string
           revenue_total?: number
+          service_commission?: number | null
+          statement_id?: string | null
           tenant_id: string
         }
         Update: {
@@ -1249,8 +1270,12 @@ export type Database = {
           paid_at?: string
           period_end?: string
           period_start?: string
+          product_commission?: number | null
+          product_sales_total?: number | null
           professional_id?: string
           revenue_total?: number
+          service_commission?: number | null
+          statement_id?: string | null
           tenant_id?: string
         }
         Relationships: [
@@ -1259,6 +1284,13 @@ export type Database = {
             columns: ["professional_id"]
             isOneToOne: false
             referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_payments_statement_id_fkey"
+            columns: ["statement_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_statements"
             referencedColumns: ["id"]
           },
           {
@@ -1308,6 +1340,61 @@ export type Database = {
           },
           {
             foreignKeyName: "commission_rules_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      commission_service_rules: {
+        Row: {
+          created_at: string
+          id: string
+          professional_id: string | null
+          service_id: string
+          tenant_id: string
+          type: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          professional_id?: string | null
+          service_id: string
+          tenant_id: string
+          type: string
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          professional_id?: string | null
+          service_id?: string
+          tenant_id?: string
+          type?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commission_service_rules_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_service_rules_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_service_rules_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -1993,6 +2080,7 @@ export type Database = {
           payment_method: string
           pdf_url: string | null
           pos_sale_id: string | null
+          reference_code: string | null
           status: string
           subtotal: number
           tax_total: number
@@ -2023,6 +2111,7 @@ export type Database = {
           payment_method?: string
           pdf_url?: string | null
           pos_sale_id?: string | null
+          reference_code?: string | null
           status?: string
           subtotal?: number
           tax_total?: number
@@ -2053,6 +2142,7 @@ export type Database = {
           payment_method?: string
           pdf_url?: string | null
           pos_sale_id?: string | null
+          reference_code?: string | null
           status?: string
           subtotal?: number
           tax_total?: number
@@ -2381,6 +2471,234 @@ export type Database = {
           },
         ]
       }
+      payroll_adjustments: {
+        Row: {
+          amount: number
+          cash_movement_id: string | null
+          concept: string | null
+          created_at: string
+          created_by: string | null
+          entry_date: string
+          id: string
+          kind: string
+          pos_sale_item_id: string | null
+          professional_id: string
+          source: string
+          statement_id: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          cash_movement_id?: string | null
+          concept?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date: string
+          id?: string
+          kind: string
+          pos_sale_item_id?: string | null
+          professional_id: string
+          source?: string
+          statement_id?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          cash_movement_id?: string | null
+          concept?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date?: string
+          id?: string
+          kind?: string
+          pos_sale_item_id?: string | null
+          professional_id?: string
+          source?: string
+          statement_id?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_adjustments_cash_movement_id_fkey"
+            columns: ["cash_movement_id"]
+            isOneToOne: true
+            referencedRelation: "cash_movements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_adjustments_pos_sale_item_id_fkey"
+            columns: ["pos_sale_item_id"]
+            isOneToOne: true
+            referencedRelation: "pos_sale_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_adjustments_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_adjustments_statement_id_fkey"
+            columns: ["statement_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_statements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_adjustments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_profiles: {
+        Row: {
+          base_period: string
+          base_salary: number
+          base_since: string | null
+          created_at: string
+          id: string
+          product_commission_pct: number | null
+          professional_id: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          base_period?: string
+          base_salary?: number
+          base_since?: string | null
+          created_at?: string
+          id?: string
+          product_commission_pct?: number | null
+          professional_id: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          base_period?: string
+          base_salary?: number
+          base_since?: string | null
+          created_at?: string
+          id?: string
+          product_commission_pct?: number | null
+          professional_id?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_profiles_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_profiles_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_statements: {
+        Row: {
+          appointments_count: number
+          base_amount: number
+          base_days: number
+          base_ranges: Json
+          bonus_amount: number
+          created_at: string
+          created_by: string | null
+          deduction_amount: number
+          detail: Json
+          id: string
+          note: string | null
+          paid_at: string
+          period_end: string
+          period_start: string
+          product_commission: number
+          product_sales: number
+          professional_id: string
+          service_commission: number
+          service_sales: number
+          tenant_id: string
+          tips_amount: number
+          total_amount: number
+        }
+        Insert: {
+          appointments_count?: number
+          base_amount?: number
+          base_days?: number
+          base_ranges?: Json
+          bonus_amount?: number
+          created_at?: string
+          created_by?: string | null
+          deduction_amount?: number
+          detail?: Json
+          id: string
+          note?: string | null
+          paid_at?: string
+          period_end: string
+          period_start: string
+          product_commission?: number
+          product_sales?: number
+          professional_id: string
+          service_commission?: number
+          service_sales?: number
+          tenant_id: string
+          tips_amount?: number
+          total_amount?: number
+        }
+        Update: {
+          appointments_count?: number
+          base_amount?: number
+          base_days?: number
+          base_ranges?: Json
+          bonus_amount?: number
+          created_at?: string
+          created_by?: string | null
+          deduction_amount?: number
+          detail?: Json
+          id?: string
+          note?: string | null
+          paid_at?: string
+          period_end?: string
+          period_start?: string
+          product_commission?: number
+          product_sales?: number
+          professional_id?: string
+          service_commission?: number
+          service_sales?: number
+          tenant_id?: string
+          tips_amount?: number
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_statements_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_statements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_admins: {
         Row: {
           created_at: string
@@ -2421,9 +2739,11 @@ export type Database = {
           name: string
           price: number
           product_id: string | null
+          professional_id: string | null
           quantity: number
           sale_id: string
           service_id: string | null
+          unit_price: number | null
         }
         Insert: {
           id?: string
@@ -2431,9 +2751,11 @@ export type Database = {
           name: string
           price: number
           product_id?: string | null
+          professional_id?: string | null
           quantity?: number
           sale_id: string
           service_id?: string | null
+          unit_price?: number | null
         }
         Update: {
           id?: string
@@ -2441,9 +2763,11 @@ export type Database = {
           name?: string
           price?: number
           product_id?: string | null
+          professional_id?: string | null
           quantity?: number
           sale_id?: string
           service_id?: string | null
+          unit_price?: number | null
         }
         Relationships: [
           {
@@ -2451,6 +2775,13 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
             referencedColumns: ["id"]
           },
           {
@@ -2681,6 +3012,7 @@ export type Database = {
       professionals: {
         Row: {
           avatar_url: string | null
+          color: string | null
           created_at: string | null
           email: string | null
           id: string
@@ -2697,6 +3029,7 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          color?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -2713,6 +3046,7 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          color?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -3396,6 +3730,7 @@ export type Database = {
           duration_minutes: number
           id: string
           image_url: string | null
+          is_active: boolean
           location_id: string | null
           name: string
           position: number
@@ -3412,6 +3747,7 @@ export type Database = {
           duration_minutes: number
           id?: string
           image_url?: string | null
+          is_active?: boolean
           location_id?: string | null
           name: string
           position?: number
@@ -3428,6 +3764,7 @@ export type Database = {
           duration_minutes?: number
           id?: string
           image_url?: string | null
+          is_active?: boolean
           location_id?: string | null
           name?: string
           position?: number
@@ -4509,10 +4846,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      anular_nomina: { Args: { p_id: string; p_tenant: string }; Returns: Json }
+      client_visit_count: { Args: { p_client_id: string }; Returns: number }
       generate_gift_card_code: { Args: never; Returns: string }
       generate_order_number: { Args: never; Returns: string }
       get_location_admin_context: { Args: { p_user_id: string }; Returns: Json }
       get_public_locations: { Args: { p_tenant_id: string }; Returns: Json }
+      get_public_professionals: {
+        Args: { p_tenant_id: string }
+        Returns: {
+          avatar_url: string
+          id: string
+          is_active: boolean
+          location_id: string
+          name: string
+          photo_url: string
+          role: string
+          schedule: Json
+          show_on_booking: boolean
+          tenant_id: string
+        }[]
+      }
       get_public_tenant: {
         Args: { p_slug: string }
         Returns: {
@@ -4529,6 +4883,34 @@ export type Database = {
         Returns: undefined
       }
       is_platform_admin: { Args: { uid: string }; Returns: boolean }
+      liberar_push_token: { Args: { p_token: string }; Returns: number }
+      liquidar_nomina: { Args: { p: Json }; Returns: Json }
+      mi_negocio: {
+        Args: never
+        Returns: {
+          address: string
+          currency: string
+          id: string
+          locale: string
+          name: string
+          phone: string
+          rol: string
+          slug: string
+          timezone: string
+        }[]
+      }
+      mis_citas_ids: { Args: never; Returns: string[] }
+      mis_profesionales_activos: { Args: never; Returns: string[] }
+      mis_profesionales_con_montos: { Args: never; Returns: string[] }
+      mis_sedes_admin: {
+        Args: never
+        Returns: {
+          location_id: string
+          tenant_id: string
+        }[]
+      }
+      mis_tenants_equipo: { Args: never; Returns: string[] }
+      mis_tenants_staff: { Args: never; Returns: string[] }
       my_subscription_state: {
         Args: never
         Returns: {
@@ -4537,6 +4919,12 @@ export type Database = {
           status: string
           trial_ends_at: string
         }[]
+      }
+      nomina_arreglo: { Args: { x: Json }; Returns: Json }
+      nomina_zona: { Args: { p_tenant: string }; Returns: string }
+      patch_tenant_settings: {
+        Args: { p_patch: Json; p_tenant_id?: string }
+        Returns: Json
       }
       redeem_gift_card: {
         Args: {
@@ -4547,8 +4935,20 @@ export type Database = {
         }
         Returns: number
       }
+      storage_puede_gestionar: {
+        Args: { p_bucket: string; p_name: string }
+        Returns: boolean
+      }
       supplier_id_for_user: { Args: { uid: string }; Returns: string }
       tenant_id_for_user: { Args: { uid: string }; Returns: string }
+      user_can_access_clinical_records: {
+        Args: { t: string }
+        Returns: boolean
+      }
+      user_can_access_clinical_records_txt: {
+        Args: { t: string }
+        Returns: boolean
+      }
       user_can_access_tenant_clinical: { Args: { t: string }; Returns: boolean }
       user_can_access_tenant_clinical_txt: {
         Args: { t: string }
@@ -4561,6 +4961,8 @@ export type Database = {
       }
       user_can_manage_layaways: { Args: { t: string }; Returns: boolean }
       user_can_manage_money: { Args: { t: string }; Returns: boolean }
+      user_can_manage_tenant: { Args: { t: string }; Returns: boolean }
+      user_can_manage_tenant_txt: { Args: { t: string }; Returns: boolean }
       wa_batch_append: {
         Args: { p_phone: string; p_tenant: string; p_text: string }
         Returns: {
