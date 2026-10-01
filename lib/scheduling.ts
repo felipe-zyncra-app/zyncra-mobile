@@ -494,7 +494,13 @@ export function describirOcupado(o: Ocupado): string {
     : `El negocio tiene cerrado de ${rango}${motivo}.`;
 }
 
-export type VerificacionCupo = { ok: true } | { ok: false; motivo: string };
+/**
+ * conCita: el choque es con otra cita del profesional. El equipo puede
+ * agendar igual (dos clientes a la vez, Imperio Capilar 2026-10-01): se pide
+ * confirmar en vez de bloquear. Una ausencia, el negocio cerrado o pasar la
+ * medianoche sí bloquean.
+ */
+export type VerificacionCupo = { ok: true } | { ok: false; motivo: string; conCita?: boolean };
 
 /**
  * Re-verifica contra la base, justo antes de guardar, que la hora siga libre:
@@ -519,8 +525,12 @@ export async function verificarCupo(o: {
     return { ok: false, motivo: "La cita terminaría después de la medianoche. Elige una hora más temprana." };
   }
   const ocupados = await ocupacionDelDia(o);
-  const c = choqueCon(inicio, o.duracion, ocupados);
-  return c ? { ok: false, motivo: describirOcupado(c) } : { ok: true };
+  // Primero una ausencia o cierre (bloquea); si solo hay citas, se avisa.
+  const fin = inicio + o.duracion;
+  const cruces = ocupados.filter(x => inicio < x.fin && x.inicio < fin);
+  const bloqueo = cruces.find(x => x.tipo !== "cita");
+  if (bloqueo) return { ok: false, motivo: describirOcupado(bloqueo) };
+  return cruces.length > 0 ? { ok: false, motivo: describirOcupado(cruces[0]), conCita: true } : { ok: true };
 }
 
 /** true si el error es el índice único de "misma hora, mismo profesional" (23505). */
@@ -535,7 +545,8 @@ export function esHorarioOcupado(err: unknown): boolean {
  * conexión".
  */
 export function mensajeErrorCita(err: unknown, contexto = "No se pudo guardar la cita"): string {
-  if (esHorarioOcupado(err)) return "Ese horario ya está ocupado para ese profesional. Elige otra hora.";
+  // Solo pasa con la regla vieja de la base (misma hora EXACTA, 20261001d sin aplicar).
+  if (esHorarioOcupado(err)) return "El profesional ya tiene una cita que empieza a esa misma hora. Ponla unos minutos antes o después.";
   return mensajeError(err, contexto);
 }
 

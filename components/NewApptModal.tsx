@@ -341,9 +341,15 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         return;
       }
       if (!v.ok) {
-        Alert.alert("Horario no disponible", v.motivo);
-        cupos.recargar();
-        return;
+        // Otra cita a esa hora: el equipo puede agendar igual (quedan cruzadas).
+        if (v.conCita) {
+          const seguir = await confirmar("Se cruza con otra cita", `${v.motivo}\n\n¿Agendar igual? Quedarán dos citas a la vez.`, "Agendar igual");
+          if (!seguir) return;
+        } else {
+          Alert.alert("Horario no disponible", v.motivo);
+          cupos.recargar();
+          return;
+        }
       }
 
       let clientId = selectedClient?.id ?? null;

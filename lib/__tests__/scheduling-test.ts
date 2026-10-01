@@ -188,10 +188,28 @@ describe("verificarCupo", () => {
     if (!r.ok) expect(r.motivo).toMatch(/otra cita/);
   });
 
+  // Dos clientes a la vez con el mismo profesional (Imperio Capilar): una
+  // cita encima de otra se confirma en vez de bloquearse.
+  test("el choque con otra cita se puede confirmar (conCita)", async () => {
+    const r = await verificarCupo({ ...base, hora: "10:00" });
+    expect(r).toMatchObject({ ok: false, conCita: true });
+  });
+
   test("choca con una ausencia del profesional (AGE-05)", async () => {
     const r = await verificarCupo({ ...base, hora: "15:00" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.motivo).toMatch(/ausencia programada/);
+    if (!r.ok) expect(r.conCita).toBeUndefined();
+  });
+
+  test("si cruza una cita y una ausencia, manda la ausencia (no se puede confirmar)", async () => {
+    mockRespuestas.appointments = {
+      data: [{ id: "c2", appointment_time: "13:45:00", services: { duration_minutes: 30, duration_min: null } }],
+      error: null,
+    };
+    const r = await verificarCupo({ ...base, hora: "13:50", duracion: 30 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) { expect(r.motivo).toMatch(/ausencia programada/); expect(r.conCita).toBeUndefined(); }
   });
 
   test("ignora las ausencias de otro profesional", async () => {
@@ -208,8 +226,8 @@ describe("verificarCupo", () => {
     await expect(verificarCupo({ ...base, hora: "12:00" })).rejects.toThrow(/conexión/);
   });
 
-  test("el 23505 del índice de doble reserva se explica como horario ocupado", () => {
-    expect(mensajeErrorCita({ code: "23505", message: "duplicate key" })).toMatch(/ocupado/);
+  test("el 23505 de la regla vieja (misma hora exacta) se explica", () => {
+    expect(mensajeErrorCita({ code: "23505", message: "duplicate key" })).toMatch(/misma hora/);
     expect(mensajeErrorCita({ code: "42501", message: "" })).toMatch(/permiso/);
   });
 });

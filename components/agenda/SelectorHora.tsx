@@ -23,7 +23,11 @@ export default function SelectorHora({
   error?: unknown;
   onReintentar: () => void;
   cupos: string[];
-  /** Cupos de la grilla ya tomados: se muestran tachados y no se pueden elegir. */
+  /**
+   * Cupos de la grilla ya tomados: se marcan "ocupado" pero se pueden elegir;
+   * al guardar se confirma el cruce con la otra cita (o se bloquea si es una
+   * ausencia).
+   */
   ocupados?: string[];
   seleccionada: string | null;
   onSeleccionar: (hora: string) => void;
@@ -82,7 +86,7 @@ export default function SelectorHora({
           <Text style={[s.title, { color: t.text }]}>Día no laborable</Text>
           <Text style={[s.sub, { color: t.muted }]}>{mensajeCerrado ?? "No se atiende este día según el horario."}</Text>
         </View>
-      ) : cupos.length === 0 ? (
+      ) : grilla.length === 0 ? (
         <View style={box}>
           <Ionicons name="calendar-clear-outline" size={28} color={t.subtle} style={{ marginBottom: 8 }} />
           <Text style={[s.title, { color: t.text }]}>Sin cupos libres</Text>
@@ -94,7 +98,7 @@ export default function SelectorHora({
             <View key={ri} style={{ flexDirection: "row", gap: 8 }}>
               {row.map(h => {
                 const tomado = tomados.has(h);
-                const activo = !tomado && seleccionada === h;
+                const activo = seleccionada === h;
                 return (
                   <TouchableOpacity
                     key={h}
@@ -103,14 +107,13 @@ export default function SelectorHora({
                       borderColor: activo ? Colors.red : t.line,
                     }]}
                     onPress={() => onSeleccionar(h)}
-                    disabled={tomado}
                     activeOpacity={0.75}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: activo, disabled: tomado }}
+                    accessibilityState={{ selected: activo }}
                     accessibilityLabel={tomado ? `${fmt12(h)}, ocupado` : fmt12(h)}
                   >
-                    <Text style={[s.slotText, { color: activo ? "white" : tomado ? t.subtle : t.text },
-                      tomado && { textDecorationLine: "line-through" }]}>{fmt12(h)}</Text>
+                    <Text style={[s.slotText, { color: activo ? "white" : tomado ? t.subtle : t.text }]}>{fmt12(h)}</Text>
+                    {tomado && <Text style={[s.slotOcupado, { color: activo ? "white" : t.subtle }]}>ocupado</Text>}
                   </TouchableOpacity>
                 );
               })}
@@ -157,6 +160,7 @@ const s = StyleSheet.create({
   retryText:  { color: "white", fontFamily: Fonts.bold, fontSize: 13 },
   slot:       { flex: 1, paddingVertical: 13, borderRadius: Radius.md, borderWidth: 1, alignItems: "center" },
   slotText:   { fontSize: 13, fontFamily: Fonts.semibold },
+  slotOcupado:{ fontSize: 9.5, fontFamily: Fonts.bold, marginTop: 1 },
   block:      { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8 },
   blockText:  { flex: 1, fontSize: 12, fontFamily: Fonts.semibold },
   banner:     { flexDirection: "row", gap: 10, borderWidth: 1, borderRadius: Radius.md, padding: 12, marginTop: 12 },
