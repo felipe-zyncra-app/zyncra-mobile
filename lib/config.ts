@@ -19,6 +19,8 @@ export const Config = {
     /** Envío humano desde la bandeja de chats. Corre server-side porque
      *  usa el access_token de WhatsApp (nunca debe vivir en el dispositivo). */
     whatsappSend: `${WEB_URL}/api/whatsapp/send`,
+    /** Corregir el medio de pago de un cobro (contraseña del dueño, como anular en el web). */
+    posSalePaymentMethod: `${WEB_URL}/api/admin/pos-sales/payment-method`,
     /** Crea la fila de saas_subscriptions con el trial. Es el MISMO endpoint
      *  que usa el registro del portal, así que los días de prueba y el plan
      *  salen de una sola fuente. No pide auth: va con rate-limit por IP. */

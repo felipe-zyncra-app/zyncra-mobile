@@ -434,6 +434,11 @@ export default function PosScreen() {
           if (aviso) Alert.alert("Cobro anulado", aviso);
           recargar();
         }}
+        onMedioCambiado={aviso => {
+          setDetalle(null);
+          Alert.alert("Medio de pago corregido", aviso ?? "El cobro y la caja quedaron con el medio nuevo.");
+          recargar();
+        }}
       />
     </SafeAreaView>
   );

@@ -11,6 +11,7 @@ import { nombresDeItems, textoRecibo } from "@/lib/recibo";
 import { Colors, Fonts, Radius } from "@/constants/theme";
 import { IconButton, MonoTag } from "@/components/ui";
 import AnularCobroModal, { type CobroAAnular } from "@/components/AnularCobroModal";
+import CambiarMedioModal, { type CobroACorregir } from "@/components/cobros/CambiarMedioModal";
 import { detalleDe, type CobroFila } from "./FilaCobro";
 
 export type CobroDetalle = CobroFila & {
@@ -32,6 +33,8 @@ type Props = {
   onClose: () => void;
   /** Tras anular. `aviso` = algo secundario que no se pudo (stock o cita). */
   onAnulado: (aviso?: string) => void;
+  /** Tras corregir el medio de pago (recargar la lista). Sin él no se ofrece. */
+  onMedioCambiado?: (aviso?: string) => void;
 };
 
 /**
@@ -40,12 +43,13 @@ type Props = {
  * acciones sobre él. Anular pide contraseña (AnularCobroModal), que se abre
  * encima de esta hoja.
  */
-export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar, onClose, onAnulado }: Props) {
+export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar, onClose, onAnulado, onMedioCambiado }: Props) {
   const { t } = useTheme();
   const { tenant, timezone } = useTenant();
   const [anular, setAnular] = useState<CobroAAnular | null>(null);
+  const [corregir, setCorregir] = useState<CobroACorregir | null>(null);
 
-  useEffect(() => { setAnular(null); }, [cobro?.id]);
+  useEffect(() => { setAnular(null); setCorregir(null); }, [cobro?.id]);
 
   if (!cobro) return null;
 
@@ -169,6 +173,13 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
                   <Text style={[s.btnSecTxt, { color: t.ink }]}>Emitir factura electrónica</Text>
                 </TouchableOpacity>
               ) : null}
+              {onMedioCambiado ? (
+                <TouchableOpacity onPress={() => setCorregir({ id: cobro.id, total, lineas })} style={[s.btnSec, { borderColor: t.lineStrong }]}
+                  activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Cambiar medio de pago">
+                  <Ionicons name="card-outline" size={17} color={t.ink} />
+                  <Text style={[s.btnSecTxt, { color: t.ink }]}>Cambiar medio de pago</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity onPress={pedirAnular} style={s.btnAnular} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Anular cobro">
                 <Ionicons name="trash-outline" size={16} color={Colors.red} />
                 <Text style={s.btnAnularTxt}>Anular cobro</Text>
@@ -183,6 +194,11 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
         cobro={anular}
         onClose={() => setAnular(null)}
         onAnulado={aviso => { setAnular(null); onAnulado(aviso); }}
+      />
+      <CambiarMedioModal
+        cobro={corregir}
+        onClose={() => setCorregir(null)}
+        onCambiado={aviso => { setCorregir(null); onMedioCambiado?.(aviso); }}
       />
     </Modal>
   );
