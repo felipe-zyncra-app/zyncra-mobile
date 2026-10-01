@@ -169,6 +169,28 @@ describe("recordSale", () => {
     expect(mockDb.t.pos_sales).toHaveLength(1);
   });
 
+  test("nómina: la propina va como línea 'tip' con quien la recibe y el producto con quien lo vendió", async () => {
+    const r = await recordSale(venta({
+      total: 60000,
+      items: [
+        { name: "Corte", price: 30000, quantity: 1, service_id: "s1", item_type: "service" },
+        { name: "Cera", price: 20000, quantity: 1, product_id: "p1", item_type: "product", professional_id: "pro-luis" },
+        { name: "Propina · Ana", price: 10000, quantity: 1, item_type: "tip", professional_id: "pro-ana" },
+      ],
+    }));
+    expect(r.ok).toBe(true);
+    expect(mockDb.t.pos_sale_items.map(i => [i.name, i.item_type, i.professional_id])).toEqual([
+      ["Corte", "service", null],
+      ["Cera", "product", "pro-luis"],
+      ["Propina · Ana", "tip", "pro-ana"],
+    ]);
+    // La propina entra a caja con el pago (categoría POS: la novedad la crea
+    // el trigger de pos_sale_items, no el movimiento) y no sale del inventario.
+    expect(mockDb.t.cash_movements).toEqual([expect.objectContaining({ amount: 60000, category: "POS" })]);
+    expect(mockDb.t.cash_movements[0].professional_id).toBeUndefined();
+    expect(mockDb.t.inventory_movements).toEqual([expect.objectContaining({ product_id: "p1" })]);
+  });
+
   test("doble toque con el mismo id comparte la operación", async () => {
     const [a, b] = await Promise.all([recordSale(venta()), recordSale(venta())]);
     expect(a).toEqual(b);

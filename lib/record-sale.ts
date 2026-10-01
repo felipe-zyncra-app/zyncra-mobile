@@ -9,7 +9,10 @@ import { filtroSedeOGeneral, preferirCajaDeSede, sedeDeStock } from "./sedes";
  * (src/app/admin/pos/page.tsx, handleCharge). Una venta son estas filas:
  *
  *   · pos_sales           → la venta: dashboards, "total gastado" del CRM, finanzas
- *   · pos_sale_items      → el detalle: la Caja web muestra los ítems de cada venta
+ *   · pos_sale_items      → el detalle: la Caja web muestra los ítems de cada venta.
+ *                           Con professional_id (quién vendió / recibe la propina)
+ *                           e item_type 'tip' para las propinas: la nómina las toma
+ *                           de aquí (lib/propinas)
  *   · cash_movements      → el ingreso en la caja abierta: Caja (web y móvil) suma
  *                           SOLO cash_movements, así que una venta sin movimiento
  *                           es invisible en el arqueo y el cierre nunca cuadra
@@ -71,7 +74,13 @@ export interface SaleItemInput {
   quantity: number;
   service_id?: string | null;
   product_id?: string | null;
-  item_type?: "service" | "product";
+  /** "tip" = propina (lib/propinas): no se descuenta y no va en la factura. */
+  item_type?: "service" | "product" | "tip";
+  /**
+   * Para la nómina: quién vendió el producto o recibe la propina. null = el
+   * profesional de la cita (en una propina sin cita no llega a nadie).
+   */
+  professional_id?: string | null;
   /** Costo unitario del producto (para el costo de lo vendido en inventario). */
   unit_cost?: number | null;
   /**
@@ -91,8 +100,9 @@ export interface RecordSaleInput {
    */
   saleId?: string;
   tenantId: string;
+  /** Lo cobrado, propinas incluidas (el pago las cubre). */
   total: number;
-  /** Antes del descuento. Default: total. */
+  /** Antes del descuento, propinas incluidas. Default: total. */
   subtotal?: number;
   discountType?: "percentage" | "fixed" | null;
   discountValue?: number;
@@ -271,6 +281,9 @@ async function registrar(input: RecordSaleInput & { saleId: string }): Promise<R
           name: i.name,
           price: i.price,
           quantity: i.quantity,
+          // Una línea 'tip' con profesional se vuelve novedad de su nómina
+          // por trigger (nomina_propina_de_venta); aquí no se escribe más.
+          professional_id: i.professional_id ?? null,
         })),
       );
       if (error && (await contar("pos_sale_items", "sale_id", saleId).catch(() => 0)) === 0) throw error;

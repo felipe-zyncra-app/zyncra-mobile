@@ -182,6 +182,9 @@ export function agruparPorItem(
   const totales = new Map<string, { name: string; esProducto: boolean; val: number }>();
   for (const v of ventas) {
     for (const i of v.pos_sale_items ?? []) {
+      // Una propina no es algo que el negocio vendió: es del profesional y va
+      // a su nómina. Sin esto, "Propina · Ana" salía entre lo más vendido.
+      if (i.item_type === "tip") continue;
       const esProducto = i.item_type === "product";
       const name = nombreItem(i);
       const clave = `${esProducto ? "p" : "s"}:${name}`;

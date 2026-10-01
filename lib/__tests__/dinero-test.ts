@@ -78,6 +78,16 @@ describe("agruparPorItem (DIN-01 / DIN-24)", () => {
     ]);
     expect(r[0].pct).toBe(100);
   });
+
+  test("las propinas (item_type tip) no cuentan como algo vendido", () => {
+    const r = agruparPorItem([
+      { pos_sale_items: [
+        { name: "Corte", price: 30000, quantity: 1, item_type: "service", services: null },
+        { name: "Propina · Ana", price: 90000, quantity: 1, item_type: "tip", services: null },
+      ] },
+    ]);
+    expect(r.map(x => x.name)).toEqual(["Corte"]);
+  });
 });
 
 describe("facturación", () => {

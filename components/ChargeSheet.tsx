@@ -9,7 +9,11 @@ import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { useClientSearch, type ClientLite } from "@/lib/useClientSearch";
-import { findOpenCashSession, recordSale, type SaleItemInput } from "@/lib/record-sale";
+import { findOpenCashSession, recordSale } from "@/lib/record-sale";
+import {
+  agregarPropina, equipoConCita, esPropina, etiquetaVendedor, itemsDeVenta, lineaPropina,
+  pareceUnaPropina, textoPropinaCobrada, totalesCobro, type LineaCarrito, type Profesional,
+} from "@/lib/propinas";
 import { getActiveLocationId } from "@/lib/active-location";
 import { filtroSedeOGeneral } from "@/lib/sedes";
 import { fmtMoneyFull, fmt12, enlaceWhatsApp } from "@/lib/format";
@@ -31,6 +35,11 @@ import MetodosPago from "@/components/cobros/MetodosPago";
  * pago con un método o dividido en varios, y cliente para ventas directas.
  *
  * Sirve tanto para cobrar una cita como para una venta directa (target).
+ *
+ * Nómina (lib/propinas, igual que el POS web): "Agregar propina" suma una
+ * línea 'tip' para alguien del equipo (por defecto, el de la cita), que no se
+ * descuenta y le llega a su nómina por trigger; en cada producto se puede
+ * decir quién lo vendió (vacío = el profesional de la cita).
  *
  * Doble cobro (D8 / DIN-06): cada apertura genera un id de venta que se
  * reutiliza en los reintentos (recordSale lo usa como clave de idempotencia),
@@ -70,6 +79,8 @@ type DoneSale = {
   items: { name: string; qty: number; price: number }[];
   /** Algo que el usuario debe saber (la cita no se marcó, el cobro ya existía…). */
   aviso: string | null;
+  /** "La propina queda en la nómina de Ana." (null si no hubo propina). */
+  propina: string | null;
 };
 
 /** Cobro que ya tiene la cita (se muestra en vez de volver a cobrar). */
@@ -86,20 +97,7 @@ type Product = {
   /** Sede dueña del stock (null = producto viejo sin sede). */
   location_id: string | null;
 };
-type CartItem = {
-  key: string;
-  serviceId: string | null;
-  productId: string | null;
-  itemType: "service" | "product" | "free";
-  name: string;
-  price: number;
-  qty: number;
-  unitCost?: number | null;
-  /** Stock disponible (productos): tope de cantidad en el carrito. */
-  maxQty?: number;
-  /** Sede del producto: su salida de stock va a esa sede, no a la de la pantalla. */
-  locationId?: string | null;
-};
+type CartItem = LineaCarrito;
 type SplitLine = { method: string; amount: string };
 type Estado = "cargando" | "listo" | "error";
 
@@ -170,6 +168,15 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   // ¿La cita ya tiene cobro? Mientras se revisa, "Cobrar" espera.
   const [revisando, setRevisando] = useState(false);
   const [cobroPrevio, setCobroPrevio] = useState<CobroPrevio | null>(null);
+  // Nómina: el equipo activo y el profesional de la cita, que por defecto
+  // atendió, vendió los productos y recibe la propina.
+  const [equipo, setEquipo]     = useState<Profesional[]>([]);
+  const [proCita, setProCita]   = useState<Profesional | null>(null);
+  const [tipOpen, setTipOpen]   = useState(false);
+  const [tipMonto, setTipMonto] = useState("");
+  const [tipPara, setTipPara]   = useState("");
+  // Producto cuyo "Vendió: …" está abierto para elegir a otra persona.
+  const [vendedorDe, setVendedorDe] = useState<string | null>(null);
   // Sin caja abierta no se puede cobrar (recordSale la exige). Se revisa al
   // abrir para avisar ANTES de armar el cobro; si la revisión falla no se
   // bloquea nada: recordSale vuelve a revisar al cobrar.
@@ -235,6 +242,31 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     setExtras("listo");
   };
 
+  // Si falla no bloquea el cobro: solo no se ofrecen la propina ni el vendedor
+  // (una propina se puede anotar después en Nómina → Novedades).
+  const cargarEquipo = async (appointmentId: string | null) => {
+    const apertura = aperturaRef.current;
+    try {
+      const [eq, cita] = await Promise.all([
+        supabase.from("professionals").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+        appointmentId
+          ? supabase.from("appointments").select("professional_id, professionals(id, name)").eq("id", appointmentId).maybeSingle()
+          : Promise.resolve(null),
+      ]);
+      if (apertura !== aperturaRef.current) return;
+      const lista = eq.error ? [] : ((eq.data ?? []) as Profesional[]);
+      setEquipo(lista);
+      const fila = cita && !cita.error
+        ? (cita.data as unknown as { professional_id: string | null; professionals: Profesional | Profesional[] | null } | null)
+        : null;
+      const pro = Array.isArray(fila?.professionals) ? fila.professionals[0] : fila?.professionals;
+      const id = fila?.professional_id ?? null;
+      setProCita(id ? { id, name: pro?.name ?? lista.find(p => p.id === id)?.name ?? "Profesional de la cita" } : null);
+    } catch {
+      if (apertura === aperturaRef.current) { setEquipo([]); setProCita(null); }
+    }
+  };
+
   const revisarCaja = async (locationId: string | null | undefined) => {
     setCaja("revisando");
     const apertura = aperturaRef.current;
@@ -280,10 +312,12 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     setSplitLines([{ method: "efectivo", amount: "" }, { method: "nequi", amount: "" }]);
     setNote(""); setSearch(""); setVerTodo(false); setTab("servicios"); setFreeName(""); setFreePrice("");
     setCashReceived(""); setDone(null); setCobroPrevio(null); setSaving(false);
+    setProCita(null); setTipOpen(false); setTipMonto(""); setTipPara(""); setVendedorDe(null);
     setShowMore(tg?.kind !== "appointment");
     if (tenantId) {
       cargarCatalogo();
       revisarCaja(tg?.kind === "appointment" ? tg.appt.locationId : undefined);
+      cargarEquipo(tg?.kind === "appointment" ? tg.appt.id : null);
     }
     if (tg?.kind !== "appointment") { setExtras("listo"); setRevisando(false); return; }
     const a = tg.appt;
@@ -325,13 +359,32 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     .map(i => i.key === key ? { ...i, qty: Math.min(i.qty + delta, i.maxQty ?? Infinity) } : i)
     .filter(i => i.qty > 0));
 
+  // ── Propina y vendedor (nómina) ──
+  const opcionesPara = useMemo(() => equipoConCita(equipo, proCita), [equipo, proCita]);
+  const tipMontoNum = leerMonto(tipMonto, { decimales: conDecimales });
+  const tipOk = !!tipPara && (tipMontoNum ?? 0) > 0;
+  const abrirPropina = (montoInicial = "") => {
+    setTipMonto(montoInicial);
+    // Por defecto, el profesional de la cita (o el único del equipo).
+    setTipPara(proCita?.id ?? (opcionesPara.length === 1 ? opcionesPara[0].id : ""));
+    setTipOpen(true);
+  };
+  const addTip = () => {
+    const pro = opcionesPara.find(p => p.id === tipPara);
+    if (!pro || !tipOk) return;
+    setCart(prev => agregarPropina(prev, lineaPropina(pro, tipMontoNum ?? 0)));
+    setTipMonto(""); setTipOpen(false);
+  };
+  const setVendedor = (key: string, professionalId: string | null) => {
+    setCart(prev => prev.map(i => i.key === key ? { ...i, professionalId } : i));
+    setVendedorDe(null);
+  };
+
   // ── Totales (misma fórmula que el POS web) ──
-  const subtotal    = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
+  // La propina no se descuenta: el descuento sale del resto (lib/propinas).
   const discountVal = discountType === "percentage" ? parsePorcentaje(discountValue) : monto(discountValue);
-  const discountAmt = discountType === "percentage"
-    ? (subtotal * discountVal) / 100
-    : Math.min(discountVal, subtotal);
-  const total = Math.max(Math.round(subtotal - discountAmt), 0);
+  const { subtotal, propinas, baseDescuento, descuento: discountAmt, total } =
+    totalesCobro(cart, { tipo: discountType, valor: discountVal });
 
   const splitSum       = split ? splitLines.reduce((sum, l) => sum + monto(l.amount), 0) : 0;
   const splitRemaining = Math.round(total - splitSum);
@@ -381,13 +434,8 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     setSaving(true);
     try {
       const names = cart.map(i => (i.qty > 1 ? `${i.qty}× ${i.name}` : i.name)).join(" + ");
-      const items: SaleItemInput[] = cart.map(i => ({
-        name: i.name, price: i.price, quantity: i.qty,
-        service_id: i.serviceId, product_id: i.productId,
-        item_type: i.itemType === "product" ? "product" : "service",
-        unit_cost: i.unitCost ?? null,
-        location_id: i.locationId ?? null,
-      }));
+      // Con quién vendió cada producto y quién recibe cada propina.
+      const items = itemsDeVenta(cart);
       const res = await recordSale({
         saleId: saleIdRef.current,
         tenantId,
@@ -458,6 +506,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         aviso: !res.ok
           ? res.message
           : res.yaExistia ? "Este cobro ya se había registrado en un intento anterior: no se duplicó." : null,
+        propina: textoPropinaCobrada(cart.filter(i => esPropina(i)), opcionesPara),
       });
     } catch (e) {
       Alert.alert("No se pudo registrar el cobro", mensajeError(e));
@@ -534,6 +583,12 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
               <View style={s.doneApptRow}>
                 <Ionicons name="checkmark-circle" size={15} color={Colors.success} />
                 <Text style={s.doneApptText}>La cita quedó Completada en la agenda.</Text>
+              </View>
+            )}
+            {done.propina && (
+              <View style={s.doneApptRow}>
+                <Ionicons name="heart-circle" size={15} color={Colors.success} />
+                <Text style={s.doneApptText}>{done.propina}</Text>
               </View>
             )}
             <View style={[s.receipt, { backgroundColor: t.card, borderColor: t.border, alignSelf: "stretch", marginTop: 6 }]}>
@@ -664,29 +719,126 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         </View>
       ) : cart.map(i => {
         const tope = i.maxQty != null && i.qty >= i.maxQty;
+        const esTip = i.itemType === "tip";
+        // Quién vendió el producto: discreto, solo si hay equipo para elegir.
+        const conVendedor = i.itemType === "product" && opcionesPara.length > 0;
+        const eligiendo = conVendedor && vendedorDe === i.key;
+        const vendedor = conVendedor ? etiquetaVendedor(i.professionalId, opcionesPara, proCita) : "";
         return (
-          <View key={i.key} style={[s.cartRow, { backgroundColor: t.card, borderColor: t.border }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.cartName, { color: t.text }]} numberOfLines={1}>{i.name}</Text>
-              <Text style={[s.cartSub, { color: t.muted }]}>
-                {fmtMoneyFull(i.price)}{i.itemType === "product" ? " · producto" : ""}{tope ? " · sin más stock" : ""}
-              </Text>
+          <View key={i.key} style={[s.cartRow, { backgroundColor: t.card, borderColor: t.border }, esTip && s.cartRowTip]}>
+            <View style={s.cartRowMain}>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.cartName, { color: t.text }]} numberOfLines={1}>{i.name}</Text>
+                <Text style={[s.cartSub, { color: esTip ? Colors.success : t.muted }]}>
+                  {esTip
+                    ? "Propina · sin descuento"
+                    : `${fmtMoneyFull(i.price)}${i.itemType === "product" ? " · producto" : ""}${tope ? " · sin más stock" : ""}`}
+                </Text>
+                {conVendedor && (
+                  <TouchableOpacity onPress={() => setVendedorDe(eligiendo ? null : i.key)} hitSlop={6} style={s.vendedorBtn}
+                    accessibilityRole="button" accessibilityState={{ expanded: eligiendo }}
+                    accessibilityLabel={`${vendedor}. Cambiar quién vendió ${i.name}`}>
+                    <Ionicons name="person-outline" size={11} color={azul} />
+                    <Text style={[s.vendedorTxt, { color: azul }]} numberOfLines={1}>{vendedor}</Text>
+                    <Ionicons name={eligiendo ? "chevron-up" : "chevron-down"} size={11} color={azul} />
+                  </TouchableOpacity>
+                )}
+              </View>
+              <View style={s.qtyBox}>
+                {esTip ? (
+                  // La propina es un monto, no unidades: solo se quita.
+                  <TouchableOpacity onPress={() => changeQty(i.key, -i.qty)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
+                    accessibilityRole="button" accessibilityLabel={`Quitar ${i.name}`}>
+                    <Ionicons name="trash-outline" size={15} color={Colors.red} />
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity onPress={() => changeQty(i.key, -1)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
+                      accessibilityRole="button" accessibilityLabel={i.qty === 1 ? `Quitar ${i.name}` : `Una unidad menos de ${i.name}`}>
+                      <Ionicons name={i.qty === 1 ? "trash-outline" : "remove"} size={15} color={Colors.red} />
+                    </TouchableOpacity>
+                    <Text style={[s.qtyText, { color: t.text }]}>{i.qty}</Text>
+                    <TouchableOpacity onPress={() => changeQty(i.key, 1)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
+                      disabled={tope} accessibilityRole="button" accessibilityLabel={`Una unidad más de ${i.name}`} accessibilityState={{ disabled: tope }}>
+                      <Ionicons name="add" size={15} color={tope ? t.subtle : t.text} />
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+              <Text style={[s.cartLineTotal, { color: t.text }]}>{fmtMoneyFull(i.price * i.qty)}</Text>
             </View>
-            <View style={s.qtyBox}>
-              <TouchableOpacity onPress={() => changeQty(i.key, -1)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
-                accessibilityRole="button" accessibilityLabel={i.qty === 1 ? `Quitar ${i.name}` : `Una unidad menos de ${i.name}`}>
-                <Ionicons name={i.qty === 1 ? "trash-outline" : "remove"} size={15} color={Colors.red} />
-              </TouchableOpacity>
-              <Text style={[s.qtyText, { color: t.text }]}>{i.qty}</Text>
-              <TouchableOpacity onPress={() => changeQty(i.key, 1)} style={[s.qtyBtn, { backgroundColor: t.chipBg }]} hitSlop={8}
-                disabled={tope} accessibilityRole="button" accessibilityLabel={`Una unidad más de ${i.name}`} accessibilityState={{ disabled: tope }}>
-                <Ionicons name="add" size={15} color={tope ? t.subtle : t.text} />
-              </TouchableOpacity>
-            </View>
-            <Text style={[s.cartLineTotal, { color: t.text }]}>{fmtMoneyFull(i.price * i.qty)}</Text>
+            {eligiendo && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}
+                contentContainerStyle={{ gap: 6 }} keyboardShouldPersistTaps="handled">
+                {[
+                  // null = el profesional de la cita (o nadie, en una venta directa).
+                  { id: null as string | null, name: proCita ? `${proCita.name} (la cita)` : "Sin asignar" },
+                  ...opcionesPara.filter(p => p.id !== proCita?.id),
+                ].map(op => {
+                  const activo = (i.professionalId ?? null) === op.id;
+                  return (
+                    <TouchableOpacity key={op.id ?? "cita"} onPress={() => setVendedor(i.key, op.id)}
+                      accessibilityRole="radio" accessibilityState={{ checked: activo }} accessibilityLabel={`Vendió ${op.name}`}
+                      style={[s.miniChip, { borderColor: t.border }, activo && { backgroundColor: t.ink, borderColor: t.ink }]}>
+                      <Text style={[s.miniChipText, { color: t.muted }, activo && { color: t.cardSolid }]}>{op.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
           </View>
         );
       })}
+    </View>
+  );
+
+  // Propina para alguien del equipo: va con la venta (el pago la cubre), sin
+  // descuento, y el trigger de la base la anota en su nómina.
+  const bloquePropina = opcionesPara.length === 0 ? null : !tipOpen ? (
+    <TouchableOpacity onPress={() => abrirPropina()} style={s.tipBtn} activeOpacity={0.8}
+      accessibilityRole="button" accessibilityLabel="Agregar propina">
+      <Ionicons name="add-circle-outline" size={17} color={Colors.success} />
+      <Text style={s.tipBtnTxt}>Agregar propina</Text>
+      <Text style={[s.tipBtnSub, { color: t.muted }]} numberOfLines={1}>sin descuento · va a su nómina</Text>
+    </TouchableOpacity>
+  ) : (
+    <View style={s.tipBox}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={[s.cashLabel, { marginBottom: 0 }]}>Propina</Text>
+        <TouchableOpacity onPress={() => setTipOpen(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancelar la propina">
+          <Ionicons name="close" size={18} color={t.muted} />
+        </TouchableOpacity>
+      </View>
+      <Text style={[s.tipHint, { color: t.muted }]}>Se cobra con la venta, sin descuento, y le queda a esa persona en su nómina.</Text>
+      <Text style={[s.tipLabel, { color: t.muted }]}>¿Para quién?</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} keyboardShouldPersistTaps="handled">
+        {opcionesPara.map(p => {
+          const activo = tipPara === p.id;
+          const deLaCita = p.id === proCita?.id;
+          return (
+            <TouchableOpacity key={p.id} onPress={() => setTipPara(p.id)}
+              accessibilityRole="radio" accessibilityState={{ checked: activo }}
+              accessibilityLabel={`${p.name}${deLaCita ? ", profesional de la cita" : ""}`}
+              style={[s.miniChip, { borderColor: t.border, backgroundColor: t.cardSolid }, activo && { backgroundColor: Colors.success, borderColor: Colors.success }]}>
+              {deLaCita && <Ionicons name="calendar-outline" size={12} color={activo ? "white" : Colors.success} />}
+              <Text style={[s.miniChipText, { color: t.muted }, activo && { color: "white" }]}>{p.name}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      <View style={{ flexDirection: "row", gap: 12, alignItems: "flex-end", marginTop: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.tipLabel, { color: t.muted, marginTop: 0 }]}>Monto</Text>
+          <TextInput style={[s.cashInput, { color: t.text }]} value={tipMonto} onChangeText={setTipMonto}
+            placeholder="$ 0" placeholderTextColor={t.subtle} keyboardType={tecladoMonto} accessibilityLabel="Monto de la propina" />
+        </View>
+        <TouchableOpacity onPress={addTip} disabled={!tipOk} style={[s.addFreeBtn, { backgroundColor: Colors.success }, !tipOk && { opacity: 0.4 }]}
+          accessibilityRole="button" accessibilityLabel="Agregar la propina al cobro" accessibilityState={{ disabled: !tipOk }}>
+          <Ionicons name="add" size={18} color="white" />
+          <Text style={s.addFreeText}>Agregar</Text>
+        </TouchableOpacity>
+      </View>
+      {tipMontoNum !== null && <Text style={[s.hint, { color: t.subtle, marginTop: 6 }]}>= {fmtMoneyFull(tipMontoNum)}</Text>}
     </View>
   );
 
@@ -866,7 +1018,19 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
       ) : (
         <View style={{ gap: 10 }}>
           <TextInput style={[s.input, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
-            value={freeName} onChangeText={setFreeName} placeholder="Concepto (ej: Propina, Tratamiento)" placeholderTextColor={t.subtle} />
+            value={freeName} onChangeText={setFreeName} placeholder="Concepto (ej: Tratamiento, Domicilio)" placeholderTextColor={t.subtle} />
+          {pareceUnaPropina(freeName) && opcionesPara.length > 0 && (
+            // Una propina como ítem libre se descontaba con el resto y no
+            // decía de quién era: se ofrece pasarla al control de propina.
+            <TouchableOpacity onPress={() => { abrirPropina(freePrice); setFreeName(""); setFreePrice(""); }} style={s.tipAviso}
+              activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Agregarla como propina">
+              <Ionicons name="information-circle-outline" size={16} color={Colors.success} />
+              <Text style={[s.tipAvisoTxt, { color: t.text }]}>
+                ¿Es una propina? Como propina no se descuenta y le llega a quien la recibe en su nómina.{" "}
+                <Text style={{ fontFamily: Fonts.bold, color: Colors.success }}>Agregarla como propina</Text>
+              </Text>
+            </TouchableOpacity>
+          )}
           <View style={{ flexDirection: "row", gap: 10 }}>
             <View style={{ flex: 1 }}>
               <TextInput style={[s.input, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
@@ -905,7 +1069,12 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         {discountAmt > 0 && <Text style={{ fontFamily: Fonts.bold, fontSize: 13, color: Colors.success }}>−{fmtMoneyFull(discountAmt)}</Text>}
       </View>
       {discountType === "percentage" && discountVal > 0 && (
-        <Text style={[s.hint, { color: t.subtle, marginTop: 6 }]}>{discountVal} % de {fmtMoneyFull(subtotal)}</Text>
+        <Text style={[s.hint, { color: t.subtle, marginTop: 6 }]}>
+          {discountVal} % de {fmtMoneyFull(baseDescuento)}{propinas > 0 ? " (la propina no se descuenta)" : ""}
+        </Text>
+      )}
+      {discountType === "fixed" && discountVal > 0 && propinas > 0 && (
+        <Text style={[s.hint, { color: t.subtle, marginTop: 6 }]}>La propina no se descuenta: máximo {fmtMoneyFull(baseDescuento)}.</Text>
       )}
     </View>
   ) : null;
@@ -940,6 +1109,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                 {bannerCita}
                 {errorExtras}
                 {bloqueCarrito}
+                {bloquePropina}
                 {bloquePago}
                 {toggleMas}
                 {bloqueAgregar}
@@ -950,6 +1120,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
               <>
                 {bloqueAgregar}
                 {bloqueCarrito}
+                {bloquePropina}
                 {bloqueCliente}
                 {bloquePago}
                 {bloqueDescuento}
@@ -989,7 +1160,19 @@ const s = StyleSheet.create({
   resultSub:     { fontSize: 11, fontFamily: Fonts.regular, marginTop: 1 },
   resultPrice:   { fontSize: 13, fontFamily: Fonts.bold },
   emptyCart:     { borderWidth: 1, borderStyle: "dashed", borderRadius: Radius.md, padding: 16, alignItems: "center" },
-  cartRow:       { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: Radius.md, padding: 12, marginBottom: 8 },
+  cartRow:       { borderWidth: 1, borderRadius: Radius.md, padding: 12, marginBottom: 8 },
+  cartRowMain:   { flexDirection: "row", alignItems: "center", gap: 10 },
+  cartRowTip:    { borderColor: "rgba(16,185,129,0.35)", backgroundColor: "rgba(16,185,129,0.06)" },
+  vendedorBtn:   { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, alignSelf: "flex-start" },
+  vendedorTxt:   { fontSize: 11.5, fontFamily: Fonts.semibold, flexShrink: 1 },
+  tipBtn:        { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, paddingHorizontal: 14, borderRadius: Radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: "rgba(16,185,129,0.45)", backgroundColor: "rgba(16,185,129,0.05)" },
+  tipBtnTxt:     { fontSize: 13.5, fontFamily: Fonts.bold, color: Colors.success },
+  tipBtnSub:     { flex: 1, fontSize: 11.5, fontFamily: Fonts.regular, textAlign: "right" },
+  tipBox:        { padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.06)", borderWidth: 1, borderColor: "rgba(16,185,129,0.25)" },
+  tipHint:       { fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17, marginTop: 4 },
+  tipLabel:      { fontSize: 10.5, fontFamily: Fonts.bold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 12, marginBottom: 6 },
+  tipAviso:      { flexDirection: "row", gap: 8, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(16,185,129,0.08)" },
+  tipAvisoTxt:   { flex: 1, fontSize: 12.5, fontFamily: Fonts.regular, lineHeight: 17 },
   cartName:      { fontSize: 14, fontFamily: Fonts.semibold },
   cartSub:       { fontSize: 11, fontFamily: Fonts.regular, marginTop: 1 },
   qtyBox:        { flexDirection: "row", alignItems: "center", gap: 6 },

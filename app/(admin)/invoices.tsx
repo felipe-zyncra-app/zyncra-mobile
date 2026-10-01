@@ -19,6 +19,7 @@ import { diaLocalDe, fmtDia } from "@/lib/tz";
 import { esErrorDeRed, mensajeError, nuevoId, revisar, traerTodo } from "@/lib/db";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { leerMonto, metodoAFactus, prorratearPrecios } from "@/lib/dinero";
+import { paraFacturar } from "@/lib/propinas";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -111,7 +112,15 @@ type FacturaEmitida = { cufe: string | null; number: string | null; pdf_url?: st
 type IntentoDudoso = { desde: string; customerId: string; total: number; posSaleId: string | null };
 
 /** Cobro que se está facturando (viene de Historial de cobros). */
-type VentaAFacturar = { id: string; total: number; created_at: string; cliente: string | null };
+type VentaAFacturar = {
+  id: string;
+  /** Lo que va en la factura: el total del cobro sin propinas. */
+  total: number;
+  /** Propinas del cobro: son de quien las recibe, no una venta del negocio. */
+  propinas: number;
+  created_at: string;
+  cliente: string | null;
+};
 
 const EMPTY_SETTINGS: InvoiceSettings = {
   environment: "sandbox", factus_client_id: "", factus_client_secret: "",
@@ -239,26 +248,32 @@ export default function InvoicesScreen() {
       try {
         const [v, f] = await Promise.all([
           supabase.from("pos_sales")
-            .select("id, total, payment_method, payments, created_at, clients(name, phone, email, address, document), pos_sale_items(name, price, quantity)")
+            .select("id, total, payment_method, payments, created_at, clients(name, phone, email, address, document), pos_sale_items(name, price, quantity, item_type)")
             .eq("id", ventaId).eq("tenant_id", tenantId).maybeSingle(),
           supabase.from("invoices").select("id, number, cufe, pdf_url, status, credit_note_cufe").eq("pos_sale_id", ventaId),
         ]);
         const fila = revisar(v, "No se pudo cargar el cobro") as unknown as {
           id: string; total: number; payment_method: string; payments: { method: string }[] | null; created_at: string;
           clients: { name: string; phone: string | null; email: string | null; address: string | null; document: string | null } | null;
-          pos_sale_items: { name: string; price: number; quantity: number }[];
+          pos_sale_items: { name: string; price: number; quantity: number; item_type: string | null }[];
         } | null;
         const facturas = (revisar(f, "No se pudo revisar si el cobro ya tiene factura") ?? []) as
           { number: string | null; cufe: string | null; pdf_url: string | null; status: string; credit_note_cufe: string | null }[];
         if (!vigente) return;
         if (!fila) { setVentaError("Este cobro ya no existe: puede que lo hayan anulado."); return; }
-        setVenta({ id: fila.id, total: Number(fila.total), created_at: fila.created_at, cliente: fila.clients?.name ?? null });
+        // La propina no va en la factura (igual que el POS web): ni su línea
+        // ni su valor en el total sobre el que se reparte el descuento.
+        const facturable = paraFacturar(
+          (fila.pos_sale_items ?? []).map(i => ({ name: i.name, price: Number(i.price) || 0, quantity: Number(i.quantity) || 1, item_type: i.item_type })),
+          Number(fila.total),
+        );
+        setVenta({ id: fila.id, total: facturable.total, propinas: facturable.propinas, created_at: fila.created_at, cliente: fila.clients?.name ?? null });
         setFacturaDeVenta(facturaVigente(facturas));
-        const base = (fila.pos_sale_items ?? []).map(i => ({ name: i.name, price: Number(i.price) || 0, quantity: Number(i.quantity) || 1 }));
+        const base = facturable.items;
         if (base.length > 0) {
           // Un descuento del cobro se reparte en los precios para que la
           // factura sume lo cobrado.
-          const { precios, diferencia } = prorratearPrecios(base, Number(fila.total));
+          const { precios, diferencia } = prorratearPrecios(base, facturable.total);
           const nuevos = base.map((i, k) => ({ ...EMPTY_ITEM, name: i.name, quantity: i.quantity, price: precios[k] }));
           setItems(nuevos);
           setPriceText(nuevos.map(i => String(i.price)));
@@ -606,6 +621,11 @@ export default function InvoicesScreen() {
                   Facturando el cobro de {venta.cliente ?? "venta directa"} · {fmtMoneyFull(venta.total)}
                 </Text>
                 <Text style={[s.bannerSub, { color: t.muted }]}>{fmtDia(diaLocalDe(venta.created_at, timezone), "corto")}</Text>
+                {venta.propinas > 0 && (
+                  <Text style={[s.bannerSub, { color: t.muted }]}>
+                    Sin la propina de {fmtMoneyFull(venta.propinas)}: es de quien la recibe, no una venta del negocio.
+                  </Text>
+                )}
                 {avisoVenta && <Text style={[s.bannerSub, { color: "#d97706" }]}>{avisoVenta}</Text>}
               </>
             ) : (

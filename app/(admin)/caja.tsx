@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -23,6 +23,7 @@ import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { leerMonto, totalesCaja, esIngresoHuerfano } from "@/lib/dinero";
 import { cargarListaSedes, nombreSede, type SedeLite } from "@/components/SedeChip";
 import { filtroSedeOGeneral, incluyeCajaGeneral, preferirCajaDeSede } from "@/lib/sedes";
+import { CATEGORIA_PROPINA, profesionalDeMovimiento, type Profesional } from "@/lib/propinas";
 
 type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
@@ -32,6 +33,8 @@ type Movement = {
   id: string; session_id: string; type: MoveType; amount: number; description: string;
   category: string | null; payment_method: string | null; created_at: string;
   pos_sale_id: string | null; layaway_payment_id: string | null;
+  /** A quién va una propina registrada a mano (null = para el negocio). */
+  professional_id: string | null;
 };
 type HistRow = {
   session: Session;
@@ -45,7 +48,7 @@ const INGRESO_CATS = ["Servicio", "Producto", "Propina", "Otro"];
 const EGRESO_CATS  = ["Arriendo", "Nómina", "Insumos", "Servicios públicos", "Otro"];
 
 const COLS_SESION = "id, location_id, opening_amount, opening_note, opened_at, closed_at, closing_amount, closing_note";
-const COLS_MOV    = "id, session_id, type, amount, description, category, payment_method, created_at, pos_sale_id, layaway_payment_id";
+const COLS_MOV    = "id, session_id, type, amount, description, category, payment_method, created_at, pos_sale_id, layaway_payment_id, professional_id";
 
 /**
  * Sede de la caja y si la caja general (sin sede) cuenta como suya: solo en un
@@ -102,6 +105,11 @@ export default function CajaScreen() {
   const [movDesc, setMovDesc]       = useState("");
   const [movCat, setMovCat]         = useState("");
   const [movSaving, setMovSaving]   = useState(false);
+  // Propina: ¿para quién es? "" = para el negocio (no va a nómina). Igual que
+  // la Caja web: con alguien elegido, el trigger nomina_propina_de_caja la
+  // anota en su nómina.
+  const [propinaPara, setPropinaPara] = useState("");
+  const [equipo, setEquipo]         = useState<Profesional[]>([]);
 
   // Cierre
   const [closeModal, setCloseModal] = useState(false);
@@ -116,6 +124,17 @@ export default function CajaScreen() {
 
   // Evita el doble envío con dos toques rápidos (el estado llega tarde).
   const ocupado = useRef(false);
+
+  // Equipo activo, para decir de quién es una propina. Si no carga, la
+  // propina queda para el negocio (como antes) y no se bloquea nada.
+  useEffect(() => {
+    if (!tenantId) return;
+    let vivo = true;
+    supabase.from("professionals").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("name")
+      .then(({ data, error }) => { if (vivo && !error) setEquipo((data ?? []) as Profesional[]); }, () => {});
+    return () => { vivo = false; };
+  }, [tenantId]);
+  const nombreDe = (id: string | null) => (id ? equipo.find(p => p.id === id)?.name ?? null : null);
 
   // ── Carga de la sesión: al enfocar, al volver a primer plano, al cambiar de sede o de día.
   const { recargar } = useRecarga(async () => {
@@ -244,8 +263,9 @@ export default function CajaScreen() {
         session_id: session.id, tenant_id: tenantId,
         type: movType, amount: amt, description: movDesc.trim(),
         category: movCat || null,
+        professional_id: profesionalDeMovimiento(movType, movCat, propinaPara),
       }).select("id").single(), "No se pudo guardar el movimiento");
-      setMovAmt(""); setMovDesc(""); setMovCat("");
+      setMovAmt(""); setMovDesc(""); setMovCat(""); setPropinaPara("");
       setMovModal(false);
       await recargar();
     } catch (e) {
@@ -488,7 +508,9 @@ export default function CajaScreen() {
                           </View>
                         ) : m.category ? (
                           <View style={s.movCatBadge}>
-                            <Text style={s.movCatText}>{m.category}</Text>
+                            <Text style={s.movCatText}>
+                              {m.category}{m.category === CATEGORIA_PROPINA && nombreDe(m.professional_id) ? ` · ${nombreDe(m.professional_id)}` : ""}
+                            </Text>
                           </View>
                         ) : null}
                         {m.payment_method && m.payment_method !== "efectivo" ? (
@@ -591,7 +613,7 @@ export default function CajaScreen() {
               <View style={s.typeToggle}>
                 {(["ingreso", "egreso"] as MoveType[]).map(mt => (
                   <TouchableOpacity key={mt} style={[s.typeBtn, movType === mt && { backgroundColor: mt === "ingreso" ? Colors.success : Colors.red }]}
-                    onPress={() => { setMovType(mt); setMovCat(""); }} activeOpacity={0.8}
+                    onPress={() => { setMovType(mt); setMovCat(""); setPropinaPara(""); }} activeOpacity={0.8}
                     accessibilityRole="button" accessibilityState={{ selected: movType === mt }}>
                     <Text style={[s.typeBtnText, movType === mt && { color: "white" }]}>
                       {mt === "ingreso" ? "Ingreso" : "Egreso"}
@@ -620,13 +642,39 @@ export default function CajaScreen() {
                   {(movType === "ingreso" ? INGRESO_CATS : EGRESO_CATS).map(cat => (
                     <TouchableOpacity key={cat}
                       style={[s.catChip, movCat === cat && { backgroundColor: Colors.purple, borderColor: Colors.purple }]}
-                      onPress={() => setMovCat(movCat === cat ? "" : cat)} activeOpacity={0.75}
+                      onPress={() => { setMovCat(movCat === cat ? "" : cat); setPropinaPara(""); }} activeOpacity={0.75}
                       accessibilityRole="button" accessibilityState={{ selected: movCat === cat }}>
                       <Text style={[s.catChipText, movCat === cat && { color: "white" }]}>{cat}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </ScrollView>
+
+              {movType === "ingreso" && movCat === CATEGORIA_PROPINA && equipo.length > 0 && (
+                <>
+                  <Text style={s.label}>¿Para quién es?</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }} keyboardShouldPersistTaps="handled">
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {[{ id: "", name: "Para el negocio" }, ...equipo].map(p => {
+                        const activo = propinaPara === p.id;
+                        return (
+                          <TouchableOpacity key={p.id || "negocio"}
+                            style={[s.catChip, activo && { backgroundColor: Colors.success, borderColor: Colors.success }]}
+                            onPress={() => setPropinaPara(p.id)} activeOpacity={0.75}
+                            accessibilityRole="radio" accessibilityState={{ checked: activo }}>
+                            <Text style={[s.catChipText, activo && { color: "white" }]}>{p.name}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                  <Text style={s.hint}>
+                    {propinaPara
+                      ? `Se le suma a ${nombreDe(propinaPara) ?? "esa persona"} en su nómina.`
+                      : "Para el negocio no va a nómina. Si eliges a alguien, se le suma en su nómina."}
+                  </Text>
+                </>
+              )}
 
               <TouchableOpacity
                 style={[s.btn, { marginTop: 24 }, (!movAmt || !movDesc.trim() || movSaving) && { opacity: 0.4 }]}
