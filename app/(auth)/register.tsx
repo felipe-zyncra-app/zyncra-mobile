@@ -496,9 +496,9 @@ export default function RegisterScreen() {
    * sigue fallando, se deja constancia en tenants.settings.trial_pendiente
    * para que soporte (y el cron del portal) lo encuentren.
    *
-   * El plan va explícito: sin planId el endpoint toma el más barato de
-   * saas_plans, que sigue siendo Starter — el plan de usuario único retirado
-   * de la oferta por la directriz 3.1.3(c) de Apple.
+   * El plan va explícito: la prueba que se abre desde la app es siempre Growth.
+   * Starter (hasta 2 colaboradores, sin Hanna) volvió a la oferta web el
+   * 2026-10-05; desde la app no se elige plan (la app no vende ni muestra planes).
    */
   const activarPrueba = async (tenantId: string): Promise<boolean> => {
     let planId: string | null = null;
