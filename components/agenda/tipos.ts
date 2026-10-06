@@ -16,6 +16,8 @@ export type ApptAgenda = {
   professionals: { id: string; name: string } | null;
   /** Servicios adicionales de la cita: cuentan en el precio a cobrar (DIN-23). */
   appointment_services?: { price: number | string | null }[] | null;
+  /** Historial migrado de otro sistema: se atendió y cobró allá; no está por cobrar. */
+  imported?: boolean | null;
 };
 
 /** Fila de blocked_slots: ausencia de un profesional o cierre del negocio (professional_id null). */

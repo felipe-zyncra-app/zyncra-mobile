@@ -98,7 +98,7 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
   const [citas, prosRes, bloqRes, tenRes, sedesRes] = await Promise.all([
     traerTodo<ApptAgenda>((desde, hasta) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(price)")
+        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, imported, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dia);
       if (loc) q = q.eq("location_id", loc);

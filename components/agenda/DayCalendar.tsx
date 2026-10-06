@@ -194,7 +194,7 @@ export default function DayCalendar({
         {placed.map(({ appt, start: startMins, dur: duration, lane, lanes }) => {
           const top      = yDe(startMins) + 2;
           const height   = Math.max((duration / SLOT_MINS) * ROW_H - 4, ROW_H - 6);
-          const porCobrar = appt.status === "completed" && !!ventas && !ventas.has(appt.id);
+          const porCobrar = appt.status === "completed" && !appt.imported && !!ventas && !ventas.has(appt.id);
           const color    = porCobrar ? POR_COBRAR : STATUS_META[appt.status]?.color ?? Colors.subtle;
           const label    = porCobrar ? "Por cobrar" : STATUS_META[appt.status]?.label ?? appt.status;
           const cruzada  = cruzadas.has(appt.id);

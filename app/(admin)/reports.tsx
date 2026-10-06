@@ -42,6 +42,8 @@ type CitaReporte = {
   professionals: { name: string } | null;
   clients: { id: string; created_at: string | null } | null;
   pos_sales: VentaResumen[] | null;
+  /** Historial migrado de otro sistema: se cobró allá, no está por cobrar. */
+  imported?: boolean | null;
 };
 type CitaPrevia = { id: string; status: string; pos_sales: VentaResumen[] | null };
 type VentaSuelta = VentaResumen & { id: string; created_at: string };
@@ -80,7 +82,7 @@ async function cargarReporte(tenantId: string, r: RangoNegocio): Promise<Reporte
     // Paginado: el servidor corta en 1000 filas y "Año" las pasaba (CAL-05).
     traerTodo<CitaReporte>((d, h) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
+        .select("id, appointment_date, appointment_time, status, imported, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", r.desde)
         .lte("appointment_date", r.hasta);
@@ -146,7 +148,7 @@ async function cargarReporte(tenantId: string, r: RangoNegocio): Promise<Reporte
   // Completadas sin venta: NO se valoran a precio de lista como ingreso (antes
   // marcar "Completada" inventaba plata: DIN-05). Se cuentan aparte como por
   // cobrar, para que no desaparezcan del reporte sin explicación.
-  const sinCobro = cur.filter(a => a.status === "completed" && !estaCobrada(a));
+  const sinCobro = cur.filter(a => a.status === "completed" && !estaCobrada(a) && !a.imported);
 
   // Clientes nuevos: comparar el DÍA del negocio en que se creó el cliente.
   // Comparar el timestamp con la fecha dejaba fuera el último día (TZ-05).

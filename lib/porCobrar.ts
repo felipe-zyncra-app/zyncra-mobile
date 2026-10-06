@@ -82,6 +82,9 @@ async function consultar<T extends CitaPorCobrar>(select: string, tenantId: stri
         .select(select)
         .eq("tenant_id", tenantId)
         .in("status", [...ESTADOS_POR_COBRAR])
+        // Historial migrado de otro sistema (imported): ya se cobró allá.
+        // Mismo filtro que el portal web (src/lib/por-cobrar.ts).
+        .eq("imported", false)
         .is("pos_sales", null);
       if (loc) q = q.eq("location_id", loc);
       // Descendente: si algún día se llega al tope, se pierden las más viejas
@@ -97,7 +100,8 @@ async function consultar<T extends CitaPorCobrar>(select: string, tenantId: stri
       let q = supabase.from("appointments")
         .select(select)
         .eq("tenant_id", tenantId)
-        .in("status", ["pending", "confirmed"]);
+        .in("status", ["pending", "confirmed"])
+        .eq("imported", false);
       if (loc) q = q.eq("location_id", loc);
       return q.order("appointment_date", { ascending: false }).order("id").range(d, h)
         .overrideTypes<T[], { merge: false }>();

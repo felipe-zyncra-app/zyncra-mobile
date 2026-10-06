@@ -247,7 +247,9 @@ export type Database = {
           client_id: string | null
           created_at: string | null
           deposit_paid: boolean | null
+          duration_minutes: number | null
           id: string
+          imported: boolean
           location_id: string | null
           manage_token: string | null
           notes: string | null
@@ -264,7 +266,9 @@ export type Database = {
           client_id?: string | null
           created_at?: string | null
           deposit_paid?: boolean | null
+          duration_minutes?: number | null
           id?: string
+          imported?: boolean
           location_id?: string | null
           manage_token?: string | null
           notes?: string | null
@@ -281,7 +285,9 @@ export type Database = {
           client_id?: string | null
           created_at?: string | null
           deposit_paid?: boolean | null
+          duration_minutes?: number | null
           id?: string
+          imported?: boolean
           location_id?: string | null
           manage_token?: string | null
           notes?: string | null
@@ -330,6 +336,57 @@ export type Database = {
           },
           {
             foreignKeyName: "appointments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_notices: {
+        Row: {
+          anchor_day: string
+          created_at: string
+          email: string | null
+          id: number
+          kind: string
+          push: string | null
+          subscription_id: string
+          tenant_id: string
+          whatsapp: string | null
+        }
+        Insert: {
+          anchor_day: string
+          created_at?: string
+          email?: string | null
+          id?: number
+          kind: string
+          push?: string | null
+          subscription_id: string
+          tenant_id: string
+          whatsapp?: string | null
+        }
+        Update: {
+          anchor_day?: string
+          created_at?: string
+          email?: string | null
+          id?: number
+          kind?: string
+          push?: string | null
+          subscription_id?: string
+          tenant_id?: string
+          whatsapp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_notices_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "saas_subscriptions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_notices_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -4506,6 +4563,83 @@ export type Database = {
           },
         ]
       }
+      wallet_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          push_token: string
+          serial: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          push_token: string
+          serial: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          push_token?: string
+          serial?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_devices_serial_fkey"
+            columns: ["serial"]
+            isOneToOne: false
+            referencedRelation: "wallet_passes"
+            referencedColumns: ["serial"]
+          },
+        ]
+      }
+      wallet_passes: {
+        Row: {
+          appointment_id: string | null
+          client_id: string | null
+          created_at: string
+          deleted_at: string | null
+          kind: string
+          serial: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          kind: string
+          serial: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          kind?: string
+          serial?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_passes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_passes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       websites: {
         Row: {
           about_image_url: string | null
@@ -4994,6 +5128,15 @@ export type Database = {
       }
       wa_lock_renew: {
         Args: { p_phone: string; p_tenant: string; p_ttl_seconds: number }
+        Returns: undefined
+      }
+      wallet_notify: { Args: { p_serial: string }; Returns: undefined }
+      wallet_touch_cita: {
+        Args: { p_appointment_id: string }
+        Returns: undefined
+      }
+      wallet_touch_fidelidad: {
+        Args: { p_client_id: string }
         Returns: undefined
       }
       zyncra_traffic_summary: { Args: { days?: number }; Returns: Json }

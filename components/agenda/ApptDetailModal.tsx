@@ -71,8 +71,11 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
   const listo = venta.tipo === "listo";
   const cobrada = listo && venta.ventas.length > 0;
   const totalCobrado = listo ? venta.ventas.reduce((a, v) => a + v.total, 0) : 0;
-  const porCobrar = listo && !cobrada && appt.status === "completed";
-  const puedeCobrar = listo && !cobrada && (appt.status === "pending" || appt.status === "confirmed" || appt.status === "completed");
+  // Historial migrado de otro sistema: se atendió y se cobró allá. No está por
+  // cobrar ni es ingreso de Zyncra, así que no se ofrece cobrarla.
+  const historial = appt.status === "completed" && !!appt.imported;
+  const porCobrar = listo && !cobrada && appt.status === "completed" && !historial;
+  const puedeCobrar = listo && !cobrada && (appt.status === "pending" || appt.status === "confirmed" || porCobrar);
   // Servicio principal + adicionales (appointment_services): lo mismo que
   // precarga la hoja de cobro. Antes decía "Cobrar $20.000" y la hoja abría
   // con $25.000 porque sumaba el adicional (DIN-23).
@@ -179,6 +182,14 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
                 <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.85)" />
               </LinearGradient>
             </TouchableOpacity>
+          )}
+          {historial && listo && !cobrada && (
+            <View style={[s.infoRow, { marginBottom: 22 }]}>
+              <Ionicons name="time-outline" size={16} color={t.subtle} />
+              <Text style={[s.infoText, { color: t.text, flex: 1 }]}>
+                Cita del historial migrado: se atendió y se cobró en el sistema anterior. Cuenta como visita del cliente; no entra en Por cobrar ni en los ingresos.
+              </Text>
+            </View>
           )}
           {cobrada && (
             <View style={s.cobradaRow}>

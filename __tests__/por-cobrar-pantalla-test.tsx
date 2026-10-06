@@ -131,7 +131,8 @@ jest.mock("@/lib/supabase", () => ({
 // ─── Datos: fechas relativas al hoy DEL NEGOCIO ───────────────────────────────
 const hoy = hoyNegocio(ZONA);
 const cita = (id: string, dias: number, hora: string, status: string, cliente: string, servicio: string, precio: number | string, extras: { name: string; price: number }[] = []): Fila => ({
-  id, tenant_id: "t1", appointment_date: sumarDias(hoy, dias), appointment_time: `${hora}:00`, status,
+  // imported: false como el default de la base; la consulta real lo filtra (historial migrado fuera).
+  id, tenant_id: "t1", imported: false, appointment_date: sumarDias(hoy, dias), appointment_time: `${hora}:00`, status,
   client_id: `cli-${id}`, service_id: `svc-${id}`, professional_id: "pro-1", location_id: null,
   clients: { name: cliente, phone: "3001234567" },
   services: { name: servicio, price: precio },

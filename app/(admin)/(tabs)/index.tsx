@@ -52,6 +52,8 @@ type Appt = {
   appointment_services: { price: number | string | null }[] | null;
   /** Ventas de la cita (embed). Si hay alguna, la cita está cobrada. */
   pos_sales: VentaResumen[] | null;
+  /** Historial migrado de otro sistema: se cobró allá, no está por cobrar. */
+  imported?: boolean | null;
 };
 
 /** Venta de mostrador (sin cita). */
@@ -200,7 +202,7 @@ function ApptRow({ a, i, last, onPress }: { a: Appt; i: number; last: boolean; o
   const time  = a.appointment_time.substring(0, 5);
   // Completada sin venta: no es ingreso sino "por cobrar" (D10). Se marca
   // distinto para que no pase por cobrada.
-  const sinCobro = a.status === "completed" && !estaCobrada(a);
+  const sinCobro = a.status === "completed" && !estaCobrada(a) && !a.imported;
   const color = sinCobro ? SIN_COBRO.color : STATUS_META[a.status]?.color ?? t.subtle;
   const label = sinCobro ? SIN_COBRO.label : STATUS_META[a.status]?.label ?? a.status;
 
@@ -285,7 +287,7 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
   const [citas, sueltas, clientesRes, porCobrar, sedesRes] = await Promise.all([
     traerTodo<Appt>((d, h) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
+        .select("id, appointment_date, appointment_time, status, imported, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", fetchDesde)
         .lte("appointment_date", hoy);

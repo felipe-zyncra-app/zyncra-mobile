@@ -163,6 +163,8 @@ describe("consulta compartida (tarjeta y pantalla)", () => {
     expect(filtro(ll, "eq", "tenant_id")?.[2]).toBe("t1");
     expect(filtro(ll, "in", "status")?.[2]).toEqual(["pending", "confirmed", "completed"]);
     expect(filtro(ll, "is", "pos_sales")?.[2]).toBeNull();
+    // El historial migrado de otro sistema (imported) ya se cobró allá: fuera.
+    expect(filtro(ll, "eq", "imported")?.[2]).toBe(false);
     expect(filtro(ll, "eq", "location_id")?.[2]).toBe("sede-1");
     expect(ll.orden).toEqual(["appointment_date", "id"]);
     expect(ll.rango).toEqual([0, 999]);
