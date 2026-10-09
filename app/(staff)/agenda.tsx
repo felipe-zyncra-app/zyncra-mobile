@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { enviarCorreoCita } from "@/lib/correo-cita";
 import { useAuth } from "@/lib/auth";
@@ -21,6 +22,7 @@ import ErrorState from "@/components/ErrorState";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
 import SemanaStrip from "@/components/agenda/SemanaStrip";
 import { RESTRICTIVE_PERMISSIONS, parsePermissions, useStaffPermissions } from "@/lib/permissions";
+import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
 
 type Appt = {
   id: string;
@@ -28,6 +30,13 @@ type Appt = {
   appointment_time: string;
   status: string;
   professional_id: string | null;
+  client_id: string | null;
+  service_id: string | null;
+  location_id: string | null;
+  /** Historial migrado de otro sistema: ya se cobró allá. */
+  imported?: boolean | null;
+  /** Venta del POS de la cita (solo llega con manage_pos: la RLS la esconde al resto). */
+  pos_sales?: { id: string }[] | null;
   clients: { name: string; phone?: string | null } | null;
   services: { name: string; price?: number | null; duration_minutes?: number | null; duration_min?: number | null } | null;
   professionals: { name: string } | null;
@@ -36,11 +45,13 @@ type Appt = {
 /** Estados que el staff puede poner a mano. "Completada" solo llega cobrando (D10). */
 const OPCIONES_STAFF = STATUS_OPTIONS.filter(o => o.status !== "completed");
 
-function ApptDetailModal({ appt, verPro, onClose, onStatusChange }: {
+function ApptDetailModal({ appt, verPro, onClose, onStatusChange, onCobrar }: {
   appt: Appt | null;
   verPro: boolean;
   onClose: () => void;
   onStatusChange: (appt: Appt, status: string) => void;
+  /** Solo con permissions.manage_pos (administradora): abre la hoja de cobro. */
+  onCobrar?: (appt: Appt) => void;
 }) {
   // Hooks antes del return condicional (regla de hooks: el orden no puede variar entre renders)
   const { t } = useTheme();
@@ -49,6 +60,12 @@ function ApptDetailModal({ appt, verPro, onClose, onStatusChange }: {
   if (!appt) return null;
   const time = appt.appointment_time.substring(0, 5);
   const completada = appt.status === "completed";
+  // "Cobrada" la decide la venta, no el estado (D10): una completada sin venta
+  // sigue por cobrar, salvo el historial migrado.
+  const cobrada = (appt.pos_sales?.length ?? 0) > 0;
+  const porCobrar = completada && !cobrada && !appt.imported;
+  const puedeCobrar = !!onCobrar && perms.manage_pos && !cobrada
+    && (appt.status === "pending" || appt.status === "confirmed" || porCobrar);
 
   const alPulsar = (status: string) => {
     if (status === appt.status) return;
@@ -87,6 +104,23 @@ function ApptDetailModal({ appt, verPro, onClose, onStatusChange }: {
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+          {puedeCobrar && (
+            <TouchableOpacity onPress={() => onCobrar?.(appt)} activeOpacity={0.85} style={{ marginBottom: 22, borderRadius: Radius.lg, overflow: "hidden" }} accessibilityRole="button">
+              <LinearGradient colors={porCobrar ? ["#d97706", "#f59e0b"] : ["#10b981", "#0ea5e9"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.cobrarCard}>
+                <View style={s.cobrarIcon}><Ionicons name="card-outline" size={20} color="white" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.cobrarTitle}>Cobrar esta cita</Text>
+                  <Text style={s.cobrarSub}>
+                    {porCobrar
+                      ? "Está completada pero sin cobro registrado: aún no cuenta como ingreso."
+                      : "Con el servicio y el cliente ya cargados. Al cobrar queda Completada."}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.85)" />
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+
           <Text style={s.sectionLabel}>Estado de la cita</Text>
           {completada ? (
             <View style={[s.note, { borderColor: "rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.08)" }]}>
@@ -154,14 +188,22 @@ function crearEstilosModal(t: ThemeColors) {
     noteText:    { flex: 1, fontSize: 12.5, fontFamily: Fonts.regular, lineHeight: 18 },
     infoCard:    { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: t.cardSolid, borderRadius: Radius.md, padding: 14, borderWidth: 1, borderColor: t.line },
     infoText:    { fontSize: 14, fontFamily: Fonts.regular, color: t.text },
+    cobrarCard:  { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+    cobrarIcon:  { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" },
+    cobrarTitle: { fontSize: 15, fontFamily: Fonts.bold, color: "white" },
+    cobrarSub:   { fontSize: 12, fontFamily: Fonts.regular, color: "rgba(255,255,255,0.9)", marginTop: 2, lineHeight: 16 },
   });
 }
 
 type DatosDia = { dia: string; citas: Appt[]; agendaCompleta: boolean };
 
 export default function StaffAgendaScreen() {
+  const router = useRouter();
   const { tenantId, professionalId, reintentar } = useAuth();
-  const { timezone, ready } = useTenant();
+  const { tenant, timezone, ready } = useTenant();
+  // La administradora (permissions.manage_pos) cobra y maneja la caja desde
+  // aquí. Antes la app no se lo ofrecía aunque la base sí se lo permitía.
+  const perms = useStaffPermissions();
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const guard = useGuardRespuestas();
@@ -170,6 +212,7 @@ export default function StaffAgendaScreen() {
   const [semana, setSemana]             = useState(() => inicioDeSemana(hoyNegocio(timezone)));
   const [datos, setDatos]               = useState<DatosDia | null>(null);
   const [selectedAppt, setSelectedAppt] = useState<Appt | null>(null);
+  const [chargeAppt, setChargeAppt]     = useState<LinkedAppt | null>(null);
   const [refreshing, setRefreshing]     = useState(false);
   const [error, setError]               = useState<unknown>(null);
 
@@ -193,7 +236,7 @@ export default function StaffAgendaScreen() {
 
       const citas = await traerTodo<Appt>((desde, hasta) => {
         let q = supabase.from("appointments")
-          .select(`id, appointment_date, appointment_time, status, professional_id, ${clientes}, services(name, price, duration_minutes, duration_min), professionals(name)`)
+          .select(`id, appointment_date, appointment_time, status, professional_id, client_id, service_id, location_id, imported, ${clientes}, services(name, price, duration_minutes, duration_min), professionals(name)${permisos.manage_pos ? ", pos_sales(id)" : ""}`)
           .eq("appointment_date", dia);
         q = agendaCompleta ? q.eq("tenant_id", tenantId) : q.eq("professional_id", professionalId);
         return q.order("appointment_time").order("id").range(desde, hasta) as unknown as PromiseLike<{ data: Appt[] | null; error: unknown }>;
@@ -255,6 +298,15 @@ export default function StaffAgendaScreen() {
     // Correo de cancelación al cliente, como el calendario web. No se espera.
     if (status === "cancelled" && appt.status !== "cancelled") void enviarCorreoCita("cancellation", appt.id);
     await recargar();
+  };
+
+  const abrirCobro = (a: Appt) => {
+    setChargeAppt({
+      id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
+      serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
+      locationId: a.location_id ?? null, time: a.appointment_time,
+    });
+    setSelectedAppt(null);
   };
 
   const vigentes = datos && datos.dia === selected ? datos : null;
@@ -349,6 +401,17 @@ export default function StaffAgendaScreen() {
             <Text style={[s.todayText, { color: t.text }]}>Hoy</Text>
           </TouchableOpacity>
         )}
+        {perms.manage_pos && (
+          <TouchableOpacity
+            onPress={() => router.push("/(staff)/caja")}
+            style={[s.todayBtn, s.cajaBtn, { borderColor: t.line, backgroundColor: t.cardSolid }]}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir la caja"
+          >
+            <Ionicons name="wallet-outline" size={15} color={t.text} />
+            <Text style={[s.todayText, { color: t.text }]}>Caja</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* El equipo también se entera: si el negocio no paga, se les bloquea */}
@@ -369,7 +432,19 @@ export default function StaffAgendaScreen() {
         verPro={!!vigentes?.agendaCompleta}
         onClose={() => setSelectedAppt(null)}
         onStatusChange={handleStatusChange}
+        onCobrar={perms.manage_pos ? abrirCobro : undefined}
       />
+
+      {tenantId && perms.manage_pos && (
+        <ChargeSheet
+          visible={!!chargeAppt}
+          tenantId={tenantId}
+          target={chargeAppt ? { kind: "appointment", appt: chargeAppt } : null}
+          onClose={() => setChargeAppt(null)}
+          onSaved={() => { recargar(); }}
+          businessName={tenant?.name ?? null}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -380,6 +455,7 @@ function crearEstilos(t: ThemeColors) {
     headerTitle:  { fontSize: 21, fontFamily: Fonts.bold, letterSpacing: -0.5, marginTop: 3, textTransform: "capitalize" },
     todayBtn:     { height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
     todayText:    { fontSize: 13, fontFamily: Fonts.bold },
+    cajaBtn:      { flexDirection: "row", gap: 6 },
     row:          { backgroundColor: t.cardSolid, borderRadius: Radius.md, padding: 14, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10, borderWidth: 1, borderColor: t.line },
     timePill:     { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
     timeText:     { fontSize: 12.5, fontFamily: Fonts.bold },
