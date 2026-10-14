@@ -12,6 +12,8 @@ type TenantData = {
   phone: string;
   address: string;
   slug: string;
+  /** Logo de Mi Marca (branding.logo_url). null = se muestran las iniciales. */
+  logoUrl?: string | null;
 };
 
 type TenantCtx = {
@@ -83,6 +85,21 @@ function desdeSettings(settings: unknown) {
     currency: texto(s.currency) ?? "COP",
     locale: texto(s.locale) ?? "es-CO",
   };
+}
+
+/**
+ * Logo del negocio. branding es de lectura pública (la reserva en línea lo usa),
+ * así que sirve igual para el dueño y para el staff. Un fallo aquí no tumba la
+ * carga del negocio: sin logo se ven las iniciales, como antes.
+ */
+async function cargarLogo(tenantId: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.from("branding").select("logo_url").eq("tenant_id", tenantId).limit(1);
+    const url = (data?.[0] as { logo_url?: unknown } | undefined)?.logo_url;
+    return typeof url === "string" && url.length > 0 ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Dueño: lee tenants directo (la RLS se lo permite). */
@@ -173,9 +190,12 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     if (!tenantId || (role !== "admin" && role !== "staff")) return;
     const turno = guard.nuevo();
     try {
-      const c = role === "admin" ? await cargarComoDueno(tenantId) : await cargarComoStaff();
+      const [c, logoUrl] = await Promise.all([
+        role === "admin" ? cargarComoDueno(tenantId) : cargarComoStaff(),
+        cargarLogo(tenantId),
+      ]);
       if (!turno.vigente()) return;
-      setTenant(c.tenant);
+      setTenant({ ...c.tenant, logoUrl });
       setTimezone(c.timezone);
       setTzLista(true);
       setCurrency(c.currency);

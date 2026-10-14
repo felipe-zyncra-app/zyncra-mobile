@@ -26,6 +26,8 @@ export default function StaffLayout() {
       <Tabs.Screen name="profile" options={{ title: "Mi Perfil" }} />
       {/* Subpantalla (no está en TABS): la caja de la administradora, desde la agenda. */}
       <Tabs.Screen name="caja"    options={{ title: "Caja" }} />
+      {/* Subpantalla: su nombre y horario, desde Mi perfil (permisos edit_profile / edit_schedule). */}
+      <Tabs.Screen name="mi-ficha" options={{ title: "Mi ficha" }} />
     </Tabs>
   );
 }

@@ -4,17 +4,17 @@ import * as Linking from "expo-linking";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Config, authedFetch } from "@/lib/config";
 import { textoParaUsuario } from "@/lib/db";
 import Constants from "expo-constants";
-import { Colors, Fonts, Gradients } from "@/constants/theme";
+import { Colors, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { useAuth } from "@/lib/auth";
 import { Card, MonoTag, SectionLabel, ListRow } from "@/components/ui";
 import { ThemePicker } from "@/components/ThemePicker";
+import LogoNegocio from "@/components/LogoNegocio";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -81,12 +81,6 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
     ],
   },
 ];
-
-function initialsOf(name: string) {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  const letters = words.slice(0, 2).map((w) => w[0]).join("");
-  return (letters || "Z").toUpperCase();
-}
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -223,9 +217,7 @@ export default function SettingsScreen() {
               accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi Tienda`}
               style={({ pressed }) => [s.bizRow, pressed && { opacity: 0.7 }]}
             >
-              <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.bizAvatar}>
-                <Text style={s.bizInitials}>{initialsOf(tenant?.name ?? "")}</Text>
-              </LinearGradient>
+              <LogoNegocio name={tenant?.name ?? ""} logoUrl={tenant?.logoUrl} size={46} radius={14} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[s.bizName, { color: t.ink }]} numberOfLines={1}>
                   {tenant?.name ?? "Tu negocio"}
@@ -315,8 +307,6 @@ const s = StyleSheet.create({
   section:     { marginTop: 20 },
 
   bizRow:      { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
-  bizAvatar:   { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  bizInitials: { color: "#fff", fontSize: 17, fontFamily: Fonts.bold, letterSpacing: -0.3 },
   bizName:     { fontSize: 16, fontFamily: Fonts.bold, letterSpacing: -0.3 },
   bizLink:     { fontSize: 11, fontFamily: Fonts.mono, marginTop: 3 },
   shareBtn:    { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },

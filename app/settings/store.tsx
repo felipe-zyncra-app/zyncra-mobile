@@ -291,6 +291,8 @@ export default function StoreScreen() {
         name:    bizName.trim(),
         address: address.trim(),
         slug:    slug.trim(),
+        // Ajustes y el perfil del equipo muestran el logo nuevo sin recargar.
+        logoUrl: finalLogoUrl || null,
         ...(telCambio ? { phone: telGuardar ?? "" } : {}),
       });
       if (telCambio) {

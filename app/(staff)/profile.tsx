@@ -20,6 +20,9 @@ import { colorDeProfesional } from "@/lib/comisiones";
 import ErrorState from "@/components/ErrorState";
 import MiNomina from "@/components/nomina/MiNomina";
 import { ListRow } from "@/components/ui";
+import LogoNegocio from "@/components/LogoNegocio";
+import { useStaffPermissions } from "@/lib/permissions";
+import { useRouter } from "expo-router";
 
 // Apple 5.1.1(i): la política de privacidad tiene que poder abrirse desde la
 // app, también para el equipo (AJU-10). Mismas filas que Ajustes del dueño.
@@ -49,6 +52,8 @@ export default function StaffProfileScreen() {
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const { tenant, timezone, ready } = useTenant();
+  const perms = useStaffPermissions();
+  const router = useRouter();
   const guard = useGuardRespuestas();
   const [info, setInfo] = useState<StaffInfo | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -184,7 +189,9 @@ export default function StaffProfileScreen() {
           <Text style={s.name}>{info?.name ?? (error ? "Tu perfil" : "...")}</Text>
           <Text style={s.role}>{info?.role ?? ""}</Text>
           <View style={s.businessPill}>
-            <Ionicons name="business-outline" size={12} color="rgba(255,255,255,.8)" />
+            {tenant?.logoUrl
+              ? <LogoNegocio name={tenantName} logoUrl={tenant.logoUrl} size={18} radius={5} />
+              : <Ionicons name="business-outline" size={12} color="rgba(255,255,255,.8)" />}
             <Text style={s.businessText}>{tenantName}</Text>
           </View>
         </Animated.View>
@@ -209,6 +216,23 @@ export default function StaffProfileScreen() {
             <MiNomina tenantId={tenantId} timezone={timezone} version={versionNomina} />
           </Animated.View>
         ) : null}
+
+        {/* Mi ficha: nombre y horario, si el dueño le dio el permiso */}
+        {(perms.edit_profile || perms.edit_schedule) && (
+          <Animated.View entering={FadeInDown.delay(160).duration(400)} style={{ marginTop: 20 }}>
+            <Text style={s.sectionLabel}>Mi ficha</Text>
+            <View style={[s.card, Shadow.sm]}>
+              {perms.edit_profile && (
+                <ListRow icon="person-outline" color={Colors.blue} label="Mis datos" sub="Cambia cómo aparece tu nombre"
+                  last={!perms.edit_schedule} onPress={() => router.push("/(staff)/mi-ficha" as never)} />
+              )}
+              {perms.edit_schedule && (
+                <ListRow icon="time-outline" color={Colors.blue} label="Mi horario" sub="Tus días, horas y descansos"
+                  last onPress={() => router.push("/(staff)/mi-ficha" as never)} />
+              )}
+            </View>
+          </Animated.View>
+        )}
 
         {/* Info de cuenta */}
         <Animated.View entering={FadeInDown.delay(200).duration(400)} style={{ marginTop: 20 }}>

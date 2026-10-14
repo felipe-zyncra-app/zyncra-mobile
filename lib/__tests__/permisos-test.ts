@@ -37,3 +37,16 @@ describe("parsePermissions", () => {
     expect((perms as unknown as { web_modules: unknown }).web_modules).toEqual(web_modules);
   });
 });
+
+describe("permisos de su propia ficha", () => {
+  it("por defecto el colaborador no cambia su nombre ni su horario", () => {
+    expect(parsePermissions(null).edit_profile).toBe(false);
+    expect(parsePermissions({}).edit_schedule).toBe(false);
+    expect(RESTRICTIVE_PERMISSIONS.edit_schedule).toBe(false);
+  });
+  it("lee los permisos que da el dueño, también como texto", () => {
+    const p = parsePermissions({ edit_profile: true, edit_schedule: "true" });
+    expect(p.edit_profile).toBe(true);
+    expect(p.edit_schedule).toBe(true);
+  });
+});

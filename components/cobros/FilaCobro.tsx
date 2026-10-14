@@ -5,6 +5,7 @@ import { fmtMoneyFull, fmt12 } from "@/lib/format";
 import { horaLocalDe } from "@/lib/tz";
 import { medioOGenerico } from "@/lib/medios-pago";
 import { Fonts, Radius, Shadow } from "@/constants/theme";
+import { nombresDeItems } from "@/lib/recibo";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -19,9 +20,20 @@ export type CobroFila = {
   pos_sale_items: { name: string; price: number; quantity: number }[] | null;
 };
 
-/** Qué se cobró: la nota (que por defecto son los ítems) o el primer ítem. */
+/**
+ * La nota que escribió alguien. Por defecto la nota de un cobro son los mismos
+ * ítems («Corte + Barba»): esa no cuenta como nota, es el detalle.
+ */
+export function notaPropiaDe(c: Pick<CobroFila, "note" | "pos_sale_items">): string | null {
+  const nota = c.note?.trim() ?? "";
+  return nota && nota !== nombresDeItems(c.pos_sale_items ?? []) ? nota : null;
+}
+
+/** Qué se cobró: los ítems o, sin ítems, la nota. */
 export function detalleDe(c: Pick<CobroFila, "note" | "pos_sale_items">): string | null {
-  return c.note?.trim() || c.pos_sale_items?.[0]?.name || null;
+  const items = c.pos_sale_items ?? [];
+  if (items.length > 0) return nombresDeItems(items);
+  return c.note?.trim() || null;
 }
 
 /**
@@ -42,6 +54,7 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
   const medio = medioOGenerico(cobro.payment_method);
   const quien = cliente ?? cobro.clients?.name ?? null;
   const detalle = detalleDe(cobro);
+  const nota = notaPropiaDe(cobro);
   const hora = fmt12(horaLocalDe(cobro.created_at, timezone));
 
   return (
@@ -50,7 +63,7 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
       activeOpacity={0.8}
       style={[s.card, Shadow.sm, { backgroundColor: t.cardSolid, borderColor: t.line }]}
       accessibilityRole="button"
-      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))} en ${medio.label}, ${hora}. Ver detalle`}
+      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))} en ${medio.label}, ${hora}.${nota ? ` Nota: ${nota}.` : ""} Ver detalle`}
     >
       <View style={[s.icono, { backgroundColor: medio.color + "18" }]}>
         <Ionicons name={medio.icon} size={17} color={medio.color} />
@@ -60,6 +73,13 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
         <Text style={[s.detalle, { color: t.muted }]} numberOfLines={1}>
           {medio.label}{detalle ? ` · ${detalle}` : ""}
         </Text>
+        {nota ? (
+          // La nota del cobro a la vista, sin abrir el detalle.
+          <View style={s.notaFila}>
+            <Ionicons name="chatbox-ellipses-outline" size={11} color="#b45309" />
+            <Text style={s.notaTxt} numberOfLines={2}>{nota}</Text>
+          </View>
+        ) : null}
         {etiquetas && etiquetas.length > 0 ? (
           <View style={s.etiquetas}>
             {etiquetas.map(e => (
@@ -85,6 +105,8 @@ const s = StyleSheet.create({
   icono:       { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   quien:       { fontSize: 14.5, fontFamily: Fonts.bold },
   detalle:     { fontSize: 12, fontFamily: Fonts.regular, marginTop: 2 },
+  notaFila:    { flexDirection: "row", alignItems: "flex-start", gap: 5, marginTop: 4 },
+  notaTxt:     { flex: 1, fontSize: 12, fontFamily: Fonts.regular, color: "#b45309", lineHeight: 16 },
   etiquetas:   { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
   etiqueta:    { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3, maxWidth: 170 },
   etiquetaTxt: { fontSize: 10.5, fontFamily: Fonts.semibold },

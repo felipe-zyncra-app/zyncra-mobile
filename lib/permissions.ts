@@ -20,11 +20,16 @@ export type StaffPermissions = {
   full_agenda: boolean;
   /** true = puede registrar ventas del POS y movimientos de caja. */
   manage_pos: boolean;
+  /** true = cambia su nombre en Mi perfil (RPC actualizar_mi_ficha). */
+  edit_profile: boolean;
+  /** true = ajusta su horario semanal en Mi perfil (RPC actualizar_mi_ficha). */
+  edit_schedule: boolean;
 };
 
 export const DEFAULT_PERMISSIONS: StaffPermissions = {
   contact: true, amounts: true, clients_tab: true,
   full_agenda: false, manage_pos: false,
+  edit_profile: false, edit_schedule: false,
 };
 
 /**
@@ -35,12 +40,14 @@ export const DEFAULT_PERMISSIONS: StaffPermissions = {
 export const RESTRICTIVE_PERMISSIONS: StaffPermissions = {
   contact: false, amounts: false, clients_tab: false,
   full_agenda: false, manage_pos: false,
+  edit_profile: false, edit_schedule: false,
 };
 
 /** El dueño: ve toda la agenda y maneja la caja. Solo para el rol admin. */
 const PERMISOS_DUENO: StaffPermissions = {
   contact: true, amounts: true, clients_tab: true,
   full_agenda: true, manage_pos: true,
+  edit_profile: true, edit_schedule: true,
 };
 
 /**
@@ -70,6 +77,8 @@ export function parsePermissions(raw: unknown): StaffPermissions {
     clients_tab: leerBool(r.clients_tab, DEFAULT_PERMISSIONS.clients_tab),
     full_agenda: leerBool(r.full_agenda, DEFAULT_PERMISSIONS.full_agenda),
     manage_pos: leerBool(r.manage_pos, DEFAULT_PERMISSIONS.manage_pos),
+    edit_profile: leerBool(r.edit_profile, DEFAULT_PERMISSIONS.edit_profile),
+    edit_schedule: leerBool(r.edit_schedule, DEFAULT_PERMISSIONS.edit_schedule),
   };
 }
 
