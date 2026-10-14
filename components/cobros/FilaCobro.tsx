@@ -6,6 +6,7 @@ import { horaLocalDe } from "@/lib/tz";
 import { medioOGenerico } from "@/lib/medios-pago";
 import { Fonts, Radius, Shadow } from "@/constants/theme";
 import { nombresDeItems } from "@/lib/recibo";
+import { lineasDePago } from "@/lib/ingresos";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -15,6 +16,8 @@ export type CobroFila = {
   created_at: string;
   total: number;
   payment_method: string;
+  /** Desglose del pago dividido ([{ method, amount }]); null si fue un solo medio. */
+  payments?: unknown;
   note: string | null;
   clients: { name: string; phone?: string | null } | null;
   pos_sale_items: { name: string; price: number; quantity: number }[] | null;
@@ -52,6 +55,12 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
 }) {
   const { t } = useTheme();
   const medio = medioOGenerico(cobro.payment_method);
+  // Pago dividido: «Efectivo $10.000 + QR $50.000» en vez de solo «Dividido».
+  const lineas = lineasDePago(cobro).filter(l => l.amount > 0);
+  const mixto = lineas.length > 1;
+  const medioTxt = mixto
+    ? lineas.map(l => `${medioOGenerico(l.method).label} ${fmtMoneyFull(l.amount)}`).join(" + ")
+    : medio.label;
   const quien = cliente ?? cobro.clients?.name ?? null;
   const detalle = detalleDe(cobro);
   const nota = notaPropiaDe(cobro);
@@ -63,16 +72,33 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
       activeOpacity={0.8}
       style={[s.card, Shadow.sm, { backgroundColor: t.cardSolid, borderColor: t.line }]}
       accessibilityRole="button"
-      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))} en ${medio.label}, ${hora}.${nota ? ` Nota: ${nota}.` : ""} Ver detalle`}
+      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))}${mixto ? `, pago dividido: ${medioTxt}` : ` en ${medio.label}`}, ${hora}.${nota ? ` Nota: ${nota}.` : ""} Ver detalle`}
     >
       <View style={[s.icono, { backgroundColor: medio.color + "18" }]}>
         <Ionicons name={medio.icon} size={17} color={medio.color} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[s.quien, { color: t.ink }]} numberOfLines={1}>{quien ?? "Venta directa"}</Text>
-        <Text style={[s.detalle, { color: t.muted }]} numberOfLines={1}>
-          {medio.label}{detalle ? ` · ${detalle}` : ""}
-        </Text>
+        {mixto ? (
+          <>
+            <View style={s.mixtoFila}>
+              {lineas.map((l, i) => {
+                const m = medioOGenerico(l.method);
+                return (
+                  <View key={`${l.method}-${i}`} style={[s.mixtoChip, { backgroundColor: m.color + "14" }]}>
+                    <Ionicons name={m.icon} size={10} color={m.color} />
+                    <Text style={[s.mixtoTxt, { color: m.color }]} numberOfLines={1}>{m.label} {fmtMoneyFull(l.amount)}</Text>
+                  </View>
+                );
+              })}
+            </View>
+            {detalle ? <Text style={[s.detalle, { color: t.muted }]} numberOfLines={1}>{detalle}</Text> : null}
+          </>
+        ) : (
+          <Text style={[s.detalle, { color: t.muted }]} numberOfLines={1}>
+            {medioTxt}{detalle ? ` · ${detalle}` : ""}
+          </Text>
+        )}
         {nota ? (
           // La nota del cobro a la vista, sin abrir el detalle.
           <View style={s.notaFila}>
@@ -105,6 +131,9 @@ const s = StyleSheet.create({
   icono:       { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   quien:       { fontSize: 14.5, fontFamily: Fonts.bold },
   detalle:     { fontSize: 12, fontFamily: Fonts.regular, marginTop: 2 },
+  mixtoFila:   { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  mixtoChip:   { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: Radius.full, paddingHorizontal: 7, paddingVertical: 2 },
+  mixtoTxt:    { fontSize: 11, fontFamily: Fonts.semibold },
   notaFila:    { flexDirection: "row", alignItems: "flex-start", gap: 5, marginTop: 4 },
   notaTxt:     { flex: 1, fontSize: 12, fontFamily: Fonts.regular, color: "#b45309", lineHeight: 16 },
   etiquetas:   { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
