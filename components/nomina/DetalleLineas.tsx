@@ -76,7 +76,10 @@ function FilaLinea({ l }: { l: Linea }) {
         <Text style={[s.nombre, { color: t.text }]} numberOfLines={2}>
           {l.nombre}{l.cantidad > 1 ? ` ×${l.cantidad}` : ""}
         </Text>
-        <Text style={[s.regla, { color: l.regla === "ninguna" ? Colors.red : t.subtle }]}>{ETIQUETA_REGLA[l.regla] ?? l.regla}</Text>
+        <Text style={[s.regla, { color: l.regla === "ninguna" ? Colors.red : l.regla === "manual" ? "#b45309" : t.subtle }]}>
+          {ETIQUETA_REGLA[l.regla] ?? l.regla}
+          {l.regla === "manual" && l.ajuste ? ` · por regla eran ${fmtMoneyFull(l.ajuste.calculada)}${l.ajuste.nota ? ` · ${l.ajuste.nota}` : ""}` : ""}
+        </Text>
       </View>
       <View style={{ alignItems: "flex-end" }}>
         <Text style={[s.comision, { color: t.text }]}>{fmtMoneyFull(l.comision)}</Text>

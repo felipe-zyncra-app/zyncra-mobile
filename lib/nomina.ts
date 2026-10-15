@@ -78,7 +78,10 @@ export interface Linea {
   /** Lo cobrado por la línea, con el descuento de la venta repartido. */
   valor: number;
   comision: number;
-  regla: "servicio" | "general" | "producto" | "ninguna";
+  /** "manual": el dueño puso el pago a mano en el panel (Nómina → Detalle → Ajustar). */
+  regla: "servicio" | "general" | "producto" | "ninguna" | "manual";
+  /** Con regla "manual": lo que daba la regla y el motivo. Lo manda el servidor desde el 15-oct. */
+  ajuste?: { calculada: number; reglaOriginal: string; nota: string | null } | null;
   cliente: string | null;
   hora: string | null;
   /** El día ya está cubierto por una liquidación de comisión. */
@@ -300,6 +303,7 @@ export const ETIQUETA_REGLA: Record<Linea["regla"], string> = {
   general: "Regla general",
   producto: "% de productos",
   ninguna: "Sin comisión",
+  manual: "Pago ajustado",
 };
 
 /** ¿Hay algo que pagarle? (comisión, básico o novedades pendientes). */
