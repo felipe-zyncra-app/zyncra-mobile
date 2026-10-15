@@ -48,6 +48,13 @@ interface Props {
    * pasado abre en hoy (AGE-25).
    */
   initialDate?: Date | string;
+  /**
+   * Hora ('HH:MM') y profesional con que abre, al tocar un hueco de la
+   * Agenda. El profesional se da por elegido (abre en "Cliente") y la hora se
+   * marca sola en el paso de fecha si sigue libre para el servicio elegido.
+   */
+  initialTime?: string | null;
+  initialProId?: string | null;
   onSuccess: () => void;
 }
 
@@ -61,7 +68,7 @@ const STEP_LABELS = [
   "Paso 4 · Fecha y hora",
 ];
 
-export default function NewApptModal({ visible, onClose, tenantId, initialDate, onSuccess }: Props) {
+export default function NewApptModal({ visible, onClose, tenantId, initialDate, initialTime, initialProId, onSuccess }: Props) {
   const router = useRouter();
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
@@ -102,6 +109,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   // perdió, el reintento choca con su propia fila (23505) y se reconoce como
   // guardada en vez de duplicarla.
   const apptIdRef = useRef<string>(nuevoId());
+  // Lo que pidió el hueco tocado en la Agenda; se consume una sola vez.
+  const pedido = useRef<{ hora: string | null; proId: string | null }>({ hora: null, proId: null });
 
   const cargar = async () => {
     const turno = guard.nuevo();
@@ -120,6 +129,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         setEmailRequired(correoClienteObligatorio((ten.data as { settings?: Record<string, unknown> | null } | null)?.settings));
       }
       setCatalogo(cat);
+      const proPedido = pedido.current.proId ? cat.profesionales.find(p => p.id === pedido.current.proId) : null;
+      pedido.current.proId = null;
+      if (proPedido) { setSelectedPro(proPedido); setStep(1); }
       setSede(loc);
       setClients(lista.map((c: { id: string; name: string; phone: string | null }) => ({ ...c, phone: c.phone ?? "" })));
     } catch (e) {
@@ -140,6 +152,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       : hoyAhora;
     if (!base || base < hoyAhora) base = hoyAhora;
     apptIdRef.current = nuevoId();
+    pedido.current = { hora: initialTime ?? null, proId: initialProId ?? null };
     setStep(0);
     setSelectedPro(null);
     setSelectedClient(null);
@@ -212,6 +225,13 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
   // Al cambiar de día o recargar, la hora elegida deja de valer.
   useEffect(() => { setSelectedTime(null); }, [selectedDay, selectedPro?.id, selectedService?.id]);
+
+  // La hora del hueco tocado se marca sola si está entre los cupos libres.
+  useEffect(() => {
+    const hora = pedido.current.hora;
+    if (!hora || step !== 3 || selectedTime) return;
+    if (cupos.cupos.includes(hora)) { setSelectedTime(hora); pedido.current.hora = null; }
+  }, [cupos.cupos, step, selectedTime]);
 
   // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
   const serverClients = useClientSearch(tenantId, clientSearch);
