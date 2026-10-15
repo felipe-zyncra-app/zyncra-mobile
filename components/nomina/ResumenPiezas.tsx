@@ -132,22 +132,24 @@ export function BotonNomina({ label, onPress, tono = "primario", disabled, carga
  * Lo que se le debe en el rango: comisiones, básico, cada novedad y el total
  * (todo del servidor). `compacto` deja solo los conceptos con valor, muestra
  * las novedades por tipo (propinas, bonos, descuentos, ya sumadas por el
- * servidor) y no repite el total, para la lista del Resumen.
+ * servidor) y no repite el total, para la lista del Resumen. `sinValores`
+ * (Mi nómina del profesional): las citas y la comisión, sin cuánto se cobró.
  */
-export function DesglosePendiente({ pend, compacto }: { pend: Pendiente; compacto?: boolean }) {
+export function DesglosePendiente({ pend, compacto, sinValores }: { pend: Pendiente; compacto?: boolean; sinValores?: boolean }) {
   const { t } = useTheme();
   const c = pend.comisiones;
   const filas: React.ReactNode[] = [];
   if (!compacto || c.comisionServicios > 0 || c.citas > 0) {
     filas.push(
       <FilaMonto key="serv" label="Comisión por servicios" valor={c.comisionServicios}
-        sub={c.citas > 0 || c.ventasServicios > 0 ? `${citas(c.citas)} · ${fmtMoneyFull(c.ventasServicios)} en servicios` : null} />,
+        sub={sinValores ? (c.citas > 0 ? citas(c.citas) : null)
+          : c.citas > 0 || c.ventasServicios > 0 ? `${citas(c.citas)} · ${fmtMoneyFull(c.ventasServicios)} en servicios` : null} />,
     );
   }
   if (!compacto || c.comisionProductos > 0 || c.ventasProductos > 0) {
     filas.push(
       <FilaMonto key="prod" label="Comisión por productos" valor={c.comisionProductos}
-        sub={c.ventasProductos > 0 ? `${fmtMoneyFull(c.ventasProductos)} en productos` : null} />,
+        sub={!sinValores && c.ventasProductos > 0 ? `${fmtMoneyFull(c.ventasProductos)} en productos` : null} />,
     );
   }
   if (pend.basico) {
@@ -184,15 +186,23 @@ export function DesglosePendiente({ pend, compacto }: { pend: Pendiente; compact
 
 // ─── Productividad del periodo ───────────────────────────────────────────────
 
-/** Todo lo atendido en el rango, pagado o no (p.periodo del servidor). */
-export function Productividad({ p }: { p: ResumenProfesional }) {
+/**
+ * Todo lo atendido en el rango, pagado o no (p.periodo del servidor).
+ * `sinValores` (Mi nómina del profesional): cuántas citas y productos, y la
+ * comisión, sin cuánto se cobró por ellos.
+ */
+export function Productividad({ p, sinValores }: { p: ResumenProfesional; sinValores?: boolean }) {
   const { t } = useTheme();
-  const datos: [string, string][] = [
-    ["Citas", String(p.periodo.citas)],
-    ["Servicios", fmtMoneyFull(p.periodo.ventasServicios)],
-    ["Productos", fmtMoneyFull(p.periodo.ventasProductos)],
-    ["Comisión del periodo", fmtMoneyFull(p.periodo.comisionServicios + p.periodo.comisionProductos)],
-  ];
+  const productos = p.lineas.filter(l => l.tipo === "producto").reduce((n, l) => n + (Number(l.cantidad) || 1), 0);
+  const comision = fmtMoneyFull(p.periodo.comisionServicios + p.periodo.comisionProductos);
+  const datos: [string, string][] = sinValores
+    ? [["Citas", String(p.periodo.citas)], ["Productos vendidos", String(productos)], ["Comisión del periodo", comision]]
+    : [
+      ["Citas", String(p.periodo.citas)],
+      ["Servicios", fmtMoneyFull(p.periodo.ventasServicios)],
+      ["Productos", fmtMoneyFull(p.periodo.ventasProductos)],
+      ["Comisión del periodo", comision],
+    ];
   return (
     <View style={s.prodGrid}>
       {datos.map(([k, v]) => (

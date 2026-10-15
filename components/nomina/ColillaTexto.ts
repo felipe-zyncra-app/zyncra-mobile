@@ -9,10 +9,23 @@ import { citas, etiquetaNovedad, horaCorta, textoBasico } from "./ResumenTextos"
  * notas). Es la misma información de la colilla imprimible del web
  * (src/app/admin/commissions/colilla.ts), sin archivos de por medio. Los
  * montos son los que guardó el servidor al liquidar.
+ *
+ * Es lo que recibe el profesional: las citas y lo que se le paga, sin el
+ * valor de los servicios ni de los productos (pedido de Imperio Capilar,
+ * 15-oct).
  */
 
 /** Tope de líneas de citas y ventas: una quincena larga no debe volverse un muro de texto. */
 export const MAX_LINEAS_TEXTO = 60;
+
+/** Productos vendidos en la colilla (por cantidad), para nombrarlos sin su valor. */
+export function productosDe(c: Colilla): number {
+  return (c.liquidacion.detail?.lineas ?? [])
+    .filter(x => x.tipo === "producto")
+    .reduce((n, x) => n + (Number(x.cantidad) || 1), 0);
+}
+
+export const productosTexto = (n: number) => `${n} ${n === 1 ? "producto" : "productos"}`;
 
 export function textoColilla(c: Colilla, timeZone: string): string {
   const l = c.liquidacion;
@@ -26,9 +39,10 @@ export function textoColilla(c: Colilla, timeZone: string): string {
   out.push(`Pagado el ${fmtDia(diaLocalDe(l.paid_at, timeZone), "corto")}`);
   out.push("");
 
-  out.push(`Comisión por servicios (${citas(Number(l.appointments_count) || 0)} · ${fmtMoneyFull(l.service_sales)}): ${fmtMoneyFull(l.service_commission)}`);
-  if (Number(l.product_sales) > 0) {
-    out.push(`Comisión por productos (${fmtMoneyFull(l.product_sales)}): ${fmtMoneyFull(l.product_commission)}`);
+  out.push(`Comisión por servicios (${citas(Number(l.appointments_count) || 0)}): ${fmtMoneyFull(l.service_commission)}`);
+  const nProductos = productosDe(c);
+  if (Number(l.product_commission) > 0 || Number(l.product_sales) > 0 || nProductos > 0) {
+    out.push(`Comisión por productos${nProductos > 0 ? ` (${productosTexto(nProductos)})` : ""}: ${fmtMoneyFull(l.product_commission)}`);
   }
   const b = d?.basico ?? null;
   if (Number(l.base_amount) > 0 || b) {
@@ -64,7 +78,7 @@ export function textoColilla(c: Colilla, timeZone: string): string {
       const hora = horaCorta(x.hora);
       const cuando = `${fmtDia(x.dia, "dia-mes")}${hora ? ` ${hora}` : ""}`;
       const que = `${x.nombre}${x.cantidad > 1 ? ` ×${x.cantidad}` : ""}${x.tipo === "producto" ? " (producto)" : ""}`;
-      out.push(`• ${cuando} · ${x.cliente ?? "Sin cliente"} · ${que}: ${fmtMoneyFull(x.valor)} → ${fmtMoneyFull(x.comision)}`);
+      out.push(`• ${cuando} · ${x.cliente ?? "Sin cliente"} · ${que}: ${fmtMoneyFull(x.comision)}`);
     }
     if (lineas.length > MAX_LINEAS_TEXTO) {
       const resto = lineas.length - MAX_LINEAS_TEXTO;

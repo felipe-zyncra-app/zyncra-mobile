@@ -54,23 +54,27 @@ function colilla(p: Partial<Colilla["liquidacion"]> = {}, extra: Partial<Colilla
 }
 
 describe("textoColilla", () => {
-  test("lleva negocio, profesional, periodo, desglose, total, nota y líneas", () => {
+  test("lleva negocio, profesional, periodo, desglose, total, nota y líneas, sin el valor de los servicios", () => {
     const texto = textoColilla(colilla(), ZONA);
     expect(texto).toContain("*Imperio Capilar* · Colilla de pago");
     expect(texto).toContain("Laura Gómez · Estilista");
     expect(texto).toContain("Periodo: 1 – 15 oct 2026");
     // El día del pago es el del negocio, no el de UTC.
     expect(texto).toContain("Pagado el 15 oct 2026");
-    expect(texto).toContain("Comisión por servicios (12 citas · $480.000): $96.000");
-    expect(texto).toContain("Comisión por productos ($50.000): $5.000");
+    expect(texto).toContain("Comisión por servicios (12 citas): $96.000");
+    expect(texto).toContain("Comisión por productos (2 productos): $5.000");
     expect(texto).toContain("Básico (15 días de $1.300.000 mensual, ajustado; calculado $650.000): $600.000");
     expect(texto).toContain("Propina (3 oct): $10.000");
     expect(texto).toContain("Descuento o adelanto · Adelanto (5 oct): −$50.000");
     expect(texto).toContain("*Total pagado: $661.000*");
     expect(texto).toContain("Nota: Pago por Nequi");
-    expect(texto).toContain("• 3 oct 10:30 AM · Ana · Corte: $40.000 → $16.000");
-    expect(texto).toContain("• 4 oct · Sin cliente · Cera ×2 (producto): $50.000 → $5.000");
+    expect(texto).toContain("• 3 oct 10:30 AM · Ana · Corte: $16.000");
+    expect(texto).toContain("• 4 oct · Sin cliente · Cera ×2 (producto): $5.000");
     expect(texto).toContain("Generada con Zyncra · 3a5998b9");
+    // Lo que recibe el profesional no dice cuánto se cobró (pedido de Imperio Capilar).
+    expect(texto).not.toContain("$480.000");
+    expect(texto).not.toContain("$40.000");
+    expect(texto).not.toContain("→");
   });
 
   test("total negativo: saldo a favor del negocio", () => {
@@ -81,11 +85,16 @@ describe("textoColilla", () => {
 
   test("sin productos, sin básico y sin nota no muestra esas filas", () => {
     const c = colilla({ product_sales: 0, product_commission: 0, base_amount: 0, base_days: 0, note: null });
-    c.liquidacion.detail = { ...c.liquidacion.detail!, basico: null };
+    c.liquidacion.detail = { ...c.liquidacion.detail!, basico: null, lineas: c.liquidacion.detail!.lineas.filter(x => x.tipo !== "producto") };
     const texto = textoColilla(c, ZONA);
     expect(texto).not.toContain("Comisión por productos");
     expect(texto).not.toContain("Básico");
     expect(texto).not.toContain("Nota:");
+  });
+
+  test("comisión de productos aunque el servidor no mande su valor (vista del profesional)", () => {
+    const texto = textoColilla(colilla({ service_sales: 0, product_sales: 0 }), ZONA);
+    expect(texto).toContain("Comisión por productos (2 productos): $5.000");
   });
 
   test("colilla sin detalle: usa los totales de novedades", () => {

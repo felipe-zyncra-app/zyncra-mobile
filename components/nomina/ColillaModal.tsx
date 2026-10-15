@@ -9,7 +9,7 @@ import { diaLocalDe, fmtDia } from "@/lib/tz";
 import { IconButton, MonoTag } from "@/components/ui";
 import { anularLiquidacion, leerColilla, type Colilla, type ItemHistorial } from "@/lib/nomina";
 import { etiquetaTramo, FilaMonto } from "./comun";
-import { textoColilla } from "./ColillaTexto";
+import { productosDe, productosTexto, textoColilla } from "./ColillaTexto";
 import { Aviso, BotonNomina, Etiqueta } from "./ResumenPiezas";
 import { citas, etiquetaNovedad, horaCorta, mensajeNomina, ORIGEN_NOVEDAD, textoBasico } from "./ResumenTextos";
 
@@ -20,12 +20,17 @@ export type ItemColilla = Pick<ItemHistorial, "id" | "profesional" | "period_sta
  * periodo, básico, comisiones, novedades, cita por cita, total y nota, tal
  * como quedó guardada al liquidar. Se puede compartir como texto. El dueño
  * puede anularla (con confirmación): lo que cubría vuelve a quedar pendiente.
+ *
+ * `sinValores` (el profesional viendo la suya): sin el valor de los
+ * servicios ni de los productos, solo citas y comisiones. El texto que se
+ * comparte nunca lleva esos valores.
  */
-export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, onClose, onAnulada }: {
+export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, sinValores = false, onClose, onAnulada }: {
   tenantId: string;
   timeZone: string;
   item: ItemColilla;
   puedeAnular: boolean;
+  sinValores?: boolean;
   onClose: () => void;
   onAnulada?: (item: ItemColilla) => void;
 }) {
@@ -73,6 +78,8 @@ export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, on
   const d = l?.detail ?? null;
   const total = Number(l?.total_amount) || 0;
   const logo = c?.negocio.logo && /^https:\/\//.test(c.negocio.logo) ? c.negocio.logo : null;
+  const nProductos = c ? productosDe(c) : 0;
+  const hayProductos = !!l && (Number(l.product_commission) > 0 || Number(l.product_sales) > 0 || nProductos > 0);
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={cerrar}>
@@ -120,10 +127,11 @@ export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, on
               <FilaMonto
                 label="Comisión por servicios"
                 valor={Number(l.service_commission) || 0}
-                sub={`${citas(Number(l.appointments_count) || 0)} · ${fmtMoneyFull(l.service_sales)}`}
+                sub={sinValores ? citas(Number(l.appointments_count) || 0) : `${citas(Number(l.appointments_count) || 0)} · ${fmtMoneyFull(l.service_sales)}`}
               />
-              {Number(l.product_sales) > 0 ? (
-                <FilaMonto label="Comisión por productos" valor={Number(l.product_commission) || 0} sub={fmtMoneyFull(l.product_sales)} />
+              {hayProductos ? (
+                <FilaMonto label="Comisión por productos" valor={Number(l.product_commission) || 0}
+                  sub={sinValores ? (nProductos > 0 ? productosTexto(nProductos) : null) : fmtMoneyFull(l.product_sales)} />
               ) : null}
               {Number(l.base_amount) > 0 || d?.basico ? (
                 <FilaMonto
@@ -181,7 +189,7 @@ export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, on
                           </View>
                           <View style={{ alignItems: "flex-end" }}>
                             <Text style={[s.lineaCom, { color: t.text }]}>{fmtMoneyFull(x.comision)}</Text>
-                            <Text style={[s.lineaSub, { color: t.subtle }]}>de {fmtMoneyFull(x.valor)}</Text>
+                            {!sinValores ? <Text style={[s.lineaSub, { color: t.subtle }]}>de {fmtMoneyFull(x.valor)}</Text> : null}
                           </View>
                         </View>
                       );

@@ -362,7 +362,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Anota bonificaciones, propinas y adelantos",
             "En Novedades anota bonificaciones y descuentos o adelantos. Las propinas que registras en Caja (categoría Propina) o al cobrar, con su profesional, se anotan solas."),
           paso("Revisa y liquida",
-            "En Resumen elige la quincena, el mes o la semana. Verás por profesional las citas atendidas, lo vendido y lo pendiente por pagar; al tocarlo, el detalle cita por cita. Liquidar registra el pago y deja la colilla en Historial. Solo cuentan las citas completadas o cobradas."),
+            "En Resumen elige la quincena, el mes o la semana. Verás por profesional las citas atendidas, lo vendido y lo pendiente por pagar; al tocarlo, el detalle cita por cita. Liquidar registra el pago y deja la colilla en Historial. La colilla y \"Mi nómina\" del profesional muestran sus citas y su comisión, no el valor de los servicios. Solo cuentan las citas completadas o cobradas."),
         ],
       },
     ],
