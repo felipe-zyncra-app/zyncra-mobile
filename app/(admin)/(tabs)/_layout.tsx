@@ -5,6 +5,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Fonts, Gradients, Shadow } from "@/constants/theme";
 import HannaFab from "@/components/HannaFab";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { useAuth } from "@/lib/auth";
+import { pantallaPermitida } from "@/lib/acceso-equipo";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -20,12 +22,20 @@ const TABS: { name: string; label: string; icon: IoniconName; iconFocused: Ionic
 // ítem activo con fondo blanco al 8%, ícono acento #ff5d54 y barra
 // de gradiente (adaptación de .navItem.active de admin.module.css).
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+  // La administradora del negocio ve solo las pestañas de sus módulos, y
+  // Ajustes es su perfil (la configuración del negocio es del dueño).
+  const { modulosWeb } = useAuth();
+  const visibles = TABS
+    .filter(t => !modulosWeb || pantallaPermitida(t.name, modulosWeb))
+    .map(t => (modulosWeb && t.name === "settings"
+      ? { ...t, label: "Mi perfil", icon: "person-outline" as IoniconName, iconFocused: "person" as IoniconName }
+      : t));
   return (
     <View style={s.wrapper}>
       <View style={[s.bar, Shadow.md]} accessibilityRole="tablist">
-        {state.routes.filter(r => TABS.some(t => t.name === r.name)).map((route) => {
+        {state.routes.filter(r => visibles.some(t => t.name === r.name)).map((route) => {
           const focused = state.routes[state.index].name === route.name;
-          const tab = TABS.find(t => t.name === route.name) ?? TABS[0];
+          const tab = visibles.find(t => t.name === route.name) ?? visibles[0];
 
           return (
             <TouchableOpacity
@@ -76,6 +86,7 @@ const s = StyleSheet.create({
 });
 
 export default function AdminTabsLayout() {
+  const { role } = useAuth();
   return (
     <View style={{ flex: 1 }}>
       <Tabs
@@ -88,8 +99,9 @@ export default function AdminTabsLayout() {
         <Tabs.Screen name="pos"      options={{ title: "Cobros" }} />
         <Tabs.Screen name="settings" options={{ title: "Ajustes" }} />
       </Tabs>
-      {/* Copiloto Hanna — flotante sobre todas las pestañas */}
-      <HannaFab />
+      {/* Copiloto Hanna — flotante sobre todas las pestañas. Solo el dueño:
+          la ruta de Hanna resuelve el negocio por el dueño (igual que el portal). */}
+      {role === "admin" && <HannaFab />}
     </View>
   );
 }

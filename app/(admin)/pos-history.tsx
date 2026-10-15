@@ -68,7 +68,7 @@ export default function PosHistoryScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready } = useTenant();
   const guard = useGuardRespuestas();
   // Mes elegido como día 1 'YYYY-MM-01' en la zona del negocio; null = el mes
@@ -357,7 +357,8 @@ export default function PosHistoryScreen() {
         cobro={detalle}
         sede={detalle && sede ? sedeDeFila(sedes.lista, detalle.location_id) : null}
         factura={detalle ? facturaVigente(detalle) : null}
-        onFacturar={detalle && facturacion && !facturaVigente(detalle) ? () => facturar(detalle) : undefined}
+        // Facturar electrónicamente es del dueño (credenciales de Factus).
+        onFacturar={detalle && facturacion && role === "admin" && !facturaVigente(detalle) ? () => facturar(detalle) : undefined}
         onClose={() => setDetalle(null)}
         onAnulado={aviso => {
           setDetalle(null);

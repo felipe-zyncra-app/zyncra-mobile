@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { ErrorDB, mensajeError, revisar } from "./db";
+import { ErrorDB, leerAjustesDelNegocio, mensajeError, revisar } from "./db";
 import { diaDeSemana, inicioDeSemana, sumarDias } from "./tz";
 import { fmt12 } from "./format";
 import { duracionDe } from "./servicios";
@@ -382,7 +382,7 @@ export async function cargarCatalogoAgenda(tenantId: string): Promise<CatalogoAg
     supabase.from("services").select("*").eq("tenant_id", tenantId).order("name"),
     supabase.from("professionals").select("id, name, role, schedule, location_id")
       .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
-    supabase.from("tenants").select("settings").eq("id", tenantId).single(),
+    leerAjustesDelNegocio(tenantId),
   ]);
   const servicios = (revisar(svc, "No se pudieron cargar los servicios") ?? []) as Crudo[];
   const profesionales = (revisar(pros, "No se pudo cargar el equipo") ?? []) as ProfesionalAgenda[];

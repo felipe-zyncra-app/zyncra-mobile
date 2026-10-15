@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth";
 import { Card, MonoTag, SectionLabel, ListRow } from "@/components/ui";
 import { ThemePicker } from "@/components/ThemePicker";
 import LogoNegocio from "@/components/LogoNegocio";
+import StaffProfileScreen from "../../(staff)/profile";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -82,7 +83,17 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
   },
 ];
 
+/**
+ * Ajustes del dueño. La administradora del negocio no configura el negocio
+ * (igual que en el portal): en esta pestaña ve su perfil de colaboradora
+ * (nómina, ficha, salir), el mismo de la app del equipo.
+ */
 export default function SettingsScreen() {
+  const { modulosWeb } = useAuth();
+  return modulosWeb ? <StaffProfileScreen /> : <AjustesDelDueno />;
+}
+
+function AjustesDelDueno() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenant } = useTenant();

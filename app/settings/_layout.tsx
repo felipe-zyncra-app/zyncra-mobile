@@ -5,7 +5,7 @@ export default function SettingsStackLayout() {
   // /settings/* vive fuera de (admin): sin este guard, un colaborador abría
   // zyncra://settings/team y una cuenta suspendida seguía editando servicios,
   // horario y equipo encima de AccountBlocked (ARQ-06 / SEG-20).
-  const bloqueo = useGuardArea("admin");
+  const bloqueo = useGuardArea("dueno");
   if (bloqueo) return bloqueo;
 
   return (

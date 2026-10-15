@@ -103,6 +103,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
 }) {
   const { t } = useTheme();
   const { timezone } = useTenant();
+  // Borrar fichas es del dueño (la base no se lo deja al equipo).
+  const { role } = useAuth();
   const isNew = client === null;
   const [name, setName]   = useState("");
   const [phone, setPhone] = useState("");
@@ -280,7 +282,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
               <Ionicons name="close" size={20} color="white" />
             </TouchableOpacity>
             <Text style={em.headerTitle}>{isNew ? "Nuevo cliente" : "Editar cliente"}</Text>
-            {!isNew ? (
+            {!isNew && role === "admin" ? (
               <TouchableOpacity onPress={handleDelete} disabled={borrando} style={em.iconBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Eliminar cliente" accessibilityState={{ disabled: borrando, busy: borrando }}>
                 {borrando ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="trash-outline" size={18} color="white" />}
               </TouchableOpacity>

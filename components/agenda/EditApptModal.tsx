@@ -12,6 +12,7 @@ import { cambioAvisable, enviarCorreoCita } from "@/lib/correo-cita";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
+import { useAuth } from "@/lib/auth";
 import { useClientSearch } from "@/lib/useClientSearch";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import { exigirFilas, mensajeError, revisar } from "@/lib/db";
@@ -59,6 +60,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const { timezone } = useTenant();
+  const { role } = useAuth();
   const hoy = useHoyNegocio(timezone);
   const guard = useGuardRespuestas();
 
@@ -440,7 +442,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
                     avisoHora={avisosHora.length ? avisosHora.join(" ") : null}
                     mensajeCerrado={selectedPro?.schedule ? `${selectedPro.name} no atiende este día.` : "El negocio no atiende este día."}
                     horarioPorDefecto={catalogo?.horario.porDefecto}
-                    onConfigurarHorario={() => { onClose(); router.push("/settings/schedule"); }}
+                    onConfigurarHorario={role === "admin" ? () => { onClose(); router.push("/settings/schedule"); } : undefined}
                   />
                 </View>
               </ScrollView>

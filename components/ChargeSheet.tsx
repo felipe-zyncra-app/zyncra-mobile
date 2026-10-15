@@ -165,10 +165,12 @@ interface Props {
 
 export default function ChargeSheet({ visible, tenantId, target, onClose, onSaved, businessName }: Props) {
   const router = useRouter();
-  // La administradora (staff con manage_pos) también cobra: su caja vive en el
-  // área del equipo y no tiene el historial de cobros del dueño.
-  const { role } = useAuth();
-  const rutaCaja = role === "staff" ? "/(staff)/caja" : "/(admin)/caja";
+  // El equipo con manage_pos también cobra. Su caja vive en el área del
+  // equipo y no tiene el historial de cobros del dueño; la administradora del
+  // negocio usa la app del dueño, con su caja y su historial.
+  const { role, adminEquipo } = useAuth();
+  const areaEquipo = role === "staff" && !adminEquipo;
+  const rutaCaja = areaEquipo ? "/(staff)/caja" : "/(admin)/caja";
   const { t, mode } = useTheme();
   const { tenant, timezone } = useTenant();
   // El azul de marca casi no se lee sobre el fondo oscuro.
@@ -598,7 +600,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
               {appt?.clientName ? `La cita de ${appt.clientName}` : "Esta cita"} ya tiene un cobro registrado, así que no se vuelve a cobrar.
               Si hay que corregirlo, anúlalo desde el historial de cobros y vuelve a cobrar.
             </Text>
-            {role !== "staff" && (
+            {!areaEquipo && (
               <TouchableOpacity onPress={() => { onClose(); router.push("/(admin)/pos-history" as never); }}
                 style={[s.secondaryBtn, { borderColor: t.line }]} activeOpacity={0.85} accessibilityRole="button">
                 <Ionicons name="time-outline" size={17} color={t.text} />

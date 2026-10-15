@@ -81,7 +81,7 @@ export default function PosScreen() {
   const router = useRouter();
   const { t, mode } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready } = useTenant();
   const guard = useGuardRespuestas();
   // Día elegido en la zona del NEGOCIO (DIN-11). null = hoy: así la pantalla
@@ -421,7 +421,8 @@ export default function PosScreen() {
         cobro={detalle}
         cliente={detalle ? nombreDeCita(detalle) : null}
         factura={detalle ? facturaVigente(detalle) : null}
-        onFacturar={detalle && facturacion && !facturaVigente(detalle)
+        // Facturar electrónicamente es del dueño (credenciales de Factus).
+        onFacturar={detalle && facturacion && role === "admin" && !facturaVigente(detalle)
           ? () => {
               const id = detalle.id;
               setDetalle(null);

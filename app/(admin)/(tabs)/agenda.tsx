@@ -13,7 +13,7 @@ import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { getActiveLocationId } from "@/lib/active-location";
-import { exigirFilas, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
+import { exigirFilas, leerAjustesDelNegocio, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
 import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
@@ -108,7 +108,7 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
       .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
     supabase.from("blocked_slots").select("id, start_time, end_time, professional_id, reason")
       .eq("tenant_id", tenantId).eq("blocked_date", dia).order("start_time"),
-    supabase.from("tenants").select("settings").eq("id", tenantId).single(),
+    leerAjustesDelNegocio(tenantId),
     // Mismo criterio que lib/active-location (sedes activas, la principal primero).
     supabase.from("locations").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("created_at"),
   ]);
@@ -150,7 +150,7 @@ export default function AgendaScreen() {
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const router = useRouter();
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready, tenant } = useTenant();
   const guard = useGuardRespuestas();
 
@@ -412,7 +412,8 @@ export default function AgendaScreen() {
         </ScrollView>
       )}
 
-      {vigentes?.horario.porDefecto && (
+      {/* Configurar el horario es del dueño. */}
+      {vigentes?.horario.porDefecto && role === "admin" && (
         <TouchableOpacity
           onPress={() => router.push("/settings/schedule")}
           style={[s.banner, { borderColor: "rgba(217,119,6,0.35)", backgroundColor: "rgba(217,119,6,0.08)" }]}

@@ -445,7 +445,9 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
 export default function DashboardScreen() {
   const router = useRouter();
   const { t } = useTheme();
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
+  // La administradora del negocio también ve el Panel; avisos y reportes son del dueño.
+  const esDueno = role === "admin";
   const { tenant: tenantData, timezone, ready } = useTenant();
   const tenantName = tenantData?.name ?? "Tu negocio";
   const guard = useGuardRespuestas();
@@ -536,7 +538,7 @@ export default function DashboardScreen() {
             {/* Campana de avisos al lado del nombre del negocio (como el portal). */}
             <View style={s.headerAside}>
               <TenantBadge name={tenantName} style={s.tenantBadge} />
-              <CampanaAvisos />
+              {esDueno && <CampanaAvisos />}
             </View>
           </View>
 
@@ -735,7 +737,7 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Acceso a reportes ── */}
-        <Card delay={440}>
+        {esDueno && <Card delay={440}>
           <TouchableOpacity style={s.reportsRow} onPress={() => router.navigate("/(admin)/reports" as any)} activeOpacity={0.6} accessibilityRole="button">
             <View style={[s.reportsIcon, { backgroundColor: Colors.red + "12" }]}>
               <Ionicons name="bar-chart-outline" size={16} color={Colors.red} />
@@ -746,7 +748,7 @@ export default function DashboardScreen() {
             </View>
             <Ionicons name="chevron-forward" size={15} color={t.subtle} />
           </TouchableOpacity>
-        </Card>
+        </Card>}
       </ScrollView>
 
       {tenantId && (
