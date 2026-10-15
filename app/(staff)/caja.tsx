@@ -1,4 +1,5 @@
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import CajaScreen from "../(admin)/caja";
 import ErrorState from "@/components/ErrorState";
 import { PantallaCargando } from "@/lib/guards";
@@ -13,6 +14,7 @@ import { useStaffPermissionsEstado } from "@/lib/permissions";
  */
 export default function StaffCajaScreen() {
   const { t } = useTheme();
+  const router = useRouter();
   const { perms, cargando } = useStaffPermissionsEstado();
   if (cargando) return <PantallaCargando />;
   if (!perms.manage_pos) {
@@ -21,6 +23,8 @@ export default function StaffCajaScreen() {
         <ErrorState
           title="Tu cuenta no maneja la caja"
           message="Pídele al dueño del negocio que, en Equipo → Acceso del panel web, active «Administrador del negocio»."
+          // Sin barra de abajo ni encabezado: sin esto era un callejón sin salida.
+          accion={{ label: "Volver a mi agenda", icon: "arrow-back", onPress: () => router.replace("/(staff)/agenda") }}
         />
       </SafeAreaView>
     );

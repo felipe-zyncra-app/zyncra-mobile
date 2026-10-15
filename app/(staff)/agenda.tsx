@@ -12,11 +12,11 @@ import { useTenant } from "@/lib/tenant";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { IconButton, MonoTag } from "@/components/ui";
-import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
+import { STATUS_OPTIONS, STATUS_META, colorDeEstadoLegible } from "@/constants/status";
 import { duracionServicio, verificarCupo } from "@/lib/scheduling";
 import { fmt12, fmtTelefono } from "@/lib/format";
 import { exigirFilas, mensajeError, traerTodo } from "@/lib/db";
-import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
+import { conMayuscula, fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import ErrorState from "@/components/ErrorState";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
@@ -204,7 +204,7 @@ export default function StaffAgendaScreen() {
   // La administradora (permissions.manage_pos) cobra y maneja la caja desde
   // aquí. Antes la app no se lo ofrecía aunque la base sí se lo permitía.
   const perms = useStaffPermissions();
-  const { t } = useTheme();
+  const { t, mode } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const guard = useGuardRespuestas();
 
@@ -353,7 +353,7 @@ export default function StaffAgendaScreen() {
           </Animated.View>
         ) : (
           appts.map((a, i) => {
-            const meta = STATUS_META[a.status];
+            const meta = STATUS_META[a.status] ? { ...STATUS_META[a.status], color: colorDeEstadoLegible(STATUS_META[a.status].color, mode) } : undefined;
             return (
               <Animated.View key={a.id} entering={i < 10 ? FadeInRight.delay(i * 70).duration(320) : undefined}>
                 <TouchableOpacity
@@ -389,8 +389,8 @@ export default function StaffAgendaScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <View style={s.header}>
         <Animated.View entering={FadeInDown.duration(400)} style={{ flex: 1 }}>
-          <MonoTag>{vigentes?.agendaCompleta ? "Agenda del negocio" : "Mi Agenda"}</MonoTag>
-          <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>{fmtDia(selected, "largo")}</Text>
+          <MonoTag>{vigentes?.agendaCompleta ? "Agenda del negocio" : "Mi agenda"}</MonoTag>
+          <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>{conMayuscula(fmtDia(selected, "largo"))}</Text>
         </Animated.View>
         {selected !== hoy && (
           <TouchableOpacity
@@ -452,7 +452,7 @@ export default function StaffAgendaScreen() {
 function crearEstilos(t: ThemeColors) {
   return StyleSheet.create({
     header:       { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
-    headerTitle:  { fontSize: 21, fontFamily: Fonts.bold, letterSpacing: -0.5, marginTop: 3, textTransform: "capitalize" },
+    headerTitle:  { fontSize: 21, fontFamily: Fonts.bold, letterSpacing: -0.5, marginTop: 3 },
     todayBtn:     { height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
     todayText:    { fontSize: 13, fontFamily: Fonts.bold },
     cajaBtn:      { flexDirection: "row", gap: 6 },

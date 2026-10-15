@@ -17,7 +17,7 @@ import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { fmtMoneyFull, fmt12 } from "@/lib/format";
-import { sumarDias, inicioDelDiaUTC, finDelDiaUTC, fmtDia, hoyNegocio } from "@/lib/tz";
+import { sumarDias, inicioDelDiaUTC, finDelDiaUTC, fmtDia, hoyNegocio, conMayuscula } from "@/lib/tz";
 import { exigirFilas, mensajeError, traerTodo } from "@/lib/db";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { cancelarRecordatorioCita } from "@/lib/notifications";
@@ -72,8 +72,6 @@ async function leerCaja(tenantId: string, loc: string | null): Promise<EstadoDeC
 }
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
-/** Solo la primera letra: textTransform "capitalize" dejaría "Domingo 28 De Septiembre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 

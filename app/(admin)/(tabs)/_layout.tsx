@@ -1,16 +1,11 @@
 import { Tabs } from "expo-router";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { Fonts, Gradients, Shadow } from "@/constants/theme";
+import { View } from "react-native";
 import HannaFab from "@/components/HannaFab";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import BarraPestanas, { type Pestana } from "@/components/BarraPestanas";
 import { useAuth } from "@/lib/auth";
 import { pantallaPermitida } from "@/lib/acceso-equipo";
 
-type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
-
-const TABS: { name: string; label: string; icon: IoniconName; iconFocused: IoniconName }[] = [
+const TABS: Pestana[] = [
   { name: "index",    label: "Panel",    icon: "home-outline",     iconFocused: "home" },
   { name: "agenda",   label: "Agenda",   icon: "calendar-outline", iconFocused: "calendar" },
   { name: "clients",  label: "Clientes", icon: "people-outline",   iconFocused: "people" },
@@ -18,79 +13,19 @@ const TABS: { name: string; label: string; icon: IoniconName; iconFocused: Ionic
   { name: "settings", label: "Ajustes",  icon: "settings-outline", iconFocused: "settings" },
 ];
 
-// Pill de tinta oscura — eco de la sidebar del portal web (#0C0C14):
-// ítem activo con fondo blanco al 8%, ícono acento #ff5d54 y barra
-// de gradiente (adaptación de .navItem.active de admin.module.css).
-function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+export default function AdminTabsLayout() {
+  const { role, modulosWeb } = useAuth();
   // La administradora del negocio ve solo las pestañas de sus módulos, y
   // Ajustes es su perfil (la configuración del negocio es del dueño).
-  const { modulosWeb } = useAuth();
-  const visibles = TABS
+  const visibles: Pestana[] = TABS
     .filter(t => !modulosWeb || pantallaPermitida(t.name, modulosWeb))
     .map(t => (modulosWeb && t.name === "settings"
-      ? { ...t, label: "Mi perfil", icon: "person-outline" as IoniconName, iconFocused: "person" as IoniconName }
+      ? { ...t, label: "Mi perfil", icon: "person-outline", iconFocused: "person" }
       : t));
-  return (
-    <View style={s.wrapper}>
-      <View style={[s.bar, Shadow.md]} accessibilityRole="tablist">
-        {state.routes.filter(r => visibles.some(t => t.name === r.name)).map((route) => {
-          const focused = state.routes[state.index].name === route.name;
-          const tab = visibles.find(t => t.name === route.name) ?? visibles[0];
-
-          return (
-            <TouchableOpacity
-              key={route.key}
-              style={s.tab}
-              onPress={() => navigation.navigate(route.name)}
-              activeOpacity={0.7}
-              // Con el lector de pantalla se anuncia como pestaña y cuál está
-              // activa; antes solo leía el texto, sin rol ni estado (CAL-24).
-              accessibilityRole="tab"
-              accessibilityLabel={tab.label}
-              accessibilityState={{ selected: focused }}
-            >
-              <View style={[s.tabInner, focused && s.tabInnerActive]}>
-                {focused && (
-                  <LinearGradient
-                    colors={Gradients.brand}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={s.accentBar}
-                  />
-                )}
-                <Ionicons
-                  name={focused ? tab.iconFocused : tab.icon}
-                  size={19}
-                  color={focused ? "#ff5d54" : "rgba(255,255,255,0.52)"}
-                />
-                <Text style={[s.label, focused ? s.labelActive : { color: "rgba(255,255,255,0.52)" }]}>
-                  {tab.label}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-const s = StyleSheet.create({
-  wrapper:        { position: "absolute", bottom: 0, left: 0, right: 0, paddingBottom: 24, paddingHorizontal: 12 },
-  bar:            { backgroundColor: "#0C0C14", borderRadius: 22, flexDirection: "row", paddingVertical: 8, paddingHorizontal: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  tab:            { flex: 1, alignItems: "center" },
-  tabInner:       { alignItems: "center", gap: 3, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 12, overflow: "hidden" },
-  tabInnerActive: { backgroundColor: "rgba(255,255,255,0.08)" },
-  accentBar:      { position: "absolute", top: 0, left: "28%" as any, right: "28%" as any, height: 2.5, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
-  label:          { fontSize: 9.5, fontFamily: Fonts.semibold, textAlign: "center" },
-  labelActive:    { color: "white", fontFamily: Fonts.bold },
-});
-
-export default function AdminTabsLayout() {
-  const { role } = useAuth();
   return (
     <View style={{ flex: 1 }}>
       <Tabs
-        tabBar={(props) => <CustomTabBar {...props} />}
+        tabBar={(props) => <BarraPestanas {...props} tabs={visibles} />}
         screenOptions={{ headerShown: false }}
       >
         <Tabs.Screen name="index"    options={{ title: "Panel" }} />

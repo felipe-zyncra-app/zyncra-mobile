@@ -6,6 +6,9 @@ import SedeChip, { nombreCorto, nombreSede, sedeDeFila } from "@/components/Sede
 // (jest.mock se eleva sobre los imports, así que el mock ya aplica.)
 const mockPush = jest.fn();
 jest.mock("expo-router", () => ({ useRouter: () => ({ push: mockPush }) }));
+// Cambiar de sede es del dueño; para el equipo el chip solo rotula.
+let mockRol: "admin" | "staff" = "admin";
+jest.mock("@/lib/auth", () => ({ useAuth: () => ({ role: mockRol }) }));
 
 const sedes = [
   { id: "norte", name: "Sede Norte" },
@@ -50,9 +53,17 @@ describe("SedeChip", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  test("lleva al selector de sedes", async () => {
+  test("al dueño lo lleva al selector de sedes", async () => {
+    mockRol = "admin";
     await render(<SedeChip nombre="Sede Norte" sobreColor />);
     await fireEvent.press(screen.getByRole("button", { name: "Sede activa: Sede Norte. Cambiar de sede" }));
     expect(mockPush).toHaveBeenCalledWith("/settings/locations");
+  });
+
+  test("al equipo solo le dice la sede: Sedes es del dueño", async () => {
+    mockRol = "staff";
+    await render(<SedeChip nombre="Sede Norte" />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByLabelText("Sede: Sede Norte")).toBeOnTheScreen();
   });
 });

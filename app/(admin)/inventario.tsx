@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 import ErrorState from "@/components/ErrorState";
-import { IconButton } from "@/components/ui";
+import { IconButton, ScreenHeader } from "@/components/ui";
 import { exigirFilas, mensajeError, revisar, traerTodo } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { fmt12, fmtMoneyFull } from "@/lib/format";
@@ -376,26 +376,13 @@ export default function InventarioScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={["top"]}>
 
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerBlob1} />
-        <View style={s.headerBlob2} />
-        <View style={s.headerTopRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Volver">
-            <Ionicons name="chevron-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={s.headerIconBox}>
-            <Ionicons name="cube-outline" size={15} color="white" />
-          </View>
-          <Text style={s.headerLabel}>CONTROL DE STOCK</Text>
-          <TouchableOpacity style={s.addBtn} onPress={openCreate} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Nuevo producto">
-            <Ionicons name="add" size={16} color="white" />
-            <Text style={s.addBtnText}>Nuevo</Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={s.headerTitle}>Inventario</Text>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Inventario y compras"
+        title="Inventario"
+        subtitle="Control de stock"
+        onBack={() => router.back()}
+        rightAction={{ icon: "add", onPress: openCreate, label: "Nuevo producto" }}
+      />
 
       {error && products.length === 0 ? (
         <ErrorState error={error} onRetry={loadData} />

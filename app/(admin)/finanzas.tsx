@@ -26,7 +26,7 @@ import { type PaymentLine } from "@/lib/pos-payments";
 import { desglosePorMedio, lineasDePago, montoDe } from "@/lib/ingresos";
 import { agruparPorItem, nombreItem, totalesCaja, type TotalesCaja } from "@/lib/dinero";
 import { PAY_METHODS, methodCfg } from "@/components/ChargeSheet";
-import { SegmentedControl } from "@/components/ui";
+import { SegmentedControl, ScreenHeader } from "@/components/ui";
 import ErrorState from "@/components/ErrorState";
 import { cargarListaSedes, nombreCorto, nombreSede, TODAS_LAS_SEDES, type SedeLite } from "@/components/SedeChip";
 
@@ -774,33 +774,16 @@ export default function FinanzasScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={["top"]}>
-      {/* Header de subpantalla: superficie oscura + acento de marca de 3px */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerBlob1} />
-        <View style={s.headerBlob2} />
-        <View style={s.headerTopRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}
-            accessibilityRole="button" accessibilityLabel="Volver" hitSlop={8}>
-            <Ionicons name="chevron-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={s.headerIconBox}>
-            <Ionicons name="bar-chart-outline" size={15} color="white" />
-          </View>
-          <Text style={s.headerLabel}>HUB FINANCIERO</Text>
-          {cargando && vista ? <ActivityIndicator color="rgba(255,255,255,.7)" size="small" style={{ marginLeft: "auto" }} /> : null}
-        </View>
-        <Text style={s.headerTitle}>Finanzas</Text>
-        {/* Qué se está sumando (DIN-12): solo si el negocio tiene varias sedes. */}
-        {vista?.alcanceLabel ? (
-          <View style={s.headerSede}>
-            <Ionicons name="location-outline" size={12} color="rgba(255,255,255,.7)" />
-            <Text style={s.headerSedeText} numberOfLines={1}>
-              {tab === "caja" && vista.sede ? `Caja de ${vista.sede}` : vista.alcanceLabel}
-            </Text>
-          </View>
-        ) : null}
-      </LinearGradient>
+      {/* Encabezado como el resto de sub-pantallas. El subtítulo dice qué se
+          está sumando (DIN-12): solo si el negocio tiene varias sedes. */}
+      <ScreenHeader
+        crumb="Dinero"
+        title="Finanzas"
+        subtitle={cargando && vista ? "Actualizando…" : vista?.alcanceLabel
+          ? (tab === "caja" && vista.sede ? `Caja de ${vista.sede}` : vista.alcanceLabel)
+          : "Ingresos, egresos y balance"}
+        onBack={() => router.back()}
+      />
 
       <ScrollView
         horizontal showsHorizontalScrollIndicator={false}

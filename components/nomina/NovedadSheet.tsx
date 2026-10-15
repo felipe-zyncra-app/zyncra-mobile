@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { ErrorDB, exigirFilas, mensajeError, nuevoId, revisar } from "@/lib/db";
 import { fmtMoneyFull } from "@/lib/format";
 import { leerMonto, montoATexto } from "@/lib/dinero";
-import { fmtDia } from "@/lib/tz";
+import { fmtDia, conMayuscula } from "@/lib/tz";
 import { ETIQUETA_NOVEDAD, type TipoNovedad } from "@/lib/nomina";
 import {
   LARGO_CONCEPTO, TIPOS_NOVEDAD, validarNovedad, type FormNovedad, type OrigenNovedad,
@@ -53,7 +53,6 @@ const OPCIONES_TIPO: Opcion<TipoNovedad>[] = TIPOS_NOVEDAD.map(k => ({
   valor: k.valor, etiqueta: ETIQUETA_NOVEDAD[k.valor], ayuda: k.ayuda, icono: ICONO_NOVEDAD[k.valor], color: COLOR_NOVEDAD[k.valor],
 }));
 
-const conMayuscula = (x: string) => (x ? x[0].toUpperCase() + x.slice(1) : x);
 
 export default function NovedadSheet({ fila, tenantId, hoy, pros, profesionalInicial, onCerrar, onListo, onDesactualizada }: {
   /** null = novedad nueva. */

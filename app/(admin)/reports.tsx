@@ -14,6 +14,7 @@ import {
   diaLocalDe, hoyNegocio, listaDeDias, mesDe, rangoDePeriodo, rangoAnterior,
   rangoIncluyeHoy, moverReferencia, etiquetaRango,
   type Periodo, type RangoNegocio,
+  conMayuscula,
 } from "@/lib/tz";
 import { mensajeError, revisar, traerTodo } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
@@ -345,7 +346,7 @@ export default function ReportsScreen() {
             accessibilityRole="button"
             accessibilityLabel={actual ? etiquetaRango(r) : `${etiquetaRango(r)}. Volver al periodo actual`}
           >
-            <Text style={[s.navLabel, { color: t.ink }]}>{etiquetaRango(r)}</Text>
+            <Text style={[s.navLabel, { color: t.ink }]}>{conMayuscula(etiquetaRango(r))}</Text>
             {!actual ? <Text style={[s.navHint, { color: Colors.red }]}>Volver a hoy</Text> : null}
           </TouchableOpacity>
           <IconButton icon="chevron-forward" label="Periodo siguiente" onPress={() => mover(1)} disabled={actual} />
@@ -482,7 +483,7 @@ export default function ReportsScreen() {
 const s = StyleSheet.create({
   kpiRow:   { flexDirection: "row", gap: 10 },
   navRow:   { flexDirection: "row", alignItems: "center", gap: 10 },
-  navLabel: { fontSize: 14, fontFamily: Fonts.semibold, textTransform: "capitalize" },
+  navLabel: { fontSize: 14, fontFamily: Fonts.semibold },
   navHint:  { fontSize: 11, fontFamily: Fonts.semibold, marginTop: 1 },
   staleBanner: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
   staleText:   { flex: 1, fontSize: 12, fontFamily: Fonts.regular },

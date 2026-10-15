@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ScreenHeader } from "@/components/ui";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   Modal, TextInput, KeyboardAvoidingView, Platform, Switch,
@@ -371,21 +372,13 @@ export default function LoyaltyScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Volver">
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle}>Fidelización</Text>
-            <Text style={s.headerSub}>{rewards.length} recompensa{rewards.length !== 1 ? "s" : ""} · {pending.length} por entregar</Text>
-          </View>
-          <TouchableOpacity style={s.addBtn} onPress={() => setModal({ visible: true, reward: null })} activeOpacity={0.8} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Nueva recompensa">
-            <Ionicons name="add" size={22} color="white" />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
+      <ScreenHeader
+        crumb="Clientes"
+        title="Fidelización"
+        subtitle={`${rewards.length} recompensa${rewards.length !== 1 ? "s" : ""} · ${pending.length} por entregar`}
+        onBack={() => router.back()}
+        rightAction={{ icon: "add", onPress: () => setModal({ visible: true, reward: null }), label: "Nueva recompensa" }}
+      />
 
       {error && rewards.length === 0 && !loading ? (
         <ErrorState error={error} onRetry={recargar} />

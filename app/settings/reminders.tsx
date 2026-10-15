@@ -305,7 +305,7 @@ export default function RemindersScreen() {
               <View style={[s.card, Shadow.sm]}>
                 <View style={s.cardTitleRow}>
                   <View style={[s.cardIcon, { backgroundColor: Colors.purple + "15" }]}>
-                    <Ionicons name="chatbubble-outline" size={16} color={Colors.purple} />
+                    <Ionicons name="chatbubble-outline" size={16} color={t.accent} />
                   </View>
                   <Text style={s.cardTitle}>Plantilla del recordatorio por WhatsApp</Text>
                 </View>
@@ -325,7 +325,7 @@ export default function RemindersScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Insertar ${v.label}`}
                     >
-                      <Ionicons name={v.icon} size={11} color={Colors.purple} />
+                      <Ionicons name={v.icon} size={11} color={t.accent} />
                       <Text style={s.varChipText}>{v.label}</Text>
                     </TouchableOpacity>
                   ))}

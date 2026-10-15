@@ -38,7 +38,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
       { icon: "time-outline",       label: "Horario de atención", sub: "Días y horas en que atiendes",     route: "/settings/schedule" },
       { icon: "people-outline",     label: "Equipo",              sub: "Profesionales y permisos",         route: "/settings/team" },
       { icon: "location-outline",   label: "Sedes",               sub: "Ubicaciones de tu negocio",        route: "/settings/locations" },
-      { icon: "storefront-outline", label: "Mi Tienda",           sub: "Tu página y link de reservas",     route: "/settings/store" },
+      { icon: "storefront-outline", label: "Mi tienda",           sub: "Tu página y link de reservas",     route: "/settings/store" },
     ],
   },
   {
@@ -46,7 +46,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
     tint: Colors.success,
     items: [
       { icon: "bar-chart-outline",     label: "Reportes",            sub: "Ingresos, servicios y rendimiento", route: "/(admin)/reports" },
-      { icon: "stats-chart-outline",   label: "Módulo financiero",   sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
+      { icon: "stats-chart-outline",   label: "Finanzas",            sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
       { icon: "wallet-outline",        label: "Sistema de caja",     sub: "Apertura, cierre y movimientos",    route: "/(admin)/caja" },
       { icon: "ribbon-outline",        label: "Nómina",              sub: "Básico, comisiones y pagos del equipo", route: "/(admin)/commissions" },
       { icon: "document-text-outline", label: "Factura electrónica", sub: "Facturas DIAN vía Factus",          route: "/(admin)/invoices" },
@@ -66,7 +66,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
     title: "Marketing",
     tint: "#8b5cf6",
     items: [
-      { icon: "chatbox-ellipses-outline", label: "Bandeja de WhatsApp", sub: "Conversaciones con tus clientes",  route: "/(admin)/inbox", color: "#25D366" },
+      { icon: "chatbox-ellipses-outline", label: "Chats de WhatsApp",   sub: "Conversaciones con tus clientes",  route: "/(admin)/inbox", color: "#25D366" },
       { icon: "sparkles-outline",         label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp", route: "/(admin)/hanna" },
       { icon: "megaphone-outline",        label: "Campañas WhatsApp",   sub: "Mensajes masivos a tus clientes",  route: "/(admin)/whatsapp" },
       { icon: "star-outline",             label: "Reseñas Google",      sub: "Pide reseñas a tus clientes",       route: "/(admin)/reviews-google" },
@@ -225,7 +225,7 @@ function AjustesDelDueno() {
             <Pressable
               onPress={() => router.push("/settings/store" as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi Tienda`}
+              accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi tienda`}
               style={({ pressed }) => [s.bizRow, pressed && { opacity: 0.7 }]}
             >
               <LogoNegocio name={tenant?.name ?? ""} logoUrl={tenant?.logoUrl} size={46} radius={14} />

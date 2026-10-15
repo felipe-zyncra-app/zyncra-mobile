@@ -552,12 +552,12 @@ export default function InvoicesScreen() {
         ))}
       </View>
 
-      <Text style={[s.sectionTitle, { marginTop: 20 }]}>Datos del Emisor</Text>
+      <Text style={[s.sectionTitle, { marginTop: 20 }]}>Datos del emisor</Text>
       <View style={[s.card, Shadow.sm]}>
         {([
           { key: "nit",          label: "NIT" },
           { key: "dv",           label: "Dígito de verificación (DV)" },
-          { key: "company_name", label: "Razón Social" },
+          { key: "company_name", label: "Razón social" },
           { key: "phone",        label: "Teléfono" },
           { key: "address",      label: "Dirección" },
         ] as { key: keyof InvoiceSettings; label: string }[]).map(({ key, label }) => (
@@ -599,7 +599,7 @@ export default function InvoicesScreen() {
           {savingSettings ? <ActivityIndicator color="white" size="small" /> : <Text style={s.btnTxt}>Guardar</Text>}
         </TouchableOpacity>
         <TouchableOpacity style={[s.btnSecondary, { flex: 1 }]} onPress={testConnection} disabled={testingConn} accessibilityRole="button">
-          {testingConn ? <ActivityIndicator color={Colors.blue} size="small" /> : <Text style={s.btnSecondaryTxt}>Probar conexión</Text>}
+          {testingConn ? <ActivityIndicator color={t.accent} size="small" /> : <Text style={s.btnSecondaryTxt}>Probar conexión</Text>}
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -651,7 +651,7 @@ export default function InvoicesScreen() {
         </View>
       )}
 
-      <Text style={s.sectionTitle}>Datos del Cliente</Text>
+      <Text style={s.sectionTitle}>Datos del cliente</Text>
       <View style={[s.card, Shadow.sm]}>
         <Text style={s.fieldLabel}>Tipo de documento</Text>
         <TouchableOpacity style={s.pickerBtn} onPress={() => setIdTypeModal(true)} accessibilityRole="button">
@@ -664,7 +664,7 @@ export default function InvoicesScreen() {
           { key: "name",      label: "Nombres",             keyboard: "default" },
           { key: "surname",   label: "Apellidos",            keyboard: "default" },
           { key: "company",   label: "Empresa / Razón social", keyboard: "default" },
-          { key: "email",     label: "Email",               keyboard: "email-address" },
+          { key: "email",     label: "Correo electrónico",  keyboard: "email-address" },
           { key: "phone",     label: "Teléfono",            keyboard: "phone-pad" },
           { key: "address",   label: "Dirección",           keyboard: "default" },
         ] as { key: Exclude<keyof CustomerForm, "id_type" | "municipality_id">; label: string; keyboard: "default" | "email-address" | "phone-pad" }[]).map(({ key, label, keyboard }) => (
@@ -725,7 +725,7 @@ export default function InvoicesScreen() {
           </View>
         ))}
         <TouchableOpacity style={s.addItemBtn} onPress={addItem} accessibilityRole="button">
-          <Ionicons name="add-circle-outline" size={16} color={Colors.blue} />
+          <Ionicons name="add-circle-outline" size={16} color={t.accent} />
           <Text style={s.addItemBtnTxt}>Agregar ítem</Text>
         </TouchableOpacity>
       </View>
@@ -851,7 +851,7 @@ export default function InvoicesScreen() {
                     ))}
                     {inv.pdf_url && (
                       <TouchableOpacity style={[s.btnSecondary, { marginTop: 12, alignSelf: "flex-start" }]} onPress={() => Linking.openURL(inv.pdf_url!)} accessibilityRole="button">
-                        <Ionicons name="download-outline" size={14} color={Colors.blue} />
+                        <Ionicons name="download-outline" size={14} color={t.accent} />
                         <Text style={s.btnSecondaryTxt}>Descargar PDF</Text>
                       </TouchableOpacity>
                     )}
@@ -867,10 +867,10 @@ export default function InvoicesScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Dinero" title="Factura Electrónica" subtitle="Emite facturas DIAN vía Factus" onBack={() => router.back()} />
+      <ScreenHeader crumb="Dinero" title="Factura electrónica" subtitle="Emite facturas DIAN vía Factus" onBack={() => router.back()} />
 
       <View style={s.tabBar}>
-        {["Configuración", "Nueva Factura", "Historial"].map((label, i) => (
+        {["Configuración", "Nueva factura", "Historial"].map((label, i) => (
           <TouchableOpacity key={i} style={s.tabItem} onPress={() => setTab(i)} accessibilityRole="tab" accessibilityState={{ selected: tab === i }}>
             <Text style={[s.tabTxt, tab === i && s.tabTxtActive]}>{label}</Text>
             {tab === i && <View style={s.tabUnderline} />}

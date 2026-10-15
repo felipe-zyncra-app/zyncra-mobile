@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { getActiveLocationId } from "@/lib/active-location";
 import { exigirFilas, leerAjustesDelNegocio, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
-import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
+import { fmtDia, hoyNegocio, inicioDeSemana, conMayuscula } from "@/lib/tz";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import {
@@ -25,6 +25,7 @@ import {
 import { MonoTag } from "@/components/ui";
 import { STATUS_META, colorDeEstadoLegible } from "@/constants/status";
 import ErrorState from "@/components/ErrorState";
+import SedeChip from "@/components/SedeChip";
 import NewApptModal from "@/components/NewApptModal";
 import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
 import SemanaStrip from "@/components/agenda/SemanaStrip";
@@ -36,8 +37,6 @@ import { proColor, proInitials, type ApptAgenda, type BloqueoAgenda, type VentaC
 /** Área táctil extra de los botones pequeños del encabezado (CAL-24). */
 const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
-/** Solo la primera letra: textTransform "capitalize" dejaba "Miércoles 14 De Octubre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 // ─── Professional filter chip ─────────────────────────────────────────────────
 
@@ -396,20 +395,7 @@ export default function AgendaScreen() {
               </View>
             ))}
           </View>
-          {sede && (
-            <TouchableOpacity
-              onPress={() => router.push("/settings/locations")}
-              style={[s.sedeChip, { borderColor: t.line, backgroundColor: t.cardSolid }]}
-              activeOpacity={0.75}
-              hitSlop={HIT_SLOP}
-              accessibilityRole="button"
-              accessibilityLabel={`Sede ${sede.nombre}. Cambiar de sede`}
-            >
-              <Ionicons name="location-outline" size={12} color={t.muted} />
-              <Text style={[s.sedeText, { color: t.text }]} numberOfLines={1}>{sede.nombre}</Text>
-              <Ionicons name="chevron-forward" size={12} color={t.subtle} />
-            </TouchableOpacity>
-          )}
+          <SedeChip nombre={sede?.nombre ?? null} style={{ marginTop: 7 }} />
         </View>
         {selected !== hoy && (
           <TouchableOpacity onPress={() => irADia(hoy)} style={[s.todayBtn, { borderColor: t.line, backgroundColor: t.cardSolid }]} accessibilityRole="button">
@@ -575,7 +561,5 @@ function crearEstilos(t: ThemeColors) {
     filterRow:   { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
     banner:      { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 10, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 9 },
     bannerText:  { flex: 1, fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17 },
-    sedeChip:    { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: Radius.full, paddingHorizontal: 9, paddingVertical: 4, marginTop: 7 },
-    sedeText:    { flexShrink: 1, fontSize: 11.5, fontFamily: Fonts.semibold },
   });
 }

@@ -12,6 +12,8 @@ type Props = {
   /** Título; por defecto "Error de conexión" o "No se pudo cargar". */
   title?: string;
   onRetry?: () => void;
+  /** Otra salida en lugar de reintentar (p. ej. "Volver"), con su ícono. */
+  accion?: { label: string; icon: React.ComponentProps<typeof Ionicons>["name"]; onPress: () => void };
 };
 
 /**
@@ -19,7 +21,7 @@ type Props = {
  * de claro el título quedaba #14111C sobre #0D0D14 en modo oscuro (1,04:1),
  * invisible (CAL-22).
  */
-export default function ErrorState({ message, error, title, onRetry }: Props) {
+export default function ErrorState({ message, error, title, onRetry, accion }: Props) {
   const { t } = useTheme();
   const deRed = error === undefined ? true : esErrorDeRed(error);
   const texto = message ?? (error !== undefined ? mensajeError(error) : "No se pudo cargar la información");
@@ -35,10 +37,16 @@ export default function ErrorState({ message, error, title, onRetry }: Props) {
       />
       <Text style={[s.title, { color: t.text }]}>{titulo}</Text>
       <Text style={[s.message, { color: t.muted }]}>{texto}</Text>
-      {onRetry && (
+      {onRetry && !accion && (
         <TouchableOpacity style={s.btn} onPress={onRetry} activeOpacity={0.8} accessibilityRole="button">
           <Ionicons name="refresh" size={16} color="white" style={{ marginRight: 6 }} />
           <Text style={s.btnText}>Reintentar</Text>
+        </TouchableOpacity>
+      )}
+      {accion && (
+        <TouchableOpacity style={s.btn} onPress={accion.onPress} activeOpacity={0.8} accessibilityRole="button">
+          <Ionicons name={accion.icon} size={16} color="white" style={{ marginRight: 6 }} />
+          <Text style={s.btnText}>{accion.label}</Text>
         </TouchableOpacity>
       )}
     </View>

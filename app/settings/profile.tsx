@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ScreenHeader } from "@/components/ui";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, KeyboardAvoidingView, ActivityIndicator, Alert,
@@ -10,7 +11,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
-import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
+import { Colors, Gradients, Radius, Shadow, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { validarContrasena, traducirErrorAuth, AYUDA_CONTRASENA } from "@/lib/cuenta";
 
@@ -171,27 +172,15 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header (tinta oscura en ambos temas: firma de marca) */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={8} accessibilityRole="button" accessibilityLabel="Volver">
-            <Ionicons name="arrow-back" size={20} color="white" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.headerTitle} accessibilityRole="header">Mi perfil</Text>
-            <Text style={s.headerSub}>Datos personales y seguridad</Text>
-          </View>
-        </View>
+      <ScreenHeader crumb="Cuenta" title="Mi perfil" subtitle="Datos personales y seguridad" onBack={() => router.back()} />
 
-        {/* Avatar */}
-        <View style={s.avatarWrap}>
-          <View style={s.avatar}>
-            <Text style={s.avatarText}>{initials}</Text>
-          </View>
-          <Text style={s.avatarEmail}>{email}</Text>
-        </View>
-      </LinearGradient>
+      {/* Quién es: avatar con la marca y el correo de la cuenta */}
+      <View style={[s.avatarWrap, { borderBottomColor: t.line }]}>
+        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.avatar}>
+          <Text style={s.avatarText}>{initials}</Text>
+        </LinearGradient>
+        <Text style={[s.avatarEmail, { color: t.muted }]} numberOfLines={1}>{email}</Text>
+      </View>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -209,7 +198,7 @@ export default function ProfileScreen() {
               <View style={[s.card, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }]}>
                 <View style={s.cardTitleRow}>
                   <View style={[s.cardIcon, { backgroundColor: Colors.purple + "15" }]}>
-                    <Ionicons name="person-outline" size={16} color={Colors.purple} />
+                    <Ionicons name="person-outline" size={16} color={t.accent} />
                   </View>
                   <Text style={[s.cardTitle, { color: t.text }]}>Datos de la cuenta</Text>
                 </View>
@@ -316,10 +305,10 @@ const s = StyleSheet.create({
   headerTitle:    { fontSize: 22, fontFamily: "SpaceGrotesk_700Bold", color: "white", letterSpacing: -0.4 },
   headerSub:      { fontSize: 12, color: "rgba(255,255,255,.75)", fontFamily: "SpaceGrotesk_400Regular", marginTop: 2 },
 
-  avatarWrap:     { alignItems: "center" },
-  avatar:         { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,.25)", alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "rgba(255,255,255,.5)", marginBottom: 10 },
-  avatarText:     { fontSize: 26, fontFamily: "SpaceGrotesk_700Bold", color: "white" },
-  avatarEmail:    { fontSize: 13, fontFamily: "SpaceGrotesk_600SemiBold", color: "rgba(255,255,255,.85)" },
+  avatarWrap:     { alignItems: "center", paddingVertical: 18, borderBottomWidth: 1 },
+  avatar:         { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  avatarText:     { fontSize: 23, fontFamily: Fonts.bold, color: "white" },
+  avatarEmail:    { fontSize: 13, fontFamily: Fonts.semibold, maxWidth: "80%" },
 
   sectionLabel:   { fontSize: 11, fontFamily: "JetBrainsMono_500Medium", textTransform: "uppercase", letterSpacing: 0.9, marginBottom: 10 },
 

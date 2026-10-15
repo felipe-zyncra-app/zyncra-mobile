@@ -176,7 +176,7 @@ export default function ColillaModal({ tenantId, timeZone, item, puedeAnular, on
                               <Text style={[s.lineaSub, { color: t.muted, flexShrink: 1 }]} numberOfLines={2}>
                                 {x.nombre}{x.cantidad > 1 ? ` ×${x.cantidad}` : ""}
                               </Text>
-                              {x.tipo === "producto" ? <Etiqueta texto="Producto" color={Colors.blue} /> : null}
+                              {x.tipo === "producto" ? <Etiqueta texto="Producto" color={t.accent} /> : null}
                             </View>
                           </View>
                           <View style={{ alignItems: "flex-end" }}>

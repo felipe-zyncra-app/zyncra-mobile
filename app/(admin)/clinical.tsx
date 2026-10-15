@@ -448,7 +448,7 @@ function PatientModal({ client, tenantId, onClose, onSaved }: {
                           <View style={{ padding: 14 }}>
                             <View style={dm.entryTop}>
                               <View style={[dm.entryTypeBadge, { backgroundColor: Colors.blue + "14" }]}>
-                                <Text style={[dm.entryTypeText, { color: Colors.blue }]}>
+                                <Text style={[dm.entryTypeText, { color: t.accent }]}>
                                   {ENTRY_TYPES.find(x => x.key === en.entry_type)?.label ?? en.entry_type}
                                 </Text>
                               </View>

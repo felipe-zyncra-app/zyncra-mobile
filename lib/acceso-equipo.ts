@@ -57,6 +57,7 @@ const MODULO_DE_PANTALLA: Record<string, string | null> = {
   "pos-history": "/admin/pos",
   caja: "/admin/caja",
   settings: null,
+  "mi-ficha": null,
 };
 
 /**

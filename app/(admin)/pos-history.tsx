@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useTenant } from "@/lib/tenant";
 import {
   diaLocalDe, fmtDia, rangoDePeriodo, moverReferencia,
-  rangoIncluyeHoy, etiquetaRango, hoyNegocio,
+  rangoIncluyeHoy, etiquetaRango, hoyNegocio, conMayuscula,
 } from "@/lib/tz";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
@@ -53,8 +53,6 @@ type HistorySale = {
   invoices: FacturaVenta[] | null;
 };
 
-/** Solo la primera letra: textTransform "capitalize" dejaba "Martes 29 De Septiembre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 /** Sin tildes ni mayúsculas, para buscar "maria" y encontrar "María". */
 const normalizar = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -198,13 +196,13 @@ export default function PosHistoryScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Ventas" title="Historial de Cobros" onBack={() => router.back()}
+      <ScreenHeader crumb="Cobros" title="Historial de cobros" onBack={() => router.back()}
         subtitle={sede ? (filtrar ? sede : TODAS_LAS_SEDES) : undefined} />
       <View style={[s.monthNav, { backgroundColor: t.chipBg, borderColor: t.line }]}>
         <TouchableOpacity onPress={() => irAMes(-1)} style={s.navBtn} accessibilityRole="button" accessibilityLabel="Mes anterior" hitSlop={8}>
           <Ionicons name="chevron-back" size={18} color={t.muted} />
         </TouchableOpacity>
-        <Text style={[s.monthLabel, { color: t.ink }]}>{etiquetaRango(rango)}</Text>
+        <Text style={[s.monthLabel, { color: t.ink }]}>{conMayuscula(etiquetaRango(rango))}</Text>
         <TouchableOpacity onPress={() => irAMes(1)} style={s.navBtn} disabled={isCurrentMonth}
           accessibilityRole="button" accessibilityLabel="Mes siguiente" accessibilityState={{ disabled: isCurrentMonth }} hitSlop={8}>
           <Ionicons name="chevron-forward" size={18} color={isCurrentMonth ? t.subtle : t.muted} />
@@ -379,7 +377,7 @@ function crearEstilos(t: ThemeColors) {
   return StyleSheet.create({
     monthNav:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, alignSelf: "center", borderRadius: 999, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 14, marginTop: 4, marginBottom: 4 },
     navBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-    monthLabel:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", minWidth: 160, textAlign: "center", textTransform: "capitalize" },
+    monthLabel:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", minWidth: 160, textAlign: "center" },
 
     errorBanner:    { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(251,15,5,0.08)" },
     errorBannerText:{ flex: 1, fontSize: 12.5, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red },

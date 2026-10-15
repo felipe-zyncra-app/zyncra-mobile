@@ -409,7 +409,7 @@ export default function CustomFieldsScreen() {
                   <View style={s.fieldActions}>
                     <IconButton icon="chevron-up" label={`Subir ${f.name}`} onPress={() => moveField(f, -1)} disabled={i === 0} size={14} color={t.muted} style={s.iconBtn} />
                     <IconButton icon="chevron-down" label={`Bajar ${f.name}`} onPress={() => moveField(f, 1)} disabled={i === fields.length - 1} size={14} color={t.muted} style={s.iconBtn} />
-                    <IconButton icon="pencil-outline" label={`Editar ${f.name}`} onPress={() => openEdit(f)} size={14} color={Colors.blue} style={s.iconBtn} />
+                    <IconButton icon="pencil-outline" label={`Editar ${f.name}`} onPress={() => openEdit(f)} size={14} color={t.accent} style={s.iconBtn} />
                     <IconButton icon={f.active ? "eye-outline" : "eye-off-outline"} label={f.active ? `Desactivar ${f.name}` : `Activar ${f.name}`} onPress={() => toggleActive(f)} size={14} color={f.active ? Colors.success : t.subtle} style={s.iconBtn} />
                     <IconButton icon="trash-outline" label={`Eliminar ${f.name}`} onPress={() => deleteField(f)} size={14} color={Colors.red} style={s.iconBtn} />
                   </View>
@@ -517,7 +517,7 @@ export default function CustomFieldsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Clientes" title="Campos Personalizados" subtitle="Datos adicionales para clientes y citas" onBack={() => router.back()} />
+      <ScreenHeader crumb="Clientes" title="Campos personalizados" subtitle="Datos adicionales para clientes y citas" onBack={() => router.back()} />
 
       {/* Tab bar */}
       <View style={[s.tabBar, { backgroundColor: t.bgAlt, borderBottomColor: t.border }]}>

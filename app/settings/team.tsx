@@ -506,7 +506,7 @@ function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved 
               {([
                 { k: "contact" as const, titulo: "Contacto de clientes", sub: "Teléfono, correo y botones de llamar/WhatsApp" },
                 { k: "amounts" as const, titulo: "Montos y precios", sub: "Valores de servicios y total gastado por cliente" },
-                { k: "clients_tab" as const, titulo: "Pestaña de Clientes", sub: "La lista completa de sus clientes con historial" },
+                { k: "clients_tab" as const, titulo: "Pestaña de clientes", sub: "La lista completa de sus clientes con historial" },
               ]).map((p, i) => (
                 <View key={p.k} style={[s.switchRow, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }, i > 0 && { marginTop: 10 }]}>
                   <View style={{ flex: 1 }}>
@@ -680,8 +680,8 @@ export default function TeamScreen() {
               )}
               {!!p.schedule && (
                 <View style={[s.activeBadge, { backgroundColor: Colors.blue + "14" }]}>
-                  <Ionicons name="time-outline" size={10} color={Colors.blue} />
-                  <Text style={[s.badgeText, { color: Colors.blue }]}>Horario propio</Text>
+                  <Ionicons name="time-outline" size={10} color={t.accent} />
+                  <Text style={[s.badgeText, { color: t.accent }]}>Horario propio</Text>
                 </View>
               )}
               {!activo && (
