@@ -25,7 +25,7 @@ import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { getActiveLocationId } from "@/lib/active-location";
 import { desglosePorMedio, lineasDePago, montoDe } from "@/lib/ingresos";
 import { medioOGenerico } from "@/lib/medios-pago";
-import FilaCobro from "@/components/cobros/FilaCobro";
+import FilaCobro, { SELECT_COBRO, especialistasDe, type CobroFila } from "@/components/cobros/FilaCobro";
 import DetalleCobro from "@/components/cobros/DetalleCobro";
 import {
   cargarListaSedes, nombreCorto, nombreSede, sedeDeFila, TODAS_LAS_SEDES, type SedeLite,
@@ -47,7 +47,9 @@ type HistorySale = {
   appointment_id: string | null;
   location_id: string | null;
   clients: { name: string; phone?: string | null } | null;
-  pos_sale_items: { name: string; price: number; quantity: number }[];
+  pos_sale_items: NonNullable<CobroFila["pos_sale_items"]>;
+  cobrado_por_nombre?: string | null;
+  appointments?: CobroFila["appointments"];
   invoices: FacturaVenta[] | null;
 };
 
@@ -103,7 +105,7 @@ export default function PosHistoryScreen() {
         traerTodoDetalle((d, h) =>
           supabase
             .from("pos_sales")
-            .select("id,created_at,total,subtotal,payment_method,payments,note,appointment_id,location_id,clients(name,phone),pos_sale_items(name,price,quantity),invoices(id,number,status,credit_note_cufe)")
+            .select(SELECT_COBRO)
             .eq("tenant_id", tenantId)
             .gte("created_at", r.desdeUTC)
             .lte("created_at", r.hastaUTC)
@@ -170,7 +172,8 @@ export default function PosHistoryScreen() {
     return visibles.filter(v => {
       if (medio && !lineasDePago(v).some(l => l.method === medio)) return false;
       if (!q) return true;
-      const texto = [v.clients?.name, v.note, ...(v.pos_sale_items ?? []).map(i => i.name)].filter(Boolean).join(" ");
+      // También por especialista y por quién cobró.
+      const texto = [v.clients?.name, v.note, v.cobrado_por_nombre, ...especialistasDe(v), ...(v.pos_sale_items ?? []).map(i => i.name)].filter(Boolean).join(" ");
       return normalizar(texto).includes(q);
     });
   }, [visibles, busqueda, medio]);
@@ -286,7 +289,7 @@ export default function PosHistoryScreen() {
                 style={[s.buscadorInput, { color: t.ink }]}
                 value={busqueda}
                 onChangeText={setBusqueda}
-                placeholder="Buscar por cliente, servicio o nota"
+                placeholder="Buscar por cliente, servicio, especialista o nota"
                 placeholderTextColor={t.subtle}
                 returnKeyType="search"
                 autoCorrect={false}

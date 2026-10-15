@@ -20,8 +20,51 @@ export type CobroFila = {
   payments?: unknown;
   note: string | null;
   clients: { name: string; phone?: string | null } | null;
-  pos_sale_items: { name: string; price: number; quantity: number }[] | null;
+  pos_sale_items: { name: string; price: number; quantity: number; item_type?: string | null; professionals?: { name: string } | null }[] | null;
+  /** Quién registró el cobro; lo llena la base al cobrar (null en cobros viejos). */
+  cobrado_por_nombre?: string | null;
+  /** La cita que se cobró (null en ventas directas). */
+  appointments?: {
+    appointment_date: string;
+    appointment_time: string | null;
+    professionals: { name: string } | null;
+    services: { name: string } | null;
+    appointment_services?: { name: string }[] | null;
+  } | null;
 };
+
+/**
+ * Todo lo que se muestra de un cobro: cliente, cita (fecha, hora, especialista
+ * y servicios), cada línea con quién atendió o vendió, factura y quién cobró.
+ * Va con «*» para que quién cobró aparezca apenas exista la columna.
+ */
+export const SELECT_COBRO =
+  "*, clients(name,phone), " +
+  "appointments(appointment_date,appointment_time,professionals(name),services(name),appointment_services(name)), " +
+  "pos_sale_items(name,price,quantity,item_type,professionals(name)), invoices(id,number,status,credit_note_cufe)";
+
+/** Quién atendió: los del equipo en las líneas o, si ninguna lo tiene, el de la cita. */
+export function especialistasDe(c: Pick<CobroFila, "pos_sale_items" | "appointments">): string[] {
+  const n = new Set<string>();
+  for (const it of c.pos_sale_items ?? []) {
+    const x = it.professionals?.name?.trim();
+    if (x) n.add(x);
+  }
+  const deCita = c.appointments?.professionals?.name?.trim();
+  if (n.size === 0 && deCita) n.add(deCita);
+  return [...n];
+}
+
+/** «Atendió Sergio · Cobró Laura» (o «Vendió…» si solo hubo productos). */
+export function equipoDe(c: Pick<CobroFila, "pos_sale_items" | "appointments" | "cobrado_por_nombre">): string | null {
+  const esp = especialistasDe(c);
+  const soloProductos = (c.pos_sale_items ?? []).length > 0 && (c.pos_sale_items ?? []).every(i => i.item_type === "product");
+  const partes = [
+    esp.length ? `${soloProductos ? "Vendió" : "Atendió"} ${esp.join(", ")}` : null,
+    c.cobrado_por_nombre?.trim() ? `Cobró ${c.cobrado_por_nombre.trim()}` : null,
+  ].filter(Boolean);
+  return partes.length ? partes.join(" · ") : null;
+}
 
 /**
  * La nota que escribió alguien. Por defecto la nota de un cobro son los mismos
@@ -64,6 +107,7 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
   const quien = cliente ?? cobro.clients?.name ?? null;
   const detalle = detalleDe(cobro);
   const nota = notaPropiaDe(cobro);
+  const equipo = equipoDe(cobro);
   const hora = fmt12(horaLocalDe(cobro.created_at, timezone));
 
   return (
@@ -72,7 +116,7 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
       activeOpacity={0.8}
       style={[s.card, Shadow.sm, { backgroundColor: t.cardSolid, borderColor: t.line }]}
       accessibilityRole="button"
-      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))}${mixto ? `, pago dividido: ${medioTxt}` : ` en ${medio.label}`}, ${hora}.${nota ? ` Nota: ${nota}.` : ""} Ver detalle`}
+      accessibilityLabel={`${quien ?? "Venta directa"}, ${fmtMoneyFull(Number(cobro.total))}${mixto ? `, pago dividido: ${medioTxt}` : ` en ${medio.label}`}, ${hora}.${equipo ? ` ${equipo}.` : ""}${nota ? ` Nota: ${nota}.` : ""} Ver detalle`}
     >
       <View style={[s.icono, { backgroundColor: medio.color + "18" }]}>
         <Ionicons name={medio.icon} size={17} color={medio.color} />
@@ -99,6 +143,12 @@ export default function FilaCobro({ cobro, cliente, timezone, etiquetas, onPress
             {medioTxt}{detalle ? ` · ${detalle}` : ""}
           </Text>
         )}
+        {equipo ? (
+          <View style={s.equipoFila}>
+            <Ionicons name="person-outline" size={11} color={t.muted} />
+            <Text style={[s.equipoTxt, { color: t.muted }]} numberOfLines={1}>{equipo}</Text>
+          </View>
+        ) : null}
         {nota ? (
           // La nota del cobro a la vista, sin abrir el detalle.
           <View style={s.notaFila}>
@@ -134,6 +184,8 @@ const s = StyleSheet.create({
   mixtoFila:   { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
   mixtoChip:   { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: Radius.full, paddingHorizontal: 7, paddingVertical: 2 },
   mixtoTxt:    { fontSize: 11, fontFamily: Fonts.semibold },
+  equipoFila:  { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  equipoTxt:   { flex: 1, fontSize: 11.5, fontFamily: Fonts.semibold },
   notaFila:    { flexDirection: "row", alignItems: "flex-start", gap: 5, marginTop: 4 },
   notaTxt:     { flex: 1, fontSize: 12, fontFamily: Fonts.regular, color: "#b45309", lineHeight: 16 },
   etiquetas:   { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },

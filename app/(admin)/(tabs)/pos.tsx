@@ -29,7 +29,7 @@ import { IconButton, MonoTag } from "@/components/ui";
 import SedeChip, { cargarListaSedes, nombreSede } from "@/components/SedeChip";
 import ChargeSheet, { type ChargeTarget, type LinkedAppt } from "@/components/ChargeSheet";
 import TarjetaCita, { esCobrable, porCobrar, type CitaCobro } from "@/components/cobros/TarjetaCita";
-import FilaCobro from "@/components/cobros/FilaCobro";
+import FilaCobro, { SELECT_COBRO } from "@/components/cobros/FilaCobro";
 import DetalleCobro, { type CobroDetalle } from "@/components/cobros/DetalleCobro";
 import EstadoCaja, { CajaAbierta, type EstadoDeCaja } from "@/components/cobros/EstadoCaja";
 import ResumenCobros from "@/components/cobros/ResumenCobros";
@@ -123,7 +123,7 @@ export default function PosScreen() {
         // created_at es UTC: el día del negocio se acota con sus instantes reales.
         traerTodo((d, h) => {
           let q = supabase.from("pos_sales")
-            .select("id, created_at, total, subtotal, payment_method, payments, note, appointment_id, clients(name, phone), pos_sale_items(name, price, quantity), invoices(id, number, status, credit_note_cufe)")
+            .select(SELECT_COBRO)
             .eq("tenant_id", tenantId)
             .gte("created_at", inicioDelDiaUTC(dia, timezone))
             .lte("created_at", finDelDiaUTC(dia, timezone));
