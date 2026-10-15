@@ -81,14 +81,17 @@ export default function Apertura({ onDone, onReady }: {
     terminado.current = true;
     onDoneRef.current();
   };
+  // Arranca cuando el logo ya está pintado y el splash se quita: así no se
+  // pierde el comienzo debajo del splash.
   const listoEnviado = useRef(false);
   const listo = () => {
     if (listoEnviado.current) return;
     listoEnviado.current = true;
     onReadyRef.current?.();
+    animar();
   };
 
-  useEffect(() => {
+  const animar = () => {
     const fin = (done?: boolean) => {
       "worklet";
       if (done) scheduleOnRN(terminar);
@@ -110,11 +113,12 @@ export default function Apertura({ onDone, onReady }: {
       onda2.set(withDelay(260, withTiming(1, { duration: 640, easing: EASE_OUT })));
       fondo.set(withDelay(300, withTiming(0, { duration: 460, easing: EASE_IN_OUT }, fin)));
     }
-    // Por si una animación no llega a su callback: nunca se queda encima.
-    const t = setTimeout(terminar, 2000);
+  };
+
+  // Por si una animación no llega a su callback: nunca se queda encima.
+  useEffect(() => {
+    const t = setTimeout(terminar, 2500);
     return () => clearTimeout(t);
-    // Una sola vez al montar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fondoSt = useAnimatedStyle(() => ({ opacity: fondo.get() }));
@@ -122,14 +126,16 @@ export default function Apertura({ onDone, onReady }: {
   const glowSt  = useAnimatedStyle(() => ({ opacity: glow.get() }));
 
   return (
-    <View pointerEvents="none" style={[StyleSheet.absoluteFill, { zIndex: 999 }]} onLayout={listo}>
+    // El splash se quita cuando el logo ya está pintado; si la imagen no avisa
+    // (caché, web), a los 250 ms del primer cuadro.
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, { zIndex: 999 }]} onLayout={() => setTimeout(listo, 250)}>
       <Animated.View style={[StyleSheet.absoluteFill, s.fondo, fondoSt]} />
       <View style={s.centro}>
         {!reduced && <Onda p={onda1} />}
         {!reduced && <Onda p={onda2} />}
         <Animated.View style={logoSt}>
           <Animated.View style={[s.glow, glowSt]} />
-          <LogoBrillo size={LOGO} radius={RADIUS} brilloEn={0} reduced />
+          <LogoBrillo size={LOGO} radius={RADIUS} brilloEn={0} reduced onLoad={listo} />
         </Animated.View>
       </View>
     </View>

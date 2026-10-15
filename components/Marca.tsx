@@ -76,8 +76,10 @@ export function Aurora({ reduced, intensidad = 1 }: { reduced: boolean; intensid
  * `brilloEn` ms. La banda vive dentro de la caja del logo (overflow hidden),
  * así que el brillo respeta las esquinas.
  */
-export function LogoBrillo({ size, radius, brilloEn, reduced }: {
+export function LogoBrillo({ size, radius, brilloEn, reduced, onLoad }: {
   size: number; radius: number; brilloEn: number; reduced: boolean;
+  /** La imagen ya se pintó: quien oculta el splash espera esto (sin logo sería un cuadro vacío). */
+  onLoad?: () => void;
 }) {
   const x = useSharedValue(-1);
   useEffect(() => {
@@ -89,7 +91,7 @@ export function LogoBrillo({ size, radius, brilloEn, reduced }: {
   }));
   return (
     <View style={{ width: size, height: size, borderRadius: radius, overflow: "hidden" }}>
-      <Image source={LOGO_SRC} style={{ width: size, height: size }} resizeMode="cover" />
+      <Image source={LOGO_SRC} style={{ width: size, height: size }} resizeMode="cover" onLoad={onLoad} />
       {!reduced && (
         <Animated.View pointerEvents="none" style={[s.bandaWrap, { width: size * 0.55, height: size * 2, top: -size / 2, left: size / 2 - (size * 0.55) / 2 }, banda]}>
           <LinearGradient
