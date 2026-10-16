@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import { useStaffPermissions } from "@/lib/permissions";
 import { useGuardArea } from "@/lib/guards";
+import { useAbrirAgendaAlTocar } from "@/lib/useAvisos";
 import BarraPestanas, { type Pestana } from "@/components/BarraPestanas";
 
 const TABS: Pestana[] = [
@@ -15,6 +16,8 @@ export default function StaffLayout() {
   // queda fuera pero sus colaboradores siguen agendando y cobrando. Un
   // colaborador desactivado va a /sin-acceso (ver lib/guards.tsx).
   const bloqueo = useGuardArea("staff");
+  // Tocar un aviso de cita abre la agenda en el día de esa cita.
+  useAbrirAgendaAlTocar(!bloqueo);
   const visibleTabs = perms.clients_tab ? TABS : TABS.filter(t => t.name !== "clients");
 
   if (bloqueo) return bloqueo;

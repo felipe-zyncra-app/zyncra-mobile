@@ -3446,6 +3446,54 @@ export type Database = {
           },
         ]
       }
+      push_devices: {
+        Row: {
+          created_at: string
+          platform: string | null
+          professional_id: string | null
+          role: string
+          tenant_id: string
+          token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          platform?: string | null
+          professional_id?: string | null
+          role: string
+          tenant_id: string
+          token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          platform?: string | null
+          professional_id?: string | null
+          role?: string
+          tenant_id?: string
+          token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_devices_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_devices_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reminder_logs: {
         Row: {
           appointment_id: string | null
@@ -5103,6 +5151,10 @@ export type Database = {
         Returns: undefined
       }
       is_platform_admin: { Args: { uid: string }; Returns: boolean }
+      liberar_push_dispositivo: {
+        Args: { p_token: string }
+        Returns: undefined
+      }
       liberar_push_token: { Args: { p_token: string }; Returns: number }
       liquidar_nomina: { Args: { p: Json }; Returns: Json }
       mi_negocio: {
@@ -5165,6 +5217,10 @@ export type Database = {
           p_sale_id?: string
         }
         Returns: number
+      }
+      registrar_push_dispositivo: {
+        Args: { p_platform?: string; p_tenant_id: string; p_token: string }
+        Returns: string
       }
       storage_puede_gestionar: {
         Args: { p_bucket: string; p_name: string }

@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { enviarCorreoCita } from "@/lib/correo-cita";
 import { useAuth } from "@/lib/auth";
@@ -218,6 +218,14 @@ export default function StaffAgendaScreen() {
 
   const [selected, setSelected]         = useState(() => hoyNegocio(timezone));
   const [semana, setSemana]             = useState(() => inicioDeSemana(hoyNegocio(timezone)));
+  // Al tocar un aviso de cita se llega con ?fecha=YYYY-MM-DD: se abre ese día.
+  const { fecha } = useLocalSearchParams<{ fecha?: string }>();
+  useEffect(() => {
+    if (typeof fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      setSelected(fecha);
+      setSemana(inicioDeSemana(fecha));
+    }
+  }, [fecha]);
   const [datos, setDatos]               = useState<DatosDia | null>(null);
   const [selectedAppt, setSelectedAppt] = useState<Appt | null>(null);
   const [chargeAppt, setChargeAppt]     = useState<LinkedAppt | null>(null);

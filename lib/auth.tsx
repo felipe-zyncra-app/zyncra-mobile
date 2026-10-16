@@ -346,10 +346,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const cerrarSesion = useCallback(async () => {
     const tid = tenantRef.current;
-    const eraDueno = estadoRef.current === "admin";
-    // 1. Desvincular el teléfono en el servidor (solo el dueño guarda token).
+    // 1. Desvincular el teléfono en el servidor (dueño y staff reciben avisos).
     //    Con tope de tiempo: sin red no puede impedir la salida.
-    if (eraDueno && tid) {
+    if (tid) {
       await conTimeout(borrarPushTokenDelServidor(tid), 4_000).catch(() => {});
     }
     // 2. Limpieza local: recordatorios con nombres de clientes, sede activa y

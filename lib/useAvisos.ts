@@ -292,3 +292,35 @@ export function useAbrirAvisosAlTocar(habilitado: boolean): void {
     };
   }, [activo, router]);
 }
+
+/**
+ * Staff: al tocar un aviso de cita ("Tienes una nueva cita", "Te asignaron una
+ * cita"…) se abre SU agenda en el día de esa cita. También en arranque en frío.
+ * Se monta en el layout de (staff).
+ */
+export function useAbrirAgendaAlTocar(habilitado: boolean): void {
+  const router = useRouter();
+  const { estado } = useAuth();
+  const activo = habilitado && estado === "staff";
+
+  useEffect(() => {
+    if (!activo) return;
+    let espera: ReturnType<typeof setTimeout> | null = null;
+    const dejar = alTocarNotificacion((datos) => {
+      const fecha = typeof datos.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(datos.date) ? datos.date : undefined;
+      if (espera) clearTimeout(espera);
+      espera = setTimeout(() => {
+        espera = null;
+        try {
+          router.navigate({ pathname: "/(staff)/agenda", params: fecha ? { fecha } : {} } as Href);
+        } catch {
+          // Navegación aún no lista: la agenda sigue a un toque.
+        }
+      }, 0);
+    });
+    return () => {
+      dejar();
+      if (espera) clearTimeout(espera);
+    };
+  }, [activo, router]);
+}

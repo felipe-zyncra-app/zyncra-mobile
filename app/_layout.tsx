@@ -52,13 +52,16 @@ function EfectosDeSesion() {
 
   useEffect(() => {
     if (estado === "admin" && tenantId) {
-      // El portal manda los push a tenants.push_token: solo el dueño lo registra.
+      // Avisos de citas del negocio (y tenants.push_token para el portal viejo).
       registrarPushDelDispositivo(tenantId).catch(() => {});
       scheduleDailyBriefing().catch(() => {});
-    } else if (estado === "staff") {
-      // El staff no registra push, pero si el teléfono quedó anotado en el
-      // negocio de un dueño que salió sin red, aquí se libera (SEG-14).
-      liberarPushPendiente().catch(() => {});
+    } else if (estado === "staff" && tenantId) {
+      // El colaborador recibe los avisos de SUS citas (y la recepción, las del
+      // negocio). Registrar también mueve el teléfono si quedó anotado en el
+      // negocio de un dueño que salió sin red (SEG-14).
+      registrarPushDelDispositivo(tenantId, { rol: "staff" })
+        .then(token => { if (!token) return liberarPushPendiente(); })
+        .catch(() => {});
       scheduleDailyBriefing().catch(() => {});
     }
   }, [estado, tenantId, userId]);

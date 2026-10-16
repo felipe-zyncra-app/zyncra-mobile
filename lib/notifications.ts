@@ -10,11 +10,15 @@ import { hoyNegocio, instanteDe, zonaActiva } from "./tz";
  * Notificaciones del dispositivo.
  *
  * DOS COSAS DISTINTAS
- *  · Push remoto: el portal (reserva pública, Hanna, /manage) manda "Nueva
- *    cita" al token guardado en tenants.push_token. Se registra DESPUÉS del
- *    login y al cambiar de cuenta (registrarPushDelDispositivo) y se borra del
- *    servidor al cerrar sesión (borrarPushTokenDelServidor), para que el
- *    teléfono no siga recibiendo nombres de clientes de otro negocio.
+ *  · Push remoto: desde 2026-10-16 la base avisa cada cita nueva, cancelada,
+ *    reagendada o pasada a otro colaborador (trigger push_on_appointment →
+ *    portal /api/push/cita) al NEGOCIO (dueño, admins, recepción) y al
+ *    COLABORADOR de la cita. Cada teléfono se anota en push_devices con la RPC
+ *    registrar_push_dispositivo, sea dueño o staff, DESPUÉS del login y al
+ *    cambiar de cuenta (registrarPushDelDispositivo), y se borra al cerrar
+ *    sesión (borrarPushTokenDelServidor), para que el teléfono no siga
+ *    recibiendo nombres de clientes de otro negocio. El dueño además sigue
+ *    escribiendo tenants.push_token (lo leen las versiones viejas).
  *  · Recordatorios locales: avisos AL DUEÑO de sus próximas citas ("Recuerda:
  *    mañana a las 3:00 PM tienes una cita con Juan para Corte."). No son el
  *    recordatorio al cliente (ese lo manda el servidor por WhatsApp y correo).
@@ -115,18 +119,33 @@ async function obtenerTokenDelDispositivo(pedirPermiso: boolean): Promise<string
 }
 
 /**
- * Registra este dispositivo como destino de los push del negocio. Llamarla
- * cuando el rol ya se resolvió como dueño (el portal envía a
- * tenants.push_token, que solo el dueño puede escribir) y cada vez que cambie
- * la cuenta. El permiso se pide aquí, en contexto, y no sobre la intro.
+ * Registra este dispositivo como destino de los avisos de citas. Llamarla
+ * cuando el rol ya se resolvió (dueño o staff) y cada vez que cambie la
+ * cuenta. El permiso se pide aquí, en contexto, y no sobre la intro.
  */
 export async function registrarPushDelDispositivo(
   tenantId: string,
-  opciones: { pedirPermiso?: boolean } = {},
+  opciones: { pedirPermiso?: boolean; rol?: "admin" | "staff" } = {},
 ): Promise<string | null> {
   if (!tenantId || !(await haySesion())) return null;
   const token = await obtenerTokenDelDispositivo(opciones.pedirPermiso !== false);
   if (!token) return null;
+
+  // Cada teléfono, con su rol en el negocio (lo decide la base). Si la RPC
+  // aún no existe o falla, el dueño sigue con tenants.push_token como antes.
+  const plataforma = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : null;
+  const { error: errDispositivo } = await supabase.rpc("registrar_push_dispositivo", {
+    p_tenant_id: tenantId, p_token: token, p_platform: plataforma ?? undefined,
+  });
+  if (errDispositivo) console.warn(`[push] No se registró el dispositivo: ${errDispositivo.message}`);
+
+  if (opciones.rol === "staff") {
+    if (errDispositivo) return null;
+    tokenEnMemoria = token;
+    await AsyncStorage.setItem(CLAVE_TOKEN, token).catch(() => {});
+    await AsyncStorage.setItem(CLAVE_TOKEN_NEGOCIO, tenantId).catch(() => {});
+    return token;
+  }
 
   // Si este teléfono quedó registrado en OTRO negocio (esa cuenta salió sin
   // red o se le venció la sesión), se libera antes: si no, seguía recibiendo
@@ -155,6 +174,8 @@ export async function registrarPushDelDispositivo(
  */
 async function liberarTokenEnServidor(token: string): Promise<boolean> {
   try {
+    // Los avisos de citas (push_devices) y el tenants.push_token de siempre.
+    await supabase.rpc("liberar_push_dispositivo", { p_token: token });
     const { error } = await supabase.rpc("liberar_push_token", { p_token: token });
     return !error;
   } catch {
