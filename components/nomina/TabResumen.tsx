@@ -103,7 +103,7 @@ export default function TabResumen({ tenantId, timezone }: PropsTabNomina) {
 
             <View style={s.kpis}>
               <Kpi label="Por pagar" valor={tot.pendiente} icono="cash-outline" color={Colors.red} />
-              <Kpi label="Comisiones" valor={tot.comisiones} icono="stats-chart-outline" color={Colors.blue} />
+              <Kpi label="Comisiones" valor={tot.comisiones} icono="stats-chart-outline" color={t.accent} />
               <Kpi label="Básicos" valor={tot.basicos} icono="people-outline" color="#8b5cf6" />
               <Kpi label="Propinas y bonos" valor={tot.extras} icono="gift-outline" color={Colors.success} />
             </View>

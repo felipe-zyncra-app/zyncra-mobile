@@ -4,17 +4,18 @@ import * as Linking from "expo-linking";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Config, authedFetch } from "@/lib/config";
 import { textoParaUsuario } from "@/lib/db";
 import Constants from "expo-constants";
-import { Colors, Fonts, Gradients } from "@/constants/theme";
+import { Colors, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { useAuth } from "@/lib/auth";
 import { Card, MonoTag, SectionLabel, ListRow } from "@/components/ui";
 import { ThemePicker } from "@/components/ThemePicker";
+import LogoNegocio from "@/components/LogoNegocio";
+import StaffProfileScreen from "../../(staff)/profile";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -37,7 +38,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
       { icon: "time-outline",       label: "Horario de atención", sub: "Días y horas en que atiendes",     route: "/settings/schedule" },
       { icon: "people-outline",     label: "Equipo",              sub: "Profesionales y permisos",         route: "/settings/team" },
       { icon: "location-outline",   label: "Sedes",               sub: "Ubicaciones de tu negocio",        route: "/settings/locations" },
-      { icon: "storefront-outline", label: "Mi Tienda",           sub: "Tu página y link de reservas",     route: "/settings/store" },
+      { icon: "storefront-outline", label: "Mi tienda",           sub: "Tu página y link de reservas",     route: "/settings/store" },
     ],
   },
   {
@@ -45,7 +46,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
     tint: Colors.success,
     items: [
       { icon: "bar-chart-outline",     label: "Reportes",            sub: "Ingresos, servicios y rendimiento", route: "/(admin)/reports" },
-      { icon: "stats-chart-outline",   label: "Módulo financiero",   sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
+      { icon: "stats-chart-outline",   label: "Finanzas",            sub: "Ingresos, egresos y balance",       route: "/(admin)/finanzas" },
       { icon: "wallet-outline",        label: "Sistema de caja",     sub: "Apertura, cierre y movimientos",    route: "/(admin)/caja" },
       { icon: "ribbon-outline",        label: "Nómina",              sub: "Básico, comisiones y pagos del equipo", route: "/(admin)/commissions" },
       { icon: "document-text-outline", label: "Factura electrónica", sub: "Facturas DIAN vía Factus",          route: "/(admin)/invoices" },
@@ -65,7 +66,7 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
     title: "Marketing",
     tint: "#8b5cf6",
     items: [
-      { icon: "chatbox-ellipses-outline", label: "Bandeja de WhatsApp", sub: "Conversaciones con tus clientes",  route: "/(admin)/inbox", color: "#25D366" },
+      { icon: "chatbox-ellipses-outline", label: "Chats de WhatsApp",   sub: "Conversaciones con tus clientes",  route: "/(admin)/inbox", color: "#25D366" },
       { icon: "sparkles-outline",         label: "Hanna IA",            sub: "Asistente de reservas por WhatsApp", route: "/(admin)/hanna" },
       { icon: "megaphone-outline",        label: "Campañas WhatsApp",   sub: "Mensajes masivos a tus clientes",  route: "/(admin)/whatsapp" },
       { icon: "star-outline",             label: "Reseñas Google",      sub: "Pide reseñas a tus clientes",       route: "/(admin)/reviews-google" },
@@ -82,13 +83,17 @@ const SECTIONS: { title: string; tint: string; items: Item[] }[] = [
   },
 ];
 
-function initialsOf(name: string) {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  const letters = words.slice(0, 2).map((w) => w[0]).join("");
-  return (letters || "Z").toUpperCase();
+/**
+ * Ajustes del dueño. La administradora del negocio no configura el negocio
+ * (igual que en el portal): en esta pestaña ve su perfil de colaboradora
+ * (nómina, ficha, salir), el mismo de la app del equipo.
+ */
+export default function SettingsScreen() {
+  const { modulosWeb } = useAuth();
+  return modulosWeb ? <StaffProfileScreen /> : <AjustesDelDueno />;
 }
 
-export default function SettingsScreen() {
+function AjustesDelDueno() {
   const router = useRouter();
   const { t } = useTheme();
   const { tenant } = useTenant();
@@ -220,12 +225,10 @@ export default function SettingsScreen() {
             <Pressable
               onPress={() => router.push("/settings/store" as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi Tienda`}
+              accessibilityLabel={`${tenant?.name ?? "Tu negocio"}. Abrir Mi tienda`}
               style={({ pressed }) => [s.bizRow, pressed && { opacity: 0.7 }]}
             >
-              <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.bizAvatar}>
-                <Text style={s.bizInitials}>{initialsOf(tenant?.name ?? "")}</Text>
-              </LinearGradient>
+              <LogoNegocio name={tenant?.name ?? ""} logoUrl={tenant?.logoUrl} size={46} radius={14} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[s.bizName, { color: t.ink }]} numberOfLines={1}>
                   {tenant?.name ?? "Tu negocio"}
@@ -315,8 +318,6 @@ const s = StyleSheet.create({
   section:     { marginTop: 20 },
 
   bizRow:      { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
-  bizAvatar:   { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  bizInitials: { color: "#fff", fontSize: 17, fontFamily: Fonts.bold, letterSpacing: -0.3 },
   bizName:     { fontSize: 16, fontFamily: Fonts.bold, letterSpacing: -0.3 },
   bizLink:     { fontSize: 11, fontFamily: Fonts.mono, marginTop: 3 },
   shareBtn:    { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Modal, TextInput, KeyboardAvoidingView, FlatList,
+  Modal, TextInput, KeyboardAvoidingView,
   ActivityIndicator, Alert, RefreshControl, Switch, Image,
 } from "react-native";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
@@ -17,7 +17,9 @@ import { ScreenHeader } from "@/components/ui";
 import ModalHeader from "@/components/ModalHeader";
 import { Config, authedFetch } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
-import { fmt12 } from "@/lib/format";
+import {
+  type ProSchedule, DAYS, horarioBase, buildSched, toCanonical, diaInvalido, HoraSelector,
+} from "@/components/equipo/horario";
 import { validarCorreo } from "@/lib/contacto";
 import { validarContrasena, traducirErrorAuth, AYUDA_CONTRASENA } from "@/lib/cuenta";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
@@ -27,15 +29,6 @@ import ErrorState from "@/components/ErrorState";
 import { cargarListaSedes, sedeDeFila, type SedeLite } from "@/components/SedeChip";
 import { useSedeActiva } from "@/lib/active-location";
 
-/**
- * El descanso no se edita aquí, pero viaja intacto: antes se descartaba al
- * leer y al guardar, así que editar el horario propio de un profesional le
- * borraba el descanso (y con él el break_soft) que venía del panel web o del
- * horario del negocio.
- */
-type Descanso = { break_start?: string | null; break_end?: string | null; break_soft?: boolean | null };
-type DayConfig = { enabled: boolean; start: string; end: string } & Descanso;
-type ProSchedule = { mon: DayConfig; tue: DayConfig; wed: DayConfig; thu: DayConfig; fri: DayConfig; sat: DayConfig; sun: DayConfig };
 type Pro = {
   id: string; name: string; role: string; is_active: boolean | null; user_id: string | null;
   email: string | null; photo_url: string | null; avatar_url: string | null;
@@ -43,134 +36,6 @@ type Pro = {
   /** Sede donde atiende. null = ficha vieja sin sede (antes del 29-sep): trabaja en todas. */
   location_id?: string | null;
 };
-
-const DAYS: { key: keyof ProSchedule; label: string; largo: string }[] = [
-  { key: "mon", label: "Lun", largo: "lunes" }, { key: "tue", label: "Mar", largo: "martes" },
-  { key: "wed", label: "Mié", largo: "miércoles" }, { key: "thu", label: "Jue", largo: "jueves" },
-  { key: "fri", label: "Vie", largo: "viernes" }, { key: "sat", label: "Sáb", largo: "sábado" },
-  { key: "sun", label: "Dom", largo: "domingo" },
-];
-// 05:00 a 23:30 cada media hora (antes estaba declarado y no se usaba: las
-// horas del horario propio no se podían cambiar, AJU-17).
-const TIME_OPTS = Array.from({ length: 38 }, (_, i) => {
-  const total = 300 + i * 30;
-  const h = Math.floor(total / 60), m = total % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-});
-const DOW_KEYS: (keyof ProSchedule)[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-/**
- * Base cuando el negocio no configuró su horario: lunes a sábado 9 a 6.
- * Antes era "solo viernes", y activar el horario propio en uno de los 11
- * negocios sin horario dejaba al profesional disponible solo los viernes.
- */
-function horarioBase(): ProSchedule {
-  const on: DayConfig = { enabled: true, start: "09:00", end: "18:00" };
-  return { mon: on, tue: on, wed: on, thu: on, fri: on, sat: on, sun: { enabled: false, start: "09:00", end: "18:00" } };
-}
-
-function buildSched(raw: unknown, base: ProSchedule = horarioBase()): ProSchedule {
-  if (!raw || typeof raw !== "object") return base;
-  const r = raw as Record<string, ({ open?: boolean; enabled?: boolean; start?: string; end?: string } & Descanso) | undefined>;
-  const merged: ProSchedule = { ...base };
-  // Formato canónico (el que leen la reserva online y la agenda): claves "0".."6" con {open,start,end}
-  for (let d = 0; d < 7; d++) {
-    const c = r[String(d)];
-    if (c) merged[DOW_KEYS[d]] = { enabled: !!(c.open ?? c.enabled), start: c.start ?? "09:00", end: c.end ?? "18:00", ...descansoDe(c) };
-  }
-  // Formato legado del editor móvil: claves mon..sun con {enabled}
-  for (const k of Object.keys(base) as (keyof ProSchedule)[]) {
-    const c = r[k];
-    if (c) merged[k] = { enabled: !!c.enabled, start: c.start ?? "09:00", end: c.end ?? "18:00", ...descansoDe(c) };
-  }
-  return merged;
-}
-
-function descansoDe(c: Descanso): Descanso {
-  if (!c.break_start || !c.break_end) return {};
-  return { break_start: c.break_start, break_end: c.break_end, ...(typeof c.break_soft === "boolean" ? { break_soft: c.break_soft } : {}) };
-}
-
-// Se guarda siempre en el formato canónico para que la reserva online del web y la agenda lo respeten
-function toCanonical(sched: ProSchedule): Record<string, { open: boolean; start: string; end: string } & Descanso> {
-  const out: Record<string, { open: boolean; start: string; end: string } & Descanso> = {};
-  DOW_KEYS.forEach((k, dow) => {
-    out[String(dow)] = { open: sched[k].enabled, start: sched[k].start, end: sched[k].end, ...descansoDe(sched[k]) };
-  });
-  return out;
-}
-
-/** Primer día abierto con la hora de cierre antes (o igual) que la de apertura. */
-function diaInvalido(sched: ProSchedule): string | null {
-  for (const d of DAYS) {
-    const c = sched[d.key];
-    if (c.enabled && c.start >= c.end) return d.largo;
-  }
-  return null;
-}
-
-// ── Selector de hora ─────────────────────────────────────────────────────────
-function HoraSelector({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
-  const { t } = useTheme();
-  const [open, setOpen] = useState(false);
-  const opciones = TIME_OPTS.includes(value) ? TIME_OPTS : [...TIME_OPTS, value].sort();
-  return (
-    <>
-      <TouchableOpacity
-        style={[hs.btn, { backgroundColor: t.chipBg, borderColor: t.line }]}
-        onPress={() => setOpen(true)} activeOpacity={0.7}
-        accessibilityRole="button" accessibilityLabel={`${label}: ${fmt12(value)}`}
-      >
-        <Text style={[hs.valor, { color: t.text }]}>{fmt12(value)}</Text>
-        <Ionicons name="chevron-down" size={12} color={t.subtle} />
-      </TouchableOpacity>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        {/* accessible={false}: si el fondo tocable agrupara a sus hijos, VoiceOver
-            no llegaría a las horas de la lista. Se cierra eligiendo una hora o
-            con el gesto de escape. */}
-        <TouchableOpacity style={hs.overlay} onPress={() => setOpen(false)} activeOpacity={1} accessible={false}>
-          <View
-            style={[hs.sheet, { backgroundColor: t.cardSolid }]}
-            accessibilityViewIsModal
-            onAccessibilityEscape={() => setOpen(false)}
-          >
-            <Text style={[hs.titulo, { color: t.text }]}>{label}</Text>
-            <FlatList
-              data={opciones}
-              keyExtractor={i => i}
-              initialScrollIndex={Math.max(0, opciones.indexOf(value) - 3)}
-              getItemLayout={(_, index) => ({ length: 46, offset: 46 * index, index })}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[hs.opcion, item === value && { backgroundColor: Colors.red + "14" }]}
-                  onPress={() => { onChange(item); setOpen(false); }}
-                  activeOpacity={0.75}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: item === value }}
-                  accessibilityLabel={fmt12(item)}
-                >
-                  <Text style={[hs.opcionTxt, { color: item === value ? Colors.red : t.text }]}>{fmt12(item)}</Text>
-                  {item === value && <Ionicons name="checkmark" size={16} color={Colors.red} />}
-                </TouchableOpacity>
-              )}
-              style={{ maxHeight: 330 }}
-            />
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </>
-  );
-}
-
-const hs = StyleSheet.create({
-  btn:       { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 9, paddingVertical: 6 },
-  valor:     { fontSize: 12.5, fontFamily: "SpaceGrotesk_600SemiBold" },
-  overlay:   { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
-  sheet:     { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 },
-  titulo:    { fontSize: 14, fontFamily: "SpaceGrotesk_700Bold", marginBottom: 12, textAlign: "center" },
-  opcion:    { height: 46, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, borderRadius: Radius.sm },
-  opcionTxt: { fontSize: 15, fontFamily: "SpaceGrotesk_600SemiBold" },
-});
 
 // ── Foto ─────────────────────────────────────────────────────────────────────
 type Subida = { ok: true; url: string } | { ok: false; mensaje: string };
@@ -221,6 +86,8 @@ function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved 
 
   const [accEmail, setAccEmail]     = useState("");
   const [accPass, setAccPass]       = useState("");
+  // Ver la contraseña al crearla: el dueño se la dicta al colaborador.
+  const [verPass, setVerPass]       = useState(false);
   const [accLoading, setAccLoading] = useState(false);
   const [accSuccess, setAccSuccess] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -558,7 +425,18 @@ function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved 
                   <Text style={[s.fieldLabel, { marginTop: 16, color: t.muted }]}>Correo</Text>
                   <TextInput style={inputStyle} value={accEmail} onChangeText={setAccEmail} placeholder="correo@ejemplo.com" placeholderTextColor={t.subtle} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} accessibilityLabel="Correo de la cuenta" />
                   <Text style={[s.fieldLabel, { marginTop: 12, color: t.muted }]}>Contraseña inicial</Text>
-                  <TextInput style={inputStyle} value={accPass} onChangeText={setAccPass} placeholder={AYUDA_CONTRASENA} placeholderTextColor={t.subtle} secureTextEntry autoCapitalize="none" accessibilityLabel="Contraseña inicial" />
+                  <View style={{ justifyContent: "center" }}>
+                    <TextInput style={[inputStyle, { paddingRight: 48 }]} value={accPass} onChangeText={setAccPass} placeholder={AYUDA_CONTRASENA} placeholderTextColor={t.subtle} secureTextEntry={!verPass} autoCapitalize="none" autoCorrect={false} spellCheck={false} accessibilityLabel="Contraseña inicial" />
+                    <TouchableOpacity onPress={() => setVerPass(v => !v)} hitSlop={10} style={{ position: "absolute", right: 14 }}
+                      accessibilityRole="button" accessibilityLabel={verPass ? "Ocultar contraseña" : "Mostrar contraseña"}>
+                      <Ionicons name={verPass ? "eye-off-outline" : "eye-outline"} size={19} color={t.muted} />
+                    </TouchableOpacity>
+                  </View>
+                  {!!accEmail.trim() && (
+                    <Text style={[s.accountCardSub, { color: t.subtle, marginTop: 8 }]}>
+                      Entrará con <Text style={{ color: t.text, fontFamily: "SpaceGrotesk_700Bold" }}>{accEmail.trim().toLowerCase()}</Text>. Revisa que esté bien escrito.
+                    </Text>
+                  )}
                   <TouchableOpacity style={[s.accBtn, accLoading && { opacity: 0.6 }]} onPress={handleCreateAccount} disabled={accLoading} activeOpacity={0.8} accessibilityRole="button">
                     {accLoading
                       ? <ActivityIndicator color="white" size="small" />
@@ -628,7 +506,7 @@ function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved 
               {([
                 { k: "contact" as const, titulo: "Contacto de clientes", sub: "Teléfono, correo y botones de llamar/WhatsApp" },
                 { k: "amounts" as const, titulo: "Montos y precios", sub: "Valores de servicios y total gastado por cliente" },
-                { k: "clients_tab" as const, titulo: "Pestaña de Clientes", sub: "La lista completa de sus clientes con historial" },
+                { k: "clients_tab" as const, titulo: "Pestaña de clientes", sub: "La lista completa de sus clientes con historial" },
               ]).map((p, i) => (
                 <View key={p.k} style={[s.switchRow, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }, i > 0 && { marginTop: 10 }]}>
                   <View style={{ flex: 1 }}>
@@ -641,6 +519,29 @@ function ProModal({ visible, pro, tenantId, sedes, sedeActiva, onClose, onSaved 
                     trackColor={{ false: t.lineStrong, true: Colors.blue + "aa" }}
                     thumbColor={perms[p.k] ? Colors.blue : t.subtle}
                     accessibilityLabel={p.titulo}
+                  />
+                </View>
+              ))}
+            </View>
+
+            {/* Su propia ficha: nombre y horario desde Mi perfil, sin pasar por el dueño */}
+            <View style={{ marginTop: 28 }}>
+              <Text style={[MonoLabel, { marginBottom: 10, color: t.subtle }]}>Qué puede cambiar de su ficha</Text>
+              {([
+                { k: "edit_profile" as const, titulo: "Sus datos", sub: "Su nombre, desde Mi perfil" },
+                { k: "edit_schedule" as const, titulo: "Su horario", sub: "Sus días, horas y descansos. Las reservas lo respetan de inmediato" },
+              ]).map((p, i) => (
+                <View key={p.k} style={[s.switchRow, Shadow.sm, { backgroundColor: t.card, borderColor: t.cardBorder }, i > 0 && { marginTop: 10 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.switchLabel, { color: t.text }]}>{p.titulo}</Text>
+                    <Text style={[s.switchSub, { color: t.muted }]}>{p.sub}</Text>
+                  </View>
+                  <Switch
+                    value={perms[p.k]}
+                    onValueChange={v => setPerms(prev => ({ ...prev, [p.k]: v }))}
+                    trackColor={{ false: t.lineStrong, true: Colors.blue + "aa" }}
+                    thumbColor={perms[p.k] ? Colors.blue : t.subtle}
+                    accessibilityLabel={`Puede cambiar ${p.titulo.toLowerCase()}`}
                   />
                 </View>
               ))}
@@ -779,8 +680,8 @@ export default function TeamScreen() {
               )}
               {!!p.schedule && (
                 <View style={[s.activeBadge, { backgroundColor: Colors.blue + "14" }]}>
-                  <Ionicons name="time-outline" size={10} color={Colors.blue} />
-                  <Text style={[s.badgeText, { color: Colors.blue }]}>Horario propio</Text>
+                  <Ionicons name="time-outline" size={10} color={t.accent} />
+                  <Text style={[s.badgeText, { color: t.accent }]}>Horario propio</Text>
                 </View>
               )}
               {!activo && (

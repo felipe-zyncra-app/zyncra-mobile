@@ -18,7 +18,7 @@ import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import { fmt12, fmtMoneyFull } from "@/lib/format";
 import { precioDeLista } from "@/lib/ingresos";
 import { nombreDeCita } from "@/lib/adicionales";
-import { fmtDia, sumarDias } from "@/lib/tz";
+import { fmtDia, sumarDias, conMayuscula } from "@/lib/tz";
 import {
   agruparPorCobrar, estadoPorCobrar, fechaPorCobrar, porDia, serviciosDe, traerPorCobrarDetalle,
   type CitaPorCobrarDetalle,
@@ -81,8 +81,6 @@ async function cargarDatos(tenantId: string): Promise<Datos> {
 }
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
-/** Solo la primera letra: textTransform "capitalize" dejaría "Martes 29 De Septiembre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 export default function PorCobrarScreen() {
   const router = useRouter();

@@ -431,6 +431,15 @@ export function fmtDia(diaISO: string, estilo: EstiloDia = "corto"): string {
   }
 }
 
+/**
+ * Primera letra en mayúscula y el resto igual: "miércoles 14 de octubre" →
+ * "Miércoles 14 de octubre". textTransform "capitalize" daba
+ * "Miércoles 14 De Octubre".
+ */
+export function conMayuscula(texto: string): string {
+  return texto ? texto.charAt(0).toUpperCase() + texto.slice(1) : texto;
+}
+
 /** Etiqueta legible de un rango: "hoy", "22 – 28 sep 2026", "septiembre 2026", "2026". */
 export function etiquetaRango(r: RangoNegocio): string {
   if (r.periodo === "dia") return esHoy(r.desde, r.timeZone) ? "Hoy" : fmtDia(r.desde, "largo");

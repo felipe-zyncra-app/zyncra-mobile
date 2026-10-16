@@ -362,6 +362,27 @@ export async function patchTenantSettings(tenantId: string, patch: Ajustes): Pro
   return nuevo;
 }
 
+/**
+ * settings del negocio, con la forma de una respuesta de supabase-js
+ * ({ data: { settings }, error }) para usarla con revisar(). El dueño lo lee
+ * de tenants; el equipo no puede (RLS: 0 filas, y con .single() la agenda y
+ * "Nueva cita" fallaban enteras para la administradora del negocio). Para
+ * ella sale de get_staff_context, como en el portal.
+ */
+export async function leerAjustesDelNegocio(tenantId: string): Promise<Respuesta<{ settings: unknown } | null>> {
+  const r = await supabase.from("tenants").select("settings").eq("id", tenantId).limit(1);
+  if (r.error) return { data: null, error: r.error };
+  if (r.data && r.data.length > 0) return { data: { settings: (r.data[0] as { settings?: unknown }).settings ?? null }, error: null };
+
+  const ctx = await supabase.rpc("get_staff_context");
+  if (ctx.error) return { data: null, error: ctx.error };
+  const d = (Array.isArray(ctx.data) ? ctx.data[0] : ctx.data) as { tenant_id?: unknown; tenant_settings?: unknown } | null;
+  if (!d || d.tenant_id !== tenantId) {
+    return { data: null, error: { code: "SIN_FILAS", message: "No se encontró el negocio." } };
+  }
+  return { data: { settings: d.tenant_settings ?? null }, error: null };
+}
+
 // ─── Ids ─────────────────────────────────────────────────────────────────────
 
 /**

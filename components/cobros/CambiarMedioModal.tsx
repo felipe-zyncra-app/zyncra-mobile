@@ -141,7 +141,7 @@ export default function CambiarMedioModal({ cobro, onClose, onCambiado }: Props)
                 ))}
                 <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                   <TouchableOpacity onPress={() => setLineas(prev => [...prev, { method: "efectivo", amount: "" }])} accessibilityRole="button">
-                    <Text style={[s.link, { color: Colors.blue }]}>+ Otro medio</Text>
+                    <Text style={[s.link, { color: t.accent }]}>+ Otro medio</Text>
                   </TouchableOpacity>
                   <Text style={[s.suma, { color: cuadra ? Colors.success : "#d97706" }]}>Suman {fmtMoneyFull(suma)} de {fmtMoneyFull(objetivo)}</Text>
                 </View>
@@ -151,7 +151,7 @@ export default function CambiarMedioModal({ cobro, onClose, onCambiado }: Props)
               onPress={() => setLineas(dividido
                 ? [{ method: lineas[0]?.method ?? "efectivo", amount: String(objetivo) }]
                 : [{ method: lineas[0]?.method ?? "efectivo", amount: String(objetivo) }, { method: "nequi", amount: "" }])}>
-              <Text style={[s.link, { color: Colors.blue }]}>{dividido ? "Usar un solo medio" : "Dividir entre varios medios"}</Text>
+              <Text style={[s.link, { color: t.accent }]}>{dividido ? "Usar un solo medio" : "Dividir entre varios medios"}</Text>
             </TouchableOpacity>
 
             <Text style={[s.label, { color: t.muted }]}>Contraseña del dueño para confirmar</Text>

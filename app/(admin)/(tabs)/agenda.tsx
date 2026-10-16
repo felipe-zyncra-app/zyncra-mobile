@@ -13,8 +13,8 @@ import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { getActiveLocationId } from "@/lib/active-location";
-import { exigirFilas, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
-import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
+import { exigirFilas, leerAjustesDelNegocio, mensajeError, revisar, traerPorIds, traerTodo } from "@/lib/db";
+import { fmtDia, hoyNegocio, inicioDeSemana, conMayuscula } from "@/lib/tz";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import {
@@ -23,11 +23,13 @@ import {
   type HorarioNegocio, type ProfesionalAgenda,
 } from "@/lib/scheduling";
 import { MonoTag } from "@/components/ui";
+import { STATUS_META, colorDeEstadoLegible } from "@/constants/status";
 import ErrorState from "@/components/ErrorState";
+import SedeChip from "@/components/SedeChip";
 import NewApptModal from "@/components/NewApptModal";
 import ChargeSheet, { type LinkedAppt } from "@/components/ChargeSheet";
 import SemanaStrip from "@/components/agenda/SemanaStrip";
-import DayCalendar from "@/components/agenda/DayCalendar";
+import DayCalendar, { COLUMNA_OTROS, type ColumnaAgenda } from "@/components/agenda/DayCalendar";
 import ApptDetailModal from "@/components/agenda/ApptDetailModal";
 import EditApptModal from "@/components/agenda/EditApptModal";
 import ReasignarModal from "@/components/agenda/ReasignarModal";
@@ -36,6 +38,7 @@ import { proColor, proInitials, type ApptAgenda, type BloqueoAgenda, type VentaC
 
 /** Área táctil extra de los botones pequeños del encabezado (CAL-24). */
 const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+
 
 // ─── Professional filter chip ─────────────────────────────────────────────────
 
@@ -100,7 +103,7 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
   const [citas, prosRes, bloqRes, tenRes, sedesRes] = await Promise.all([
     traerTodo<ApptAgenda>((desde, hasta) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, duration_minutes, is_warranty, warranty_of, warranty_reason, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(name, price)")
+        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, imported, duration_minutes, is_warranty, warranty_of, warranty_reason, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(name, price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dia);
       if (loc) q = q.eq("location_id", loc);
@@ -110,7 +113,7 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
       .eq("tenant_id", tenantId).eq("is_active", true).order("name"),
     supabase.from("blocked_slots").select("id, start_time, end_time, professional_id, reason")
       .eq("tenant_id", tenantId).eq("blocked_date", dia).order("start_time"),
-    supabase.from("tenants").select("settings").eq("id", tenantId).single(),
+    leerAjustesDelNegocio(tenantId),
     // Mismo criterio que lib/active-location (sedes activas, la principal primero).
     supabase.from("locations").select("id, name").eq("tenant_id", tenantId).eq("is_active", true).order("created_at"),
   ]);
@@ -149,10 +152,10 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function AgendaScreen() {
-  const { t } = useTheme();
+  const { t, mode } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const router = useRouter();
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready, tenant } = useTenant();
   const guard = useGuardRespuestas();
 
@@ -164,6 +167,8 @@ export default function AgendaScreen() {
   const [filterProId, setFilterProId] = useState<string | null>(null);
   const [refreshing, setRefreshing]   = useState(false);
   const [showNew, setShowNew]         = useState(false);
+  // Hueco tocado en la agenda: Nueva cita abre con esa hora y ese profesional.
+  const [nuevoEn, setNuevoEn]         = useState<{ hora: string; proId: string | null } | null>(null);
   const [detailAppt, setDetailAppt]   = useState<ApptAgenda | null>(null);
   const [editAppt, setEditAppt]       = useState<ApptAgenda | null>(null);
   const [reasignarAppt, setReasignarAppt] = useState<ApptAgenda | null>(null);
@@ -256,6 +261,35 @@ export default function AgendaScreen() {
   }));
   const activas = citas.filter(a => a.status !== "cancelled");
 
+  // Resumen del día por estado, como los filtros de estado del calendario web.
+  const porCobrar = vigentes?.ventas
+    ? citas.filter(a => a.status === "completed" && !a.imported && !vigentes.ventas!.has(a.id)).length
+    : 0;
+  const resumen = [
+    { n: citas.filter(a => a.status === "confirmed").length, txt: "confirmada", color: colorDeEstadoLegible(STATUS_META.confirmed.color, mode) },
+    { n: citas.filter(a => a.status === "pending").length,   txt: "pendiente",  color: STATUS_META.pending.color },
+    { n: porCobrar,                                          txt: "por cobrar", color: "#d97706", fijo: true },
+    { n: cruzadas.size,                                      txt: "se cruza",   color: "#d97706", plural: "se cruzan" },
+  ].filter(r => r.n > 0);
+
+  // "Todos" con varios profesionales: una columna por cada uno (vista por
+  // profesional del web). Elegir uno lo deja solo, con sus chips para volver.
+  const vistaColumnas = !filterProId && profesionales.length > 1;
+  const columnas: ColumnaAgenda[] | null = vigentes && vistaColumnas
+    ? [
+        ...profesionales.map(p => ({
+          id: p.id, nombre: p.name, iniciales: proInitials(p.name), color: proColor(p.id, profesionales),
+          horario: effectiveDayHours(selected, vigentes.horario, p.schedule),
+        })),
+        // Citas de alguien que ya no está en la lista (inactivo, otra sede): no se esconden.
+        ...(citas.some(a => !a.professional_id || !profesionales.some(p => p.id === a.professional_id))
+          ? [{ id: COLUMNA_OTROS, nombre: "Sin asignar", iniciales: "?", color: Colors.subtle, horario: null }]
+          : []),
+      ]
+    : null;
+  const proFiltrado = filterProId ? profesionales.find(p => p.id === filterProId) ?? null : null;
+  const horarioUnico = vigentes ? effectiveDayHours(selected, vigentes.horario, proFiltrado?.schedule ?? null) : null;
+
   // ── Cambio manual de estado ─────────────────────────────────────────────────
   const handleStatusChange = async (appt: ApptAgenda, status: string) => {
     if (!tenantId || status === appt.status) return;
@@ -347,31 +381,25 @@ export default function AgendaScreen() {
       <View style={s.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <MonoTag>Agenda</MonoTag>
-          <Text style={[s.headerTitle, { color: t.ink }]}>{fmtDia(selected, "largo")}</Text>
-          <Text style={[s.headerSub, { color: t.muted }]}>
-            {vigentes ? (
-              <>
-                {activas.length} cita{activas.length !== 1 ? "s" : ""} · {citas.filter(a => a.status === "confirmed").length} confirmadas
-                {cruzadas.size > 0
-                  ? <Text style={{ color: "#d97706" }}> · {cruzadas.size} se cruzan</Text>
-                  : null}
-              </>
-            ) : " "}
+          <Text style={[s.headerTitle, { color: t.ink }]} numberOfLines={1}>
+            {selected === hoy ? "Hoy" : conMayuscula(fmtDia(selected, "largo"))}
           </Text>
-          {sede && (
-            <TouchableOpacity
-              onPress={() => router.push("/settings/locations")}
-              style={[s.sedeChip, { borderColor: t.line, backgroundColor: t.cardSolid }]}
-              activeOpacity={0.75}
-              hitSlop={HIT_SLOP}
-              accessibilityRole="button"
-              accessibilityLabel={`Sede ${sede.nombre}. Cambiar de sede`}
-            >
-              <Ionicons name="location-outline" size={12} color={t.muted} />
-              <Text style={[s.sedeText, { color: t.text }]} numberOfLines={1}>{sede.nombre}</Text>
-              <Ionicons name="chevron-forward" size={12} color={t.subtle} />
-            </TouchableOpacity>
-          )}
+          <View style={s.resumen}>
+            <Text style={[s.headerSub, { color: t.muted }]}>
+              {vigentes
+                ? `${selected === hoy ? `${conMayuscula(fmtDia(selected, "semana-dia-mes"))} · ` : ""}${activas.length} cita${activas.length !== 1 ? "s" : ""}`
+                : " "}
+            </Text>
+            {vigentes && resumen.map(r => (
+              <View key={r.txt} style={[s.resumenChip, { backgroundColor: r.color + "14" }]}>
+                <View style={[s.resumenPunto, { backgroundColor: r.color }]} />
+                <Text style={[s.resumenTxt, { color: r.color }]}>
+                  {r.n} {r.fijo ? r.txt : r.n === 1 ? r.txt : r.plural ?? `${r.txt}s`}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <SedeChip nombre={sede?.nombre ?? null} style={{ marginTop: 7 }} />
         </View>
         {selected !== hoy && (
           <TouchableOpacity onPress={() => irADia(hoy)} style={[s.todayBtn, { borderColor: t.line, backgroundColor: t.cardSolid }]} accessibilityRole="button">
@@ -394,8 +422,9 @@ export default function AgendaScreen() {
         onCambiarSemana={setSemana}
       />
 
-      {/* ── Professional filter ── */}
-      {profesionales.length > 0 && (
+      {/* ── Profesional elegido: chips para cambiar o volver a "Todos" (con todos,
+           la vista por columnas ya muestra a cada uno arriba) ── */}
+      {profesionales.length > 1 && filterProId !== null && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -416,7 +445,8 @@ export default function AgendaScreen() {
         </ScrollView>
       )}
 
-      {vigentes?.horario.porDefecto && (
+      {/* Configurar el horario es del dueño. */}
+      {vigentes?.horario.porDefecto && role === "admin" && (
         <TouchableOpacity
           onPress={() => router.push("/settings/schedule")}
           style={[s.banner, { borderColor: "rgba(217,119,6,0.35)", backgroundColor: "rgba(217,119,6,0.08)" }]}
@@ -433,9 +463,11 @@ export default function AgendaScreen() {
       {tenantId && (
         <NewApptModal
           visible={showNew}
-          onClose={() => setShowNew(false)}
+          onClose={() => { setShowNew(false); setNuevoEn(null); }}
           tenantId={tenantId}
           initialDate={selected}
+          initialTime={nuevoEn?.hora ?? null}
+          initialProId={nuevoEn?.proId ?? null}
           onSuccess={() => { recargar(); }}
         />
       )}
@@ -507,13 +539,16 @@ export default function AgendaScreen() {
             timezone={timezone}
             citas={visibles}
             bloqueos={bloqueosVisibles}
-            profesionales={profesionales}
+            columnas={columnas}
+            horarioUnico={horarioUnico}
             horarios={horariosDelDia}
             ventas={vigentes.ventas}
             cruzadas={cruzadas}
             onPressAppt={setDetailAppt}
-            onAddPress={() => setShowNew(true)}
-            showPro={filterProId === null}
+            onAddPress={() => { setNuevoEn(null); setShowNew(true); }}
+            onPressHueco={(hora, proId) => { setNuevoEn({ hora, proId: proId ?? filterProId }); setShowNew(true); }}
+            onElegirColumna={id => { if (id !== COLUMNA_OTROS) setFilterProId(id); }}
+            showPro={filterProId === null && !vistaColumnas}
             refreshing={refreshing}
             onRefresh={onRefresh}
           />
@@ -528,8 +563,12 @@ export default function AgendaScreen() {
 function crearEstilos(t: ThemeColors) {
   return StyleSheet.create({
     header:      { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10, paddingTop: 14, paddingHorizontal: 20, paddingBottom: 14 },
-    headerTitle: { fontSize: 21, fontFamily: Fonts.bold, letterSpacing: -0.5, textTransform: "capitalize", marginTop: 3 },
-    headerSub:   { fontSize: 12.5, fontFamily: Fonts.regular, marginTop: 3 },
+    headerTitle: { fontSize: 22, fontFamily: Fonts.bold, letterSpacing: -0.5, marginTop: 3 },
+    headerSub:   { fontSize: 12.5, fontFamily: Fonts.regular },
+    resumen:     { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 5 },
+    resumenChip: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: Radius.full, paddingHorizontal: 7, paddingVertical: 2 },
+    resumenPunto:{ width: 5, height: 5, borderRadius: 3 },
+    resumenTxt:  { fontSize: 11, fontFamily: Fonts.bold },
     todayBtn:    { height: 38, paddingHorizontal: 14, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
     todayText:   { fontSize: 13, fontFamily: Fonts.bold },
     addBtnWrap:  { borderRadius: 19, overflow: "hidden" },
@@ -538,7 +577,5 @@ function crearEstilos(t: ThemeColors) {
     filterRow:   { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
     banner:      { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 10, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 9 },
     bannerText:  { flex: 1, fontSize: 12, fontFamily: Fonts.regular, lineHeight: 17 },
-    sedeChip:    { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: Radius.full, paddingHorizontal: 9, paddingVertical: 4, marginTop: 7 },
-    sedeText:    { flexShrink: 1, fontSize: 11.5, fontFamily: Fonts.semibold },
   });
 }

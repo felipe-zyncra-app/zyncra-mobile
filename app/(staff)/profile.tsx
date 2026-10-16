@@ -3,7 +3,6 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
   Linking, RefreshControl,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { Config, authedFetch } from "@/lib/config";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
-import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
+import { Colors, Fonts, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { ErrorDB, mensajeError, revisar } from "@/lib/db";
 import { AVISO_ELIMINAR_CUENTA_EQUIPO, estadoServidorCuentas } from "@/lib/cuenta";
@@ -19,7 +18,10 @@ import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { colorDeProfesional } from "@/lib/comisiones";
 import ErrorState from "@/components/ErrorState";
 import MiNomina from "@/components/nomina/MiNomina";
-import { ListRow } from "@/components/ui";
+import { ListRow, MonoTag } from "@/components/ui";
+import LogoNegocio from "@/components/LogoNegocio";
+import { useStaffPermissions } from "@/lib/permissions";
+import { useRouter } from "expo-router";
 
 // Apple 5.1.1(i): la política de privacidad tiene que poder abrirse desde la
 // app, también para el equipo (AJU-10). Mismas filas que Ajustes del dueño.
@@ -45,10 +47,15 @@ type StaffInfo = { id: string; name: string; role: string | null; email: string 
 const estadoServidor = estadoServidorCuentas;
 
 export default function StaffProfileScreen() {
-  const { user, tenantId, professionalId, cerrarSesion } = useAuth();
+  const { user, tenantId, professionalId, cerrarSesion, adminEquipo } = useAuth();
+  // La administradora ve este perfil en el Ajustes de la app del dueño: su
+  // ficha se abre ahí mismo para que "volver" regrese a Ajustes.
+  const rutaFicha = adminEquipo ? "/(admin)/mi-ficha" : "/(staff)/mi-ficha";
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
   const { tenant, timezone, ready } = useTenant();
+  const perms = useStaffPermissions();
+  const router = useRouter();
   const guard = useGuardRespuestas();
   const [info, setInfo] = useState<StaffInfo | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -171,24 +178,29 @@ export default function StaffProfileScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* Header */}
-      <LinearGradient colors={Gradients.ink} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <LinearGradient colors={Gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, zIndex: 1 }} />
-        <View style={s.headerBlob} />
-        <Animated.View entering={FadeInDown.duration(400)} style={{ alignItems: "center", position: "relative", zIndex: 1 }}>
+      {/* Encabezado de pestaña (como Agenda, Clientes y Cobros) y, debajo, quién
+          es: antes era un bloque de tinta con manchas que no se parecía al resto. */}
+      <View style={s.tabHeader}>
+        <MonoTag>Mi perfil</MonoTag>
+        <Text style={[s.tabTitle, { color: t.ink }]}>Tu cuenta</Text>
+      </View>
+      <View style={[s.header, { backgroundColor: t.cardSolid, borderColor: t.line }]}>
+        <Animated.View entering={FadeInDown.duration(400)} style={{ alignItems: "center" }}>
           <View style={[s.avatarRing, { borderColor: avatarColor + "60" }]}>
             <View style={[s.avatarInner, { backgroundColor: avatarColor }]}>
               <Text style={s.avatarText}>{initials}</Text>
             </View>
           </View>
-          <Text style={s.name}>{info?.name ?? (error ? "Tu perfil" : "...")}</Text>
-          <Text style={s.role}>{info?.role ?? ""}</Text>
-          <View style={s.businessPill}>
-            <Ionicons name="business-outline" size={12} color="rgba(255,255,255,.8)" />
-            <Text style={s.businessText}>{tenantName}</Text>
+          <Text style={[s.name, { color: t.ink }]}>{info?.name ?? (error ? "Tu perfil" : "...")}</Text>
+          {info?.role ? <Text style={[s.role, { color: t.muted }]}>{info.role}</Text> : null}
+          <View style={[s.businessPill, { backgroundColor: t.chipBg }]}>
+            {tenant?.logoUrl
+              ? <LogoNegocio name={tenantName} logoUrl={tenant.logoUrl} size={18} radius={5} />
+              : <Ionicons name="business-outline" size={12} color={t.muted} />}
+            <Text style={[s.businessText, { color: t.muted }]}>{tenantName}</Text>
           </View>
         </Animated.View>
-      </LinearGradient>
+      </View>
 
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
@@ -209,6 +221,23 @@ export default function StaffProfileScreen() {
             <MiNomina tenantId={tenantId} timezone={timezone} version={versionNomina} />
           </Animated.View>
         ) : null}
+
+        {/* Mi ficha: nombre y horario, si el dueño le dio el permiso */}
+        {(perms.edit_profile || perms.edit_schedule) && (
+          <Animated.View entering={FadeInDown.delay(160).duration(400)} style={{ marginTop: 20 }}>
+            <Text style={s.sectionLabel}>Mi ficha</Text>
+            <View style={[s.card, Shadow.sm]}>
+              {perms.edit_profile && (
+                <ListRow icon="person-outline" color={t.accent} label="Mis datos" sub="Cambia cómo aparece tu nombre"
+                  last={!perms.edit_schedule} onPress={() => router.push(rutaFicha)} />
+              )}
+              {perms.edit_schedule && (
+                <ListRow icon="time-outline" color={t.accent} label="Mi horario" sub="Tus días, horas y descansos"
+                  last onPress={() => router.push(rutaFicha)} />
+              )}
+            </View>
+          </Animated.View>
+        )}
 
         {/* Info de cuenta */}
         <Animated.View entering={FadeInDown.delay(200).duration(400)} style={{ marginTop: 20 }}>
@@ -277,15 +306,16 @@ export default function StaffProfileScreen() {
 // con texto oscuro en modo oscuro.
 function crearEstilos(t: ThemeColors) {
   return StyleSheet.create({
-    header:       { paddingTop: 32, paddingBottom: 40, paddingHorizontal: 24, overflow: "hidden" },
-    headerBlob:   { position: "absolute", width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,.08)", top: -60, right: -40 },
-    avatarRing:   { width: 88, height: 88, borderRadius: 44, borderWidth: 2.5, borderColor: "rgba(255,255,255,.4)", alignItems: "center", justifyContent: "center", marginBottom: 14 },
-    avatarInner:  { width: 78, height: 78, borderRadius: 39, alignItems: "center", justifyContent: "center" },
-    avatarText:   { fontSize: 28, fontFamily: Fonts.bold, color: "white" },
-    name:         { fontSize: 22, fontFamily: Fonts.bold, color: "white", letterSpacing: -0.5 },
-    role:         { fontSize: 13, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.8)", marginTop: 4 },
-    businessPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,.14)", borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10 },
-    businessText: { fontSize: 12, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.85)" },
+    tabHeader:    { paddingTop: 14, paddingHorizontal: 20, paddingBottom: 12 },
+    tabTitle:     { fontSize: 22, fontFamily: Fonts.bold, letterSpacing: -0.5, marginTop: 3 },
+    header:       { marginHorizontal: 20, paddingVertical: 20, paddingHorizontal: 20, borderRadius: Radius.lg, borderWidth: 1 },
+    avatarRing:   { width: 76, height: 76, borderRadius: 38, borderWidth: 2, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+    avatarInner:  { width: 66, height: 66, borderRadius: 33, alignItems: "center", justifyContent: "center" },
+    avatarText:   { fontSize: 24, fontFamily: Fonts.bold, color: "white" },
+    name:         { fontSize: 19, fontFamily: Fonts.bold, letterSpacing: -0.4, textAlign: "center" },
+    role:         { fontSize: 13, fontFamily: Fonts.semibold, marginTop: 3 },
+    businessPill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10 },
+    businessText: { fontSize: 12, fontFamily: Fonts.semibold },
 
     sectionLabel: { fontSize: 11, fontFamily: Fonts.mono, color: t.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
 

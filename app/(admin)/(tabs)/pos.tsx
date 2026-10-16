@@ -17,7 +17,7 @@ import { useTheme, type ThemeColors } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
 import { fmtMoneyFull, fmt12 } from "@/lib/format";
-import { sumarDias, inicioDelDiaUTC, finDelDiaUTC, fmtDia, hoyNegocio } from "@/lib/tz";
+import { sumarDias, inicioDelDiaUTC, finDelDiaUTC, fmtDia, hoyNegocio, conMayuscula } from "@/lib/tz";
 import { exigirFilas, mensajeError, traerTodo } from "@/lib/db";
 import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { cancelarRecordatorioCita } from "@/lib/notifications";
@@ -30,7 +30,7 @@ import SedeChip, { cargarListaSedes, nombreSede } from "@/components/SedeChip";
 import ChargeSheet, { type ChargeTarget, type LinkedAppt } from "@/components/ChargeSheet";
 import { nombreDeCita as nombreServicioCita } from "@/lib/adicionales";
 import TarjetaCita, { esCobrable, porCobrar, type CitaCobro } from "@/components/cobros/TarjetaCita";
-import FilaCobro from "@/components/cobros/FilaCobro";
+import FilaCobro, { SELECT_COBRO } from "@/components/cobros/FilaCobro";
 import DetalleCobro, { type CobroDetalle } from "@/components/cobros/DetalleCobro";
 import EstadoCaja, { CajaAbierta, type EstadoDeCaja } from "@/components/cobros/EstadoCaja";
 import ResumenCobros from "@/components/cobros/ResumenCobros";
@@ -74,8 +74,6 @@ async function leerCaja(tenantId: string, loc: string | null): Promise<EstadoDeC
 }
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
-/** Solo la primera letra: textTransform "capitalize" dejaría "Domingo 28 De Septiembre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -83,7 +81,7 @@ export default function PosScreen() {
   const router = useRouter();
   const { t, mode } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready } = useTenant();
   const guard = useGuardRespuestas();
   // Día elegido en la zona del NEGOCIO (DIN-11). null = hoy: así la pantalla
@@ -125,7 +123,7 @@ export default function PosScreen() {
         // created_at es UTC: el día del negocio se acota con sus instantes reales.
         traerTodo((d, h) => {
           let q = supabase.from("pos_sales")
-            .select("id, created_at, total, subtotal, payment_method, payments, note, appointment_id, clients(name, phone), pos_sale_items(name, price, quantity), invoices(id, number, status, credit_note_cufe)")
+            .select(SELECT_COBRO)
             .eq("tenant_id", tenantId)
             .gte("created_at", inicioDelDiaUTC(dia, timezone))
             .lte("created_at", finDelDiaUTC(dia, timezone));
@@ -423,7 +421,8 @@ export default function PosScreen() {
         cobro={detalle}
         cliente={detalle ? nombreDeCita(detalle) : null}
         factura={detalle ? facturaVigente(detalle) : null}
-        onFacturar={detalle && facturacion && !facturaVigente(detalle)
+        // Facturar electrónicamente es del dueño (credenciales de Factus).
+        onFacturar={detalle && facturacion && role === "admin" && !facturaVigente(detalle)
           ? () => {
               const id = detalle.id;
               setDetalle(null);

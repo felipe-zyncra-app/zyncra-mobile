@@ -14,6 +14,7 @@ import { TenantProvider } from "@/lib/tenant";
 import { SubscriptionProvider } from "@/lib/subscription";
 import { PantallaCargando } from "@/lib/guards";
 import ZyncraIntro from "@/components/ZyncraIntro";
+import Apertura from "@/components/Apertura";
 import { liberarPushPendiente, registrarPushDelDispositivo, scheduleDailyBriefing } from "@/lib/notifications";
 
 const CLAVE_INTRO = "zyncra_intro_vista";
@@ -27,9 +28,9 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 const SPLASH_MAX_MS = 5000;
 let splashOculto = false;
 /**
- * Arranque normal: fundido corto (150 ms: se ve decenas de veces al día).
- * Primera apertura: sin fundido, porque el primer cuadro de ZyncraIntro es el
- * mismo splash y cualquier fundido se vería como parpadeo.
+ * Con intro (primera apertura) o con Apertura (las demás): sin fundido, porque
+ * su primer cuadro es el mismo splash y cualquier fundido se vería como
+ * parpadeo. El fundido corto queda para el tope de tiempo (SPLASH_MAX_MS).
  */
 function ocultarSplash(conFundido: boolean) {
   if (splashOculto) return;
@@ -90,17 +91,19 @@ function AppContent() {
   const { t } = useTheme();
   const intro = useIntroPrimeraVez();
   const { estado } = useAuth();
-
-  // Sin intro: se quita el splash cuando la sesión ya decidió a dónde ir, así
-  // la primera pantalla que se ve es la de verdad y no el spinner. Con intro:
-  // lo quita la intro al pintar su primer cuadro (onReady).
+  // Apertura corta de cada arranque: se monta cuando la sesión ya decidió a
+  // dónde ir (la primera pantalla de debajo es la de verdad, no el spinner) y
+  // ella quita el splash al pintar su primer cuadro. Si el splash ya se quitó
+  // por el tope de tiempo, no se muestra (sería un logo que aparece de la nada).
+  const [apertura, setApertura] = useState<"espera" | "mostrar" | "lista">("espera");
   useEffect(() => {
-    if (intro.estado === "no" && estado !== "cargando") ocultarSplash(true);
-  }, [intro.estado, estado]);
+    if (apertura !== "espera" || intro.estado !== "no" || estado === "cargando") return;
+    setApertura(splashOculto ? "lista" : "mostrar");
+  }, [apertura, intro.estado, estado]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: t.bg }}>
-      <StatusBar style={intro.estado === "mostrar" ? "light" : t.statusBar} />
+      <StatusBar style={intro.estado === "mostrar" || apertura === "mostrar" ? "light" : t.statusBar} />
       <EfectosDeSesion />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
         <Stack.Screen name="(admin)" options={{ animation: "fade", gestureEnabled: false }} />
@@ -112,6 +115,7 @@ function AppContent() {
           para no mostrar un cuadro de la app y luego la intro encima. */}
       {intro.estado === "pendiente" && <View style={[StyleSheet.absoluteFill, { backgroundColor: t.bg }]} />}
       {intro.estado === "mostrar" && <ZyncraIntro onDone={intro.terminar} onReady={() => ocultarSplash(false)} />}
+      {apertura === "mostrar" && <Apertura onDone={() => setApertura("lista")} onReady={() => ocultarSplash(false)} />}
     </GestureHandlerRootView>
   );
 }

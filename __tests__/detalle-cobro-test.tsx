@@ -65,3 +65,38 @@ test("Anular abre la confirmación con contraseña encima", async () => {
   await fireEvent.press(screen.getByRole("button", { name: "Anular cobro" }));
   expect(screen.getByText("Confirmar anulación venta-1")).toBeOnTheScreen();
 });
+
+test("dice quién atendió cada línea, quién cobró y de qué cita es", async () => {
+  await render(
+    <DetalleCobro
+      cobro={{
+        ...base,
+        cobrado_por_nombre: "Laura",
+        appointments: {
+          appointment_date: "2026-09-25",
+          appointment_time: "15:30:00",
+          professionals: { name: "Sergio" },
+          services: { name: "Corte" },
+          appointment_services: [],
+        },
+        pos_sale_items: [
+          { name: "Corte", price: 30000, quantity: 1, item_type: "service", professionals: { name: "Sergio" } },
+          { name: "Cera", price: 10000, quantity: 2, item_type: "product", professionals: null },
+        ],
+      }}
+      onClose={() => {}}
+      onAnulado={() => {}}
+    />,
+  );
+  expect(screen.getByText("Atendió Sergio")).toBeOnTheScreen();
+  expect(screen.getByText("Sin vendedor")).toBeOnTheScreen();
+  expect(screen.getByText("Laura")).toBeOnTheScreen();
+  expect(screen.getByText(/vie 25 sep · 3:30 PM/)).toBeOnTheScreen();
+  expect(screen.getByText("Servicio de la cita")).toBeOnTheScreen();
+});
+
+test("un cobro viejo, sin quién cobró ni especialista, no inventa nombres", async () => {
+  await render(<DetalleCobro cobro={{ ...base, appointment_id: null }} onClose={() => {}} onAnulado={() => {}} />);
+  expect(screen.getByText("Sin asignar")).toBeOnTheScreen();
+  expect(screen.getByText("Venta sin cita")).toBeOnTheScreen();
+});

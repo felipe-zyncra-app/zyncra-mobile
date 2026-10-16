@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Alert, Switch, Linking, ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useAuth } from "@/lib/auth";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/lib/theme";
@@ -170,6 +171,12 @@ interface Props {
 
 export default function ChargeSheet({ visible, tenantId, target, onClose, onSaved, businessName }: Props) {
   const router = useRouter();
+  // El equipo con manage_pos también cobra. Su caja vive en el área del
+  // equipo y no tiene el historial de cobros del dueño; la administradora del
+  // negocio usa la app del dueño, con su caja y su historial.
+  const { role, adminEquipo } = useAuth();
+  const areaEquipo = role === "staff" && !adminEquipo;
+  const rutaCaja = areaEquipo ? "/(staff)/caja" : "/(admin)/caja";
   const { t, mode } = useTheme();
   const { tenant, timezone } = useTenant();
   // El azul de marca casi no se lee sobre el fondo oscuro.
@@ -520,7 +527,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
             `${res.message} Así el cobro queda en el arqueo del día, igual que en el panel web.`,
             [
               { text: "Ahora no", style: "cancel" },
-              { text: "Abrir caja", onPress: () => { onClose(); router.push("/(admin)/caja"); } },
+              { text: "Abrir caja", onPress: () => { onClose(); router.push(rutaCaja); } },
             ],
           );
           return;
@@ -602,11 +609,13 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
               {appt?.clientName ? `La cita de ${appt.clientName}` : "Esta cita"} ya tiene un cobro registrado, así que no se vuelve a cobrar.
               Si hay que corregirlo, anúlalo desde el historial de cobros y vuelve a cobrar.
             </Text>
-            <TouchableOpacity onPress={() => { onClose(); router.push("/(admin)/pos-history" as never); }}
-              style={[s.secondaryBtn, { borderColor: t.line }]} activeOpacity={0.85} accessibilityRole="button">
-              <Ionicons name="time-outline" size={17} color={t.text} />
-              <Text style={[s.secondaryBtnText, { color: t.text }]}>Ver historial de cobros</Text>
-            </TouchableOpacity>
+            {!areaEquipo && (
+              <TouchableOpacity onPress={() => { onClose(); router.push("/(admin)/pos-history" as never); }}
+                style={[s.secondaryBtn, { borderColor: t.line }]} activeOpacity={0.85} accessibilityRole="button">
+                <Ionicons name="time-outline" size={17} color={t.text} />
+                <Text style={[s.secondaryBtnText, { color: t.text }]}>Ver historial de cobros</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
           <BottomSaveBar label="Entendido" saving={false} onPress={onClose} />
         </View>
@@ -706,7 +715,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
         </View>
       </View>
       <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-        <TouchableOpacity onPress={() => { onClose(); router.push("/(admin)/caja"); }} style={s.cajaBtn} activeOpacity={0.85} accessibilityRole="button">
+        <TouchableOpacity onPress={() => { onClose(); router.push(rutaCaja); }} style={s.cajaBtn} activeOpacity={0.85} accessibilityRole="button">
           <Text style={s.cajaBtnTxt}>Abrir caja</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => revisarCaja(appt?.locationId)} style={[s.cajaBtnSec, { borderColor: t.lineStrong }]} activeOpacity={0.85} accessibilityRole="button">

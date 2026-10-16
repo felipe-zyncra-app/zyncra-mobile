@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { useTenant } from "@/lib/tenant";
 import {
   diaLocalDe, fmtDia, rangoDePeriodo, moverReferencia,
-  rangoIncluyeHoy, etiquetaRango, hoyNegocio,
+  rangoIncluyeHoy, etiquetaRango, hoyNegocio, conMayuscula,
 } from "@/lib/tz";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import ErrorState from "@/components/ErrorState";
@@ -25,7 +25,7 @@ import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { getActiveLocationId } from "@/lib/active-location";
 import { desglosePorMedio, lineasDePago, montoDe } from "@/lib/ingresos";
 import { medioOGenerico } from "@/lib/medios-pago";
-import FilaCobro from "@/components/cobros/FilaCobro";
+import FilaCobro, { SELECT_COBRO, especialistasDe, type CobroFila } from "@/components/cobros/FilaCobro";
 import DetalleCobro from "@/components/cobros/DetalleCobro";
 import {
   cargarListaSedes, nombreCorto, nombreSede, sedeDeFila, TODAS_LAS_SEDES, type SedeLite,
@@ -47,12 +47,12 @@ type HistorySale = {
   appointment_id: string | null;
   location_id: string | null;
   clients: { name: string; phone?: string | null } | null;
-  pos_sale_items: { name: string; price: number; quantity: number }[];
+  pos_sale_items: NonNullable<CobroFila["pos_sale_items"]>;
+  cobrado_por_nombre?: string | null;
+  appointments?: CobroFila["appointments"];
   invoices: FacturaVenta[] | null;
 };
 
-/** Solo la primera letra: textTransform "capitalize" dejaba "Martes 29 De Septiembre". */
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
 
 /** Sin tildes ni mayúsculas, para buscar "maria" y encontrar "María". */
 const normalizar = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -66,7 +66,7 @@ export default function PosHistoryScreen() {
   const router = useRouter();
   const { t } = useTheme();
   const s = useMemo(() => crearEstilos(t), [t]);
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
   const { timezone, ready } = useTenant();
   const guard = useGuardRespuestas();
   // Mes elegido como día 1 'YYYY-MM-01' en la zona del negocio; null = el mes
@@ -103,7 +103,7 @@ export default function PosHistoryScreen() {
         traerTodoDetalle((d, h) =>
           supabase
             .from("pos_sales")
-            .select("id,created_at,total,subtotal,payment_method,payments,note,appointment_id,location_id,clients(name,phone),pos_sale_items(name,price,quantity),invoices(id,number,status,credit_note_cufe)")
+            .select(SELECT_COBRO)
             .eq("tenant_id", tenantId)
             .gte("created_at", r.desdeUTC)
             .lte("created_at", r.hastaUTC)
@@ -170,7 +170,8 @@ export default function PosHistoryScreen() {
     return visibles.filter(v => {
       if (medio && !lineasDePago(v).some(l => l.method === medio)) return false;
       if (!q) return true;
-      const texto = [v.clients?.name, v.note, ...(v.pos_sale_items ?? []).map(i => i.name)].filter(Boolean).join(" ");
+      // También por especialista y por quién cobró.
+      const texto = [v.clients?.name, v.note, v.cobrado_por_nombre, ...especialistasDe(v), ...(v.pos_sale_items ?? []).map(i => i.name)].filter(Boolean).join(" ");
       return normalizar(texto).includes(q);
     });
   }, [visibles, busqueda, medio]);
@@ -195,13 +196,13 @@ export default function PosHistoryScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Ventas" title="Historial de Cobros" onBack={() => router.back()}
+      <ScreenHeader crumb="Cobros" title="Historial de cobros" onBack={() => router.back()}
         subtitle={sede ? (filtrar ? sede : TODAS_LAS_SEDES) : undefined} />
       <View style={[s.monthNav, { backgroundColor: t.chipBg, borderColor: t.line }]}>
         <TouchableOpacity onPress={() => irAMes(-1)} style={s.navBtn} accessibilityRole="button" accessibilityLabel="Mes anterior" hitSlop={8}>
           <Ionicons name="chevron-back" size={18} color={t.muted} />
         </TouchableOpacity>
-        <Text style={[s.monthLabel, { color: t.ink }]}>{etiquetaRango(rango)}</Text>
+        <Text style={[s.monthLabel, { color: t.ink }]}>{conMayuscula(etiquetaRango(rango))}</Text>
         <TouchableOpacity onPress={() => irAMes(1)} style={s.navBtn} disabled={isCurrentMonth}
           accessibilityRole="button" accessibilityLabel="Mes siguiente" accessibilityState={{ disabled: isCurrentMonth }} hitSlop={8}>
           <Ionicons name="chevron-forward" size={18} color={isCurrentMonth ? t.subtle : t.muted} />
@@ -286,7 +287,7 @@ export default function PosHistoryScreen() {
                 style={[s.buscadorInput, { color: t.ink }]}
                 value={busqueda}
                 onChangeText={setBusqueda}
-                placeholder="Buscar por cliente, servicio o nota"
+                placeholder="Buscar por cliente, servicio, especialista o nota"
                 placeholderTextColor={t.subtle}
                 returnKeyType="search"
                 autoCorrect={false}
@@ -354,7 +355,8 @@ export default function PosHistoryScreen() {
         cobro={detalle}
         sede={detalle && sede ? sedeDeFila(sedes.lista, detalle.location_id) : null}
         factura={detalle ? facturaVigente(detalle) : null}
-        onFacturar={detalle && facturacion && !facturaVigente(detalle) ? () => facturar(detalle) : undefined}
+        // Facturar electrónicamente es del dueño (credenciales de Factus).
+        onFacturar={detalle && facturacion && role === "admin" && !facturaVigente(detalle) ? () => facturar(detalle) : undefined}
         onClose={() => setDetalle(null)}
         onAnulado={aviso => {
           setDetalle(null);
@@ -375,7 +377,7 @@ function crearEstilos(t: ThemeColors) {
   return StyleSheet.create({
     monthNav:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, alignSelf: "center", borderRadius: 999, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 14, marginTop: 4, marginBottom: 4 },
     navBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-    monthLabel:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", minWidth: 160, textAlign: "center", textTransform: "capitalize" },
+    monthLabel:   { fontSize: 16, fontFamily: "SpaceGrotesk_700Bold", minWidth: 160, textAlign: "center" },
 
     errorBanner:    { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12, padding: 12, borderRadius: Radius.md, backgroundColor: "rgba(251,15,5,0.08)" },
     errorBannerText:{ flex: 1, fontSize: 12.5, fontFamily: "SpaceGrotesk_600SemiBold", color: Colors.red },

@@ -439,7 +439,7 @@ export default function ServicesScreen() {
         accessibilityLabel={`${svc.name}, ${svc.duracion} minutos, ${fmtMoneyFull(svc.price)}${svc.activo ? "" : ", archivado"}`}
       >
         <View style={[s.iconBox, { backgroundColor: Colors.purple + "12" }]}>
-          <Ionicons name={svc.activo ? "pricetags-outline" : "archive-outline"} size={18} color={Colors.purple} />
+          <Ionicons name={svc.activo ? "pricetags-outline" : "archive-outline"} size={18} color={t.accent} />
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>

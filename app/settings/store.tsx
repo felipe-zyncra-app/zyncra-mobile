@@ -291,6 +291,8 @@ export default function StoreScreen() {
         name:    bizName.trim(),
         address: address.trim(),
         slug:    slug.trim(),
+        // Ajustes y el perfil del equipo muestran el logo nuevo sin recargar.
+        logoUrl: finalLogoUrl || null,
         ...(telCambio ? { phone: telGuardar ?? "" } : {}),
       });
       if (telCambio) {
@@ -323,7 +325,7 @@ export default function StoreScreen() {
   if (cargaError && !loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <ScreenHeader crumb="Negocio" title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
+        <ScreenHeader crumb="Negocio" title="Mi tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
         <ErrorState error={cargaError} onRetry={load} />
       </SafeAreaView>
     );
@@ -331,7 +333,7 @@ export default function StoreScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Negocio" title="Mi Tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
+      <ScreenHeader crumb="Negocio" title="Mi tienda" subtitle="Personaliza y comparte tu negocio" onBack={() => router.back()} />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -390,7 +392,7 @@ export default function StoreScreen() {
             </Section>
 
             {/* ── Personalización visual ─────────────────────────────── */}
-            <Section title="Personalización visual" icon="color-palette-outline" color={Colors.purple}>
+            <Section title="Personalización visual" icon="color-palette-outline" color={t.accent}>
 
               {/* Logo */}
               <View style={s.logoRow}>

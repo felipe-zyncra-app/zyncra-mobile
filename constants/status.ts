@@ -14,6 +14,14 @@ export const STATUS_META: Record<string, { label: string; color: string; bg: str
   no_show:   { label: "No asistió", color: Colors.red,     bg: "rgba(251,15,5,0.10)",    icon: "alert-circle-outline" },
 };
 
+/**
+ * Color del estado para texto. En modo oscuro el azul de marca (#0027fe)
+ * casi no se lee sobre fondo oscuro: se usa el mismo azul claro del cobro.
+ */
+export function colorDeEstadoLegible(color: string, mode: "light" | "dark"): string {
+  return mode === "dark" && color === Colors.blue ? "#8da2ff" : color;
+}
+
 export const STATUS_OPTIONS = Object.entries(STATUS_META).map(([status, meta]) => ({
   status,
   label: meta.label,

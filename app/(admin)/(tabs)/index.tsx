@@ -10,6 +10,7 @@ import { getActiveLocationId } from "@/lib/active-location";
 import {
   inicioDelDiaUTC, finDelDiaUTC, diaLocalDe, horaLocalDe, hoyNegocio, sumarDias,
   listaDeDias, diaDeSemana, fmtDia, minutosDelDia,
+  conMayuscula,
 } from "@/lib/tz";
 import { ErrorDB, esErrorDeRed, mensajeError, traerTodo } from "@/lib/db";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
@@ -21,12 +22,13 @@ import { Colors, Fonts, Gradients, CardStyle } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useTenant } from "@/lib/tenant";
-import { fmtMoney, fmtMoneyFull } from "@/lib/format";
+import { fmt12, fmtMoney, fmtMoneyFull } from "@/lib/format";
 import { agruparPorCobrar, traerPorCobrar, RUTA_POR_COBRAR } from "@/lib/porCobrar";
-import { STATUS_META } from "@/constants/status";
+import { STATUS_META, colorDeEstadoLegible } from "@/constants/status";
 import { refreshAllReminders } from "@/lib/notifications";
 import NewApptModal from "@/components/NewApptModal";
 import SubscriptionBanner from "@/components/SubscriptionBanner";
+import SedeChip from "@/components/SedeChip";
 import ErrorState from "@/components/ErrorState";
 import CampanaAvisos from "@/components/CampanaAvisos";
 import { Card, CardHead, MonoTag, TrendChip, TenantBadge, SegmentedControl, useCountUp } from "@/components/ui";
@@ -52,6 +54,8 @@ type Appt = {
   appointment_services: { price: number | string | null }[] | null;
   /** Ventas de la cita (embed). Si hay alguna, la cita está cobrada. */
   pos_sales: VentaResumen[] | null;
+  /** Historial migrado de otro sistema: se cobró allá, no está por cobrar. */
+  imported?: boolean | null;
 };
 
 /** Venta de mostrador (sin cita). */
@@ -196,12 +200,12 @@ const ms = StyleSheet.create({
 const SIN_COBRO = { label: "Sin cobro", color: "#d97706" };
 
 function ApptRow({ a, i, last, onPress }: { a: Appt; i: number; last: boolean; onPress: () => void }) {
-  const { t } = useTheme();
-  const time  = a.appointment_time.substring(0, 5);
+  const { t, mode } = useTheme();
+  const time  = fmt12(a.appointment_time);
   // Completada sin venta: no es ingreso sino "por cobrar" (D10). Se marca
   // distinto para que no pase por cobrada.
-  const sinCobro = a.status === "completed" && !estaCobrada(a);
-  const color = sinCobro ? SIN_COBRO.color : STATUS_META[a.status]?.color ?? t.subtle;
+  const sinCobro = a.status === "completed" && !estaCobrada(a) && !a.imported;
+  const color = sinCobro ? SIN_COBRO.color : colorDeEstadoLegible(STATUS_META[a.status]?.color ?? t.subtle, mode);
   const label = sinCobro ? SIN_COBRO.label : STATUS_META[a.status]?.label ?? a.status;
 
   return (
@@ -285,7 +289,7 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
   const [citas, sueltas, clientesRes, porCobrar, sedesRes] = await Promise.all([
     traerTodo<Appt>((d, h) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, is_warranty, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
+        .select("id, appointment_date, appointment_time, status, imported, is_warranty, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", fetchDesde)
         .lte("appointment_date", hoy);
@@ -443,7 +447,9 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
 export default function DashboardScreen() {
   const router = useRouter();
   const { t } = useTheme();
-  const { tenantId } = useAuth();
+  const { tenantId, role } = useAuth();
+  // La administradora del negocio también ve el Panel; avisos y reportes son del dueño.
+  const esDueno = role === "admin";
   const { tenant: tenantData, timezone, ready } = useTenant();
   const tenantName = tenantData?.name ?? "Tu negocio";
   const guard = useGuardRespuestas();
@@ -515,26 +521,13 @@ export default function DashboardScreen() {
             <View style={{ flex: 1, minWidth: 0 }}>
               <MonoTag>Panel</MonoTag>
               <Text style={[s.greeting, { color: t.ink }]}>{greeting(timezone)}</Text>
-              <Text style={[s.date, { color: t.muted }]}>{fmtDia(hoy, "largo")}</Text>
-              {sede ? (
-                <TouchableOpacity
-                  onPress={() => router.push("/settings/locations" as any)}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={[s.sedeChip, { backgroundColor: t.chipBg, borderColor: t.line }]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Sede ${sede}. Cambiar de sede`}
-                >
-                  <Ionicons name="location-outline" size={12} color={t.muted} />
-                  <Text style={[s.sedeText, { color: t.muted }]} numberOfLines={1}>{sede}</Text>
-                  <Ionicons name="chevron-down" size={12} color={t.subtle} />
-                </TouchableOpacity>
-              ) : null}
+              <Text style={[s.date, { color: t.muted }]}>{conMayuscula(fmtDia(hoy, "largo"))}</Text>
+              <SedeChip nombre={sede} style={{ marginTop: 8 }} />
             </View>
             {/* Campana de avisos al lado del nombre del negocio (como el portal). */}
             <View style={s.headerAside}>
               <TenantBadge name={tenantName} style={s.tenantBadge} />
-              <CampanaAvisos />
+              {esDueno && <CampanaAvisos />}
             </View>
           </View>
 
@@ -700,7 +693,7 @@ export default function DashboardScreen() {
                 title="Agenda de hoy"
                 sub={`${d.todayAppts.length} agendada${d.todayAppts.length !== 1 ? "s" : ""}`}
                 aside={(
-                  <TouchableOpacity onPress={() => router.navigate("/agenda" as any)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ver toda la agenda">
+                  <TouchableOpacity onPress={() => router.navigate({ pathname: "/(admin)/(tabs)/agenda", params: { fecha: hoy } })} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ver toda la agenda">
                     <Text style={s.seeAll}>Ver todo →</Text>
                   </TouchableOpacity>
                 )}
@@ -724,7 +717,8 @@ export default function DashboardScreen() {
                     a={a}
                     i={i}
                     last={i === d.todayAppts.length - 1}
-                    onPress={() => router.navigate("/agenda" as any)}
+                    // Abre la cita en la Agenda, en hoy (la pestaña pudo quedar en otro día).
+                    onPress={() => router.navigate({ pathname: "/(admin)/(tabs)/agenda", params: { fecha: hoy, cita: a.id } })}
                   />
                 ))
               )}
@@ -733,7 +727,7 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Acceso a reportes ── */}
-        <Card delay={440}>
+        {esDueno && <Card delay={440}>
           <TouchableOpacity style={s.reportsRow} onPress={() => router.navigate("/(admin)/reports" as any)} activeOpacity={0.6} accessibilityRole="button">
             <View style={[s.reportsIcon, { backgroundColor: Colors.red + "12" }]}>
               <Ionicons name="bar-chart-outline" size={16} color={Colors.red} />
@@ -744,7 +738,7 @@ export default function DashboardScreen() {
             </View>
             <Ionicons name="chevron-forward" size={15} color={t.subtle} />
           </TouchableOpacity>
-        </Card>
+        </Card>}
       </ScrollView>
 
       {tenantId && (
@@ -768,9 +762,7 @@ const s = StyleSheet.create({
   // Con la campana al lado el nombre se corta antes, para no apretar el saludo.
   tenantBadge: { alignSelf: "center", flexShrink: 1, maxWidth: 150 },
   greeting:    { fontSize: 23, fontFamily: Fonts.bold, letterSpacing: -0.6, marginTop: 3 },
-  date:        { fontSize: 15.5, fontFamily: Fonts.serifItalic, marginTop: 2, textTransform: "capitalize" },
-  sedeChip:    { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: 8 },
-  sedeText:    { fontSize: 11.5, fontFamily: Fonts.semibold, flexShrink: 1 },
+  date:        { fontSize: 15.5, fontFamily: Fonts.serifItalic, marginTop: 2 },
 
   controlsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 14, flexWrap: "wrap" },
   newBtnWrap:  { borderRadius: 9, overflow: "hidden" },

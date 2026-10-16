@@ -177,7 +177,7 @@ export default function LocationsScreen() {
           <>
             {locations.length > 1 && (
               <Animated.View entering={FadeInDown.duration(400)} style={[s.hint, { backgroundColor: Colors.blue + "0D", borderColor: Colors.blue + "30" }]}>
-                <Ionicons name="information-circle-outline" size={16} color={Colors.blue} />
+                <Ionicons name="information-circle-outline" size={16} color={t.accent} />
                 <Text style={[s.hintText, { color: t.muted }]}>
                   La sede activa se estampa en las citas, cobros y caja que crees desde el celular, y el Panel, la Agenda y Cobros muestran esa sede.
                 </Text>
@@ -205,7 +205,7 @@ export default function LocationsScreen() {
                         <Image source={{ uri: loc.image_url }} style={s.photo} />
                       ) : (
                         <View style={[s.photo, s.photoEmpty, { backgroundColor: Colors.blue + "10" }]}>
-                          <Ionicons name="location-outline" size={20} color={Colors.blue} />
+                          <Ionicons name="location-outline" size={20} color={t.accent} />
                         </View>
                       )}
                       <View style={[s.photoBadge, { borderColor: t.card }]}>

@@ -12,7 +12,7 @@ import { Colors, Fonts, Radius } from "@/constants/theme";
 import { IconButton, MonoTag } from "@/components/ui";
 import AnularCobroModal, { type CobroAAnular } from "@/components/AnularCobroModal";
 import CambiarMedioModal, { type CobroACorregir } from "@/components/cobros/CambiarMedioModal";
-import { detalleDe, type CobroFila } from "./FilaCobro";
+import { detalleDe, especialistasDe, type CobroFila } from "./FilaCobro";
 
 export type CobroDetalle = CobroFila & {
   payments: unknown;
@@ -53,7 +53,10 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
 
   if (!cobro) return null;
 
-  const items = (cobro.pos_sale_items ?? []).map(i => ({ name: i.name, qty: Number(i.quantity) || 1, price: Number(i.price) || 0 }));
+  const items = (cobro.pos_sale_items ?? []).map(i => ({
+    name: i.name, qty: Number(i.quantity) || 1, price: Number(i.price) || 0,
+    tipo: i.item_type ?? null, equipo: i.professionals?.name?.trim() || null,
+  }));
   const total = Number(cobro.total) || 0;
   const sumaItems = items.reduce((sum, i) => sum + i.price * i.qty, 0);
   const subtotal = Number(cobro.subtotal) > 0 ? Number(cobro.subtotal) : sumaItems;
@@ -68,6 +71,21 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
 
   const dia = diaLocalDe(cobro.created_at, timezone);
   const cuando = `${esHoy(dia, timezone) ? "Hoy" : fmtDia(dia, "semana-dia-mes")} · ${fmt12(horaLocalDe(cobro.created_at, timezone))}`;
+
+  // De quién fue y quién lo hizo: especialista, quién cobró y la cita.
+  const especialistas = especialistasDe(cobro);
+  const cita = cobro.appointments ?? null;
+  const serviciosCita = (cita?.appointment_services ?? []).map(x => x.name).filter(Boolean);
+  if (cita && serviciosCita.length === 0 && cita.services?.name) serviciosCita.push(cita.services.name);
+  const datos: { k: string; v: string; alerta?: boolean }[] = [
+    { k: "Especialista", v: especialistas.join(", ") || "Sin asignar", alerta: especialistas.length === 0 },
+    { k: "Cobró", v: cobro.cobrado_por_nombre?.trim() || "—" },
+    ...(cita ? [
+      { k: "Cita", v: `${fmtDia(cita.appointment_date, "semana-dia-mes")}${cita.appointment_time ? ` · ${fmt12(cita.appointment_time)}` : ""}` },
+      ...(serviciosCita.length ? [{ k: "Servicio de la cita", v: serviciosCita.join(", ") }] : []),
+    ] : [{ k: "Cita", v: "Venta sin cita" }]),
+    ...(cobro.clients?.phone ? [{ k: "Teléfono", v: cobro.clients.phone }] : []),
+  ];
 
   const wa = cobro.clients?.phone
     ? enlaceWhatsApp(cobro.clients.phone, {
@@ -99,6 +117,12 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
                 <Ionicons name="person-outline" size={12} color={t.muted} />
                 <Text style={[s.chipTxt, { color: t.text }]} numberOfLines={1}>{quien ?? "Venta directa"}</Text>
               </View>
+              {especialistas.length > 0 ? (
+                <View style={[s.chip, { backgroundColor: t.chipBg }]}>
+                  <Ionicons name="cut-outline" size={12} color={t.muted} />
+                  <Text style={[s.chipTxt, { color: t.text }]} numberOfLines={1}>{especialistas.join(", ")}</Text>
+                </View>
+              ) : null}
               {cobro.appointment_id ? (
                 <View style={[s.chip, { backgroundColor: t.chipBg }]}>
                   <Ionicons name="calendar-outline" size={12} color={t.muted} />
@@ -113,15 +137,34 @@ export default function DetalleCobro({ cobro, cliente, sede, factura, onFacturar
               ) : null}
             </View>
 
+            <MonoTag style={s.seccion}>Datos del cobro</MonoTag>
+            <View style={[s.caja, { borderColor: t.line }]}>
+              {datos.map((d, i) => (
+                <View key={d.k} style={[s.fila, i > 0 && { borderTopWidth: 1, borderTopColor: t.line }]}>
+                  <Text style={[s.filaTxt, { color: t.muted, width: 128 }]}>{d.k}</Text>
+                  <Text style={[s.filaVal, { color: d.alerta ? "#b45309" : t.text, flex: 1, textAlign: "right" }]}>{d.v}</Text>
+                </View>
+              ))}
+            </View>
+
             <MonoTag style={s.seccion}>Qué se cobró</MonoTag>
             <View style={[s.caja, { borderColor: t.line }]}>
               {items.length === 0 ? (
                 <Text style={[s.fila, s.filaTxt, { color: t.muted }]}>{detalleDe(cobro) ?? "Sin detalle"}</Text>
               ) : items.map((it, i) => (
                 <View key={`${it.name}-${i}`} style={[s.fila, i > 0 && { borderTopWidth: 1, borderTopColor: t.line }]}>
-                  <Text style={[s.filaTxt, { color: t.text, flex: 1 }]} numberOfLines={2}>
-                    {it.name}{it.qty > 1 ? ` × ${it.qty}` : ""}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.filaTxt, { color: t.text }]} numberOfLines={2}>
+                      {it.name}{it.qty > 1 ? ` × ${it.qty}` : ""}
+                    </Text>
+                    {it.equipo ? (
+                      <Text style={[s.itemEquipo, { color: t.muted }]} numberOfLines={1}>
+                        {it.tipo === "product" ? "Vendió" : "Atendió"} {it.equipo}
+                      </Text>
+                    ) : it.tipo === "service" || it.tipo === "product" ? (
+                      <Text style={[s.itemEquipo, { color: "#b45309" }]}>Sin {it.tipo === "product" ? "vendedor" : "especialista"}</Text>
+                    ) : null}
+                  </View>
                   <Text style={[s.filaVal, { color: t.text }]}>{fmtMoneyFull(it.price * it.qty)}</Text>
                 </View>
               ))}
@@ -220,6 +263,7 @@ const s = StyleSheet.create({
   fila:        { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11 },
   filaTxt:     { fontSize: 13.5, fontFamily: Fonts.regular },
   filaVal:     { fontSize: 13.5, fontFamily: Fonts.semibold },
+  itemEquipo:  { fontSize: 11.5, fontFamily: Fonts.semibold, marginTop: 2 },
   medioIcono:  { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   nota:        { fontSize: 13.5, fontFamily: Fonts.regular, lineHeight: 19 },
   btnWa:       { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: Radius.full, borderWidth: 1, borderColor: "rgba(37,211,102,0.5)", backgroundColor: "rgba(37,211,102,0.08)" },

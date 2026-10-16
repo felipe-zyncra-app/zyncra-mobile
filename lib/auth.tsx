@@ -8,6 +8,7 @@ import { conTimeout, esErrorDeRed, mensajeError } from "./db";
 import { borrarPushTokenDelServidor, cancelarTodasLasNotificaciones } from "./notifications";
 import { clearActiveLocationCache } from "./active-location";
 import { CLAVE_BORRADOR_REGISTRO } from "./cuenta";
+import { esAdministradorDelEquipo, inicioAdministradorEquipo, modulosWebDe, pantallaAdminDe, pantallaPermitida } from "./acceso-equipo";
 
 export type UserRole = "admin" | "staff" | null;
 
@@ -37,6 +38,13 @@ type AuthCtx = {
   tenantId: string | null;
   /** professionals.id del staff con sesión (null para el dueño). */
   professionalId: string | null;
+  /**
+   * Staff con rol "Administrador del negocio" (toda la agenda + caja): usa la
+   * app del dueño, con los módulos que tiene en el portal. Ver lib/acceso-equipo.
+   */
+  adminEquipo: boolean;
+  /** web_modules de esa administradora (null para el dueño y el resto del equipo). */
+  modulosWeb: Record<string, boolean> | null;
   estado: EstadoAcceso;
   /** Mensaje en español cuando estado === "error". */
   errorAcceso: string | null;
@@ -66,6 +74,8 @@ const AuthContext = createContext<AuthCtx>({
   role: null,
   tenantId: null,
   professionalId: null,
+  adminEquipo: false,
+  modulosWeb: null,
   estado: "cargando",
   errorAcceso: null,
   loading: true,
@@ -77,7 +87,7 @@ const AuthContext = createContext<AuthCtx>({
 
 type Resolucion =
   | { estado: "admin"; tenantId: string }
-  | { estado: "staff"; tenantId: string; professionalId: string }
+  | { estado: "staff"; tenantId: string; professionalId: string; permisos: unknown }
   | { estado: "desactivado"; tenantId: string | null; professionalId: string | null }
   | { estado: "sin-rol" }
   | { estado: "error"; mensaje: string };
@@ -99,13 +109,13 @@ async function consultarAcceso(userId: string): Promise<Resolucion> {
   // Staff. Puede tener filas en más de un negocio: se usa la primera ACTIVA.
   const pros = await supabase
     .from("professionals")
-    .select("id, tenant_id, is_active")
+    .select("id, tenant_id, is_active, permissions")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   if (pros.error) return { estado: "error", mensaje: mensajeError(pros.error, "No pudimos verificar tu cuenta") };
-  const filas = (pros.data ?? []) as { id: string; tenant_id: string | null; is_active: boolean | null }[];
+  const filas = (pros.data ?? []) as { id: string; tenant_id: string | null; is_active: boolean | null; permissions: unknown }[];
   const activa = filas.find(p => p.is_active === true && p.tenant_id);
-  if (activa) return { estado: "staff", tenantId: activa.tenant_id!, professionalId: activa.id };
+  if (activa) return { estado: "staff", tenantId: activa.tenant_id!, professionalId: activa.id, permisos: activa.permissions };
   if (filas.length > 0) {
     // La RLS de la agenda ya exige is_active: entrar como staff mostraba una
     // agenda vacía sin explicación.
@@ -150,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [estado, setEstado] = useState<EstadoAcceso>("cargando");
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [professionalId, setProfessionalId] = useState<string | null>(null);
+  const [modulosWeb, setModulosWeb] = useState<Record<string, boolean> | null>(null);
   const [errorAcceso, setErrorAcceso] = useState<string | null>(null);
   const router = useRouter();
   const segments = useSegments();
@@ -182,6 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
     setTenantId(null);
     setProfessionalId(null);
+    setModulosWeb(null);
     setErrorAcceso(null);
     fijarEstado("sin-sesion");
   }, [fijarEstado]);
@@ -226,15 +238,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       tenantRef.current = r.tenantId;
       setTenantId(r.tenantId);
       setProfessionalId(null);
+      setModulosWeb(null);
     } else if (r.estado === "staff") {
       tenantRef.current = r.tenantId;
       setTenantId(r.tenantId);
       setProfessionalId(r.professionalId);
+      // Se revalida al volver a primer plano: si el dueño le quita el rol,
+      // vuelve a la app del colaborador.
+      setModulosWeb(esAdministradorDelEquipo(r.permisos) ? modulosWebDe(r.permisos) : null);
     } else {
       // sin-rol / desactivado: sin negocio activo (TenantProvider se limpia).
       tenantRef.current = null;
       setTenantId(null);
       setProfessionalId(r.estado === "desactivado" ? r.professionalId : null);
+      setModulosWeb(null);
     }
     fijarEstado(r.estado);
   }, [fijarEstado]);
@@ -297,6 +314,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           tenantRef.current = null;
           setTenantId(null);
           setProfessionalId(null);
+          setModulosWeb(null);
           fijarEstado("cargando");
         }
         setTimeout(() => resolver(uid, mismo && resuelto), 0);
@@ -373,6 +391,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (estado === "staff") {
+      if (modulosWeb) {
+        // Administradora del negocio: la app del dueño, solo con lo que tiene
+        // prendido en el portal. (staff) le sigue sirviendo (Mi perfil, Mi ficha).
+        const pantalla = pantallaAdminDe(segs);
+        const permitida = pantalla !== null ? pantallaPermitida(pantalla, modulosWeb) : !enDueno;
+        if (!permitida || enSinAcceso) router.replace(inicioAdministradorEquipo(modulosWeb));
+        return;
+      }
       if (enDueno || enSinAcceso) router.replace("/(staff)/agenda");
       return;
     }
@@ -388,7 +414,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (!enSinAcceso && !enIndex) router.replace(RUTA_SIN_ACCESO);
-  }, [session, estado, segments, router]);
+  }, [session, estado, segments, router, modulosWeb]);
 
   const role: UserRole = estado === "admin" ? "admin" : estado === "staff" ? "staff" : null;
 
@@ -400,6 +426,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role,
         tenantId,
         professionalId,
+        adminEquipo: estado === "staff" && modulosWeb !== null,
+        modulosWeb: estado === "staff" ? modulosWeb : null,
         estado,
         errorAcceso,
         loading: estado === "cargando",

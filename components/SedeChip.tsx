@@ -1,8 +1,9 @@
-import { Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Text, TouchableOpacity, View, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/lib/theme";
+import { useAuth } from "@/lib/auth";
 import { Fonts } from "@/constants/theme";
 
 /**
@@ -52,27 +53,45 @@ export function sedeDeFila(lista: readonly SedeLite[], locationId: string | null
  * nada si `nombre` es null (negocio con una sola sede o sin sedes).
  * `sobreColor`: para encabezados con gradiente (texto blanco).
  */
-export default function SedeChip({ nombre, sobreColor = false }: { nombre: string | null; sobreColor?: boolean }) {
+/**
+ * La sede activa. Una sola pieza para el Panel, la Agenda, Cobros y Por
+ * cobrar (antes cada pantalla tenía su chip). Tocarla lleva a Sedes, que es
+ * del dueño: para el resto solo rotula.
+ */
+export default function SedeChip({ nombre, sobreColor = false, style }: {
+  nombre: string | null; sobreColor?: boolean; style?: StyleProp<ViewStyle>;
+}) {
   const router = useRouter();
   const { t } = useTheme();
+  const { role } = useAuth();
   if (!nombre) return null;
   const color = sobreColor ? "white" : t.muted;
+  const caja = [
+    s.chip,
+    sobreColor
+      ? { backgroundColor: "rgba(255,255,255,.14)", borderColor: "rgba(255,255,255,0.25)" }
+      : { backgroundColor: t.chipBg, borderColor: t.line },
+    style,
+  ];
+  const contenido = (
+    <>
+      <Ionicons name="location-outline" size={12} color={color} />
+      <Text style={[s.text, { color }]} numberOfLines={1}>{nombre}</Text>
+    </>
+  );
+  if (role !== "admin") {
+    return <View style={caja} accessibilityLabel={`Sede: ${nombre}`}>{contenido}</View>;
+  }
   return (
     <TouchableOpacity
-      onPress={() => router.push("/settings/locations" as never)}
+      onPress={() => router.push("/settings/locations")}
       activeOpacity={0.7}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      style={[
-        s.chip,
-        sobreColor
-          ? { backgroundColor: "rgba(255,255,255,.14)", borderColor: "rgba(255,255,255,0.25)" }
-          : { backgroundColor: t.chipBg, borderColor: t.line },
-      ]}
+      style={caja}
       accessibilityRole="button"
       accessibilityLabel={`Sede activa: ${nombre}. Cambiar de sede`}
     >
-      <Ionicons name="location-outline" size={12} color={color} />
-      <Text style={[s.text, { color }]} numberOfLines={1}>{nombre}</Text>
+      {contenido}
       <Ionicons name="chevron-down" size={12} color={sobreColor ? "rgba(255,255,255,.7)" : t.subtle} />
     </TouchableOpacity>
   );

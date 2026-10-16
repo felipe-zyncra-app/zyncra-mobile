@@ -3,6 +3,7 @@ import { Redirect } from "expo-router";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "./theme";
 import { useAuth, RUTA_SIN_ACCESO } from "./auth";
+import { inicioAdministradorEquipo } from "./acceso-equipo";
 import { useSubscription } from "./subscription";
 import AccountBlocked from "@/components/AccountBlocked";
 
@@ -32,16 +33,22 @@ export function PantallaCargando() {
  * Espera a conocer la suscripción antes de montar el área, para no disparar
  * las consultas del Panel de una cuenta suspendida (ARQ-16).
  */
-export function useGuardArea(area: "admin" | "staff"): React.ReactElement | null {
-  const { session, estado, loading } = useAuth();
+export function useGuardArea(area: "admin" | "dueno" | "staff"): React.ReactElement | null {
+  const { session, estado, loading, modulosWeb } = useAuth();
   const { blocked, resuelto } = useSubscription();
 
   if (loading) return <PantallaCargando />;
   if (!session) return <Redirect href="/(auth)/login" />;
 
-  if (area === "admin") {
-    if (estado === "staff") return <Redirect href="/(staff)/agenda" />;
+  if (area === "dueno") {
+    // /settings/*: solo el dueño, también frente a la administradora del negocio.
+    if (estado === "staff") return <Redirect href={modulosWeb ? inicioAdministradorEquipo(modulosWeb) : "/(staff)/agenda"} />;
     if (estado !== "admin") return <Redirect href={RUTA_SIN_ACCESO} />;
+  } else if (area === "admin") {
+    // La administradora del negocio entra a (admin); qué pantallas, lo decide
+    // AuthProvider con sus módulos. /settings sigue siendo solo del dueño.
+    if (estado === "staff" && !modulosWeb) return <Redirect href="/(staff)/agenda" />;
+    if (estado !== "admin" && estado !== "staff") return <Redirect href={RUTA_SIN_ACCESO} />;
   } else {
     if (estado === "admin") return <Redirect href="/(admin)/(tabs)" />;
     if (estado !== "staff") return <Redirect href={RUTA_SIN_ACCESO} />;

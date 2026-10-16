@@ -363,7 +363,7 @@ export default function CajaScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScreenHeader crumb="Dinero" title="Sistema de Caja" onBack={() => router.back()}
+      <ScreenHeader crumb="Dinero" title="Sistema de caja" onBack={() => router.back()}
         subtitle={sede ? `Caja de ${sede} · ingresos y egresos` : "Control de ingresos y egresos"} />
 
       <View style={s.tabBar}>
@@ -462,7 +462,7 @@ export default function CajaScreen() {
             </View>
             <View style={[s.metricCard, Shadow.sm]}>
               <Text style={s.metricLabel}>Efectivo en caja</Text>
-              <Text style={[s.metricValue, { color: Colors.purple }]}>{fmtMoneyFull(tot.efectivoEsperado)}</Text>
+              <Text style={[s.metricValue, { color: t.accent }]}>{fmtMoneyFull(tot.efectivoEsperado)}</Text>
               {tot.ingresosElectronicos > 0 && (
                 <Text style={s.metricSub}>+ {fmtMoneyFull(tot.ingresosElectronicos)} electrónicos</Text>
               )}

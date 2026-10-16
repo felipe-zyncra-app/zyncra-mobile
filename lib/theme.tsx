@@ -37,6 +37,8 @@ const LIGHT = {
   ink:          "#14111C",
   chipBg:       "rgba(20,15,30,0.04)",
   trackBg:      "rgba(20,15,30,0.06)",
+  /** Azul de marca para texto e íconos. En oscuro se aclara: #0027fe sobre la card oscura no se lee (≈2:1). */
+  accent:       "#0027fe",
   blurTint:     "light" as const,
   statusBar:    "dark" as const,
 };
@@ -70,6 +72,7 @@ const DARK = {
   ink:          "#F0EFF4",
   chipBg:       "rgba(255,255,255,0.06)",
   trackBg:      "rgba(255,255,255,0.08)",
+  accent:       "#8da2ff",
   blurTint:     "dark" as const,
   statusBar:    "light" as const,
 };

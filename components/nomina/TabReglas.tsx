@@ -395,7 +395,7 @@ function FilaServicioVista({ servicio, reglas, ultima, onPress }: {
       accessibilityHint="Abre la comisión de este servicio"
     >
       <View style={[s.iconoSvc, { backgroundColor: Colors.blue + "14" }]}>
-        <Ionicons name="cut-outline" size={17} color={Colors.blue} />
+        <Ionicons name="cut-outline" size={17} color={t.accent} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[s.nombre, { color: t.ink }]} numberOfLines={2}>{servicio.name}</Text>
@@ -403,7 +403,7 @@ function FilaServicioVista({ servicio, reglas, ultima, onPress }: {
       </View>
       <View style={s.svcDerecha}>
         <Text style={[s.svcRegla, { color: todos ? t.text : t.subtle }, todos && { fontFamily: Fonts.bold }]} numberOfLines={1}>{regla}</Text>
-        {extra ? <Text style={[s.svcExtra, { color: Colors.blue }]}>{extra}</Text> : null}
+        {extra ? <Text style={[s.svcExtra, { color: t.accent }]}>{extra}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={15} color={t.subtle} />
     </TouchableOpacity>

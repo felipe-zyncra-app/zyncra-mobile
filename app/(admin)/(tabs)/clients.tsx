@@ -14,8 +14,8 @@ import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
 import { diaLocalDe, fmtDia, hoyNegocio, sumarDias } from "@/lib/tz";
 import { useAuth } from "@/lib/auth";
-import { enlaceTel, enlaceWhatsApp, fmtMoney, fmtMoneyFull, fmtTelefono } from "@/lib/format";
-import { STATUS_META } from "@/constants/status";
+import { enlaceTel, enlaceWhatsApp, fmt12, fmtMoney, fmtMoneyFull, fmtTelefono } from "@/lib/format";
+import { STATUS_META, colorDeEstadoLegible } from "@/constants/status";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 import { MonoTag } from "@/components/ui";
@@ -95,6 +95,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
   onAbrirExistente?: (id: string) => void;
 }) {
   const { t } = useTheme();
+  // Borrar fichas es del dueño (la base no se lo deja al equipo).
+  const { role } = useAuth();
   const isNew = client === null;
   const [name, setName]   = useState("");
   const [phone, setPhone] = useState("");
@@ -268,7 +270,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
               <Ionicons name="close" size={20} color="white" />
             </TouchableOpacity>
             <Text style={em.headerTitle}>{isNew ? "Nuevo cliente" : "Editar cliente"}</Text>
-            {!isNew ? (
+            {!isNew && role === "admin" ? (
               <TouchableOpacity onPress={handleDelete} disabled={borrando} style={em.iconBtn} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Eliminar cliente" accessibilityState={{ disabled: borrando, busy: borrando }}>
                 {borrando ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="trash-outline" size={18} color="white" />}
               </TouchableOpacity>
@@ -383,7 +385,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onChange
   client: Client; tenantId: string; onClose: () => void; onChanged: () => void;
   onAbrirOtro: (id: string) => void;
 }) {
-  const { t } = useTheme();
+  const { t, mode } = useTheme();
   const { timezone } = useTenant();
   const insets = useSafeAreaInsets();
   const guard = useGuardRespuestas();
@@ -714,7 +716,8 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onChange
             ) : (
               <>
                 {appts.slice(0, mostrar).map((a, i) => {
-                  const meta = STATUS_META[a.status ?? "pending"] ?? STATUS_META.pending;
+                  const base = STATUS_META[a.status ?? "pending"] ?? STATUS_META.pending;
+                  const meta = { ...base, color: colorDeEstadoLegible(base.color, mode) };
                   const [diaTxt, mesTxt] = fmtDia(a.appointment_date, "dia-mes").split(" ");
                   return (
                     <Animated.View key={a.id} entering={i < 10 ? FadeInRight.delay(i * 35).duration(260) : undefined}>
@@ -726,7 +729,7 @@ function ClientProfileModal({ client: initialClient, tenantId, onClose, onChange
                         <View style={{ flex: 1 }}>
                           <Text style={[p.apptService, { color: t.ink }]} numberOfLines={1}>{a.services?.name ?? "Servicio"}</Text>
                           <Text style={[p.apptTime, { color: t.muted }]}>
-                            {a.appointment_date.slice(0, 4) !== hoy.slice(0, 4) ? `${a.appointment_date.slice(0, 4)} · ` : ""}{a.appointment_time?.slice(0, 5) ?? "—"}
+                            {a.appointment_date.slice(0, 4) !== hoy.slice(0, 4) ? `${a.appointment_date.slice(0, 4)} · ` : ""}{a.appointment_time ? fmt12(a.appointment_time) : "—"}
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end", gap: 5 }}>

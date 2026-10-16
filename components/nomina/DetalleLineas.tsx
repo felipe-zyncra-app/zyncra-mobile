@@ -11,9 +11,10 @@ import { Etiqueta } from "./ResumenPiezas";
 /**
  * La productividad cita por cita (las `lineas` del resumen): servicios
  * agrupados por cita y productos uno por uno, con lo cobrado, la comisión,
- * la regla que se aplicó y si ese día ya se liquidó.
+ * la regla que se aplicó y si ese día ya se liquidó. `sinValores` (Mi
+ * nómina del profesional): sin lo cobrado, solo su comisión.
  */
-export function LineasNomina({ lineas }: { lineas: Linea[] }) {
+export function LineasNomina({ lineas, sinValores }: { lineas: Linea[]; sinValores?: boolean }) {
   const { t } = useTheme();
   const grupos = agruparPorCita(lineas);
   const productos = lineas.filter(l => l.tipo === "producto");
@@ -37,7 +38,7 @@ export function LineasNomina({ lineas }: { lineas: Linea[] }) {
                     {g.liquidada ? <Etiqueta texto="Liquidada" color={Colors.success} /> : null}
                   </View>
                   {g.lineas.map((l, j) => (
-                    <FilaLinea key={`${l.item_id ?? l.service_id ?? l.nombre}-${j}`} l={l} />
+                    <FilaLinea key={`${l.item_id ?? l.service_id ?? l.nombre}-${j}`} l={l} sinValores={sinValores} />
                   ))}
                 </View>
               );
@@ -58,7 +59,7 @@ export function LineasNomina({ lineas }: { lineas: Linea[] }) {
                   </Text>
                   {l.liquidada ? <Etiqueta texto="Liquidada" color={Colors.success} /> : null}
                 </View>
-                <FilaLinea l={l} />
+                <FilaLinea l={l} sinValores={sinValores} />
               </View>
             ))}
           </View>
@@ -68,7 +69,7 @@ export function LineasNomina({ lineas }: { lineas: Linea[] }) {
   );
 }
 
-function FilaLinea({ l }: { l: Linea }) {
+function FilaLinea({ l, sinValores }: { l: Linea; sinValores?: boolean }) {
   const { t } = useTheme();
   return (
     <View style={s.linea}>
@@ -76,11 +77,14 @@ function FilaLinea({ l }: { l: Linea }) {
         <Text style={[s.nombre, { color: t.text }]} numberOfLines={2}>
           {l.nombre}{l.cantidad > 1 ? ` ×${l.cantidad}` : ""}
         </Text>
-        <Text style={[s.regla, { color: l.regla === "ninguna" ? Colors.red : t.subtle }]}>{ETIQUETA_REGLA[l.regla] ?? l.regla}</Text>
+        <Text style={[s.regla, { color: l.regla === "ninguna" ? Colors.red : l.regla === "manual" ? "#b45309" : t.subtle }]}>
+          {ETIQUETA_REGLA[l.regla] ?? l.regla}
+          {l.regla === "manual" && l.ajuste ? ` · por regla eran ${fmtMoneyFull(l.ajuste.calculada)}${l.ajuste.nota ? ` · ${l.ajuste.nota}` : ""}` : ""}
+        </Text>
       </View>
       <View style={{ alignItems: "flex-end" }}>
         <Text style={[s.comision, { color: t.text }]}>{fmtMoneyFull(l.comision)}</Text>
-        <Text style={[s.valor, { color: t.muted }]}>de {fmtMoneyFull(l.valor)}</Text>
+        {!sinValores ? <Text style={[s.valor, { color: t.muted }]}>de {fmtMoneyFull(l.valor)}</Text> : null}
       </View>
     </View>
   );

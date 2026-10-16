@@ -22,6 +22,9 @@ import { estadoAcceso, mensajeNomina } from "./ResumenTextos";
  * sin_montos y aquí se explica en vez de mostrar cifras. No lee la base
  * directo: con los montos ocultos la RLS tampoco lo deja.
  *
+ * Nunca muestra el valor de lo que atendió o vendió, solo las citas y su
+ * comisión (el servidor tampoco lo manda: sinValoresDeVenta en el web).
+ *
  * Va dentro del ScrollView del perfil, así que no tiene scroll propio.
  */
 export default function MiNomina({ tenantId, timezone, version = 0 }: {
@@ -106,7 +109,7 @@ export default function MiNomina({ tenantId, timezone, version = 0 }: {
               </View>
             </View>
 
-            <DesglosePendiente pend={yo.pendiente} />
+            <DesglosePendiente pend={yo.pendiente} sinValores />
 
             {yo.comisionLiquidada > 0 ? (
               <Text style={[s.nota, { color: Colors.success }]}>
@@ -124,7 +127,7 @@ export default function MiNomina({ tenantId, timezone, version = 0 }: {
 
           <View>
             <MonoTag style={{ marginBottom: 8 }}>Lo que atendiste en el periodo</MonoTag>
-            <Productividad p={yo} />
+            <Productividad p={yo} sinValores />
           </View>
 
           {yo.lineas.length > 0 ? (
@@ -139,7 +142,7 @@ export default function MiNomina({ tenantId, timezone, version = 0 }: {
                 <Text style={[s.toggleTxt, { color: t.text }]}>Detalle cita por cita</Text>
                 <Ionicons name={verCitas ? "chevron-up" : "chevron-down"} size={16} color={t.muted} />
               </TouchableOpacity>
-              {verCitas ? <View style={{ marginTop: 12 }}><LineasNomina lineas={yo.lineas} /></View> : null}
+              {verCitas ? <View style={{ marginTop: 12 }}><LineasNomina lineas={yo.lineas} sinValores /></View> : null}
             </View>
           ) : null}
         </>
@@ -191,6 +194,7 @@ export default function MiNomina({ tenantId, timezone, version = 0 }: {
           timeZone={timezone}
           item={colilla}
           puedeAnular={false}
+          sinValores
           onClose={() => setColilla(null)}
         />
       ) : null}

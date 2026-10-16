@@ -15,6 +15,7 @@ import * as Linking from "expo-linking";
 import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { inicioAdministradorEquipo } from "@/lib/acceso-equipo";
 import { Config } from "@/lib/config";
 import { validarCorreo } from "@/lib/contacto";
 import { traducirErrorAuth } from "@/lib/cuenta";
@@ -112,7 +113,7 @@ function CajaCampo({ activo, children }: { activo: boolean; children: React.Reac
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { estado } = useAuth();
+  const { estado, modulosWeb } = useAuth();
   const reduced = useReducedMotion();
   const { estilo: sacudidaSt, sacudir } = useSacudida(reduced);
   const [email,    setEmail]    = useState("");
@@ -176,13 +177,13 @@ export default function LoginScreen() {
   useEffect(() => {
     if (!enfocada) return;
     if (estado === "admin") { soltar(); router.replace("/(admin)/(tabs)"); return; }
-    if (estado === "staff") { soltar(); router.replace("/(staff)/agenda"); return; }
+    if (estado === "staff") { soltar(); router.replace(modulosWeb ? inicioAdministradorEquipo(modulosWeb) : "/(staff)/agenda"); return; }
     // Sesión sin negocio, colaborador desactivado o sin red: AuthProvider lleva
     // a /sin-acceso, que explica el caso y ofrece salidas. Aquí solo se suelta
     // el botón para que no quede en "Entrando…".
     if (estado === "sin-rol" || estado === "desactivado" || estado === "error") soltar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, enfocada]);
+  }, [estado, enfocada, modulosWeb]);
 
   const enviarRecuperacion = async () => {
     if (enviandoRec) return;

@@ -60,9 +60,9 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Revisa la zona horaria",
             "La zona horaria decide qué cuenta como \"hoy\" en la Agenda, en Cobros y en los reportes. Si tu negocio no está en Colombia, elígela aquí antes de empezar."),
           paso("Personaliza tu página de reservas",
-            "En Ajustes → Mi Tienda sube tu logo, escribe el mensaje de bienvenida y elige los colores. Toca Guardar cambios."),
+            "En Ajustes → Mi tienda sube tu logo, escribe el mensaje de bienvenida y elige los colores. Toca Guardar cambios."),
           paso("Comparte tu link",
-            "Tu link de reservas aparece arriba en Ajustes y en Mi Tienda. Tócalo para compartirlo por WhatsApp, Instagram o donde quieras."),
+            "Tu link de reservas aparece arriba en Ajustes y en Mi tienda. Tócalo para compartirlo por WhatsApp, Instagram o donde quieras."),
         ],
       },
       {
@@ -178,7 +178,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         readMinutes: 2,
         steps: [
           paso("Encuentra tu link",
-            "Está arriba en Ajustes y en Ajustes → Mi Tienda, con el botón para compartirlo o copiarlo. Tiene la forma zyncra.app/book/tu-negocio."),
+            "Está arriba en Ajustes y en Ajustes → Mi tienda, con el botón para compartirlo o copiarlo. Tiene la forma zyncra.app/book/tu-negocio."),
           paso("Compártelo donde estén tus clientes",
             "En la bio de Instagram, en tu estado de WhatsApp, en Facebook o en tu perfil de Google."),
           paso("El cliente reserva sin ayuda",
@@ -341,7 +341,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         category: "finanzas",
         readMinutes: 2,
         steps: [
-          paso("Abre Reportes", "Ve a Ajustes → Reportes. Para ingresos contra egresos, usa Ajustes → Módulo financiero."),
+          paso("Abre Reportes", "Ve a Ajustes → Reportes. Para ingresos contra egresos, usa Ajustes → Finanzas."),
           paso("Elige el período", "Semana, Mes o Año, y muévete con las flechas a períodos anteriores."),
           paso("Qué cuenta como ingreso",
             "Solo lo que cobraste. Las citas completadas que no se cobraron no suman: aparecen en Por cobrar. En el Panel, toca esa tarjeta para ver cuáles son."),
@@ -362,7 +362,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           paso("Anota bonificaciones, propinas y adelantos",
             "En Novedades anota bonificaciones y descuentos o adelantos. Las propinas que registras en Caja (categoría Propina) o al cobrar, con su profesional, se anotan solas."),
           paso("Revisa y liquida",
-            "En Resumen elige la quincena, el mes o la semana. Verás por profesional las citas atendidas, lo vendido y lo pendiente por pagar; al tocarlo, el detalle cita por cita. Liquidar registra el pago y deja la colilla en Historial. Solo cuentan las citas completadas o cobradas."),
+            "En Resumen elige la quincena, el mes o la semana. Verás por profesional las citas atendidas, lo vendido y lo pendiente por pagar; al tocarlo, el detalle cita por cita. Liquidar registra el pago y deja la colilla en Historial. La colilla y \"Mi nómina\" del profesional muestran sus citas y su comisión, no el valor de los servicios. Solo cuentan las citas completadas o cobradas."),
         ],
       },
     ],
@@ -399,7 +399,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         readMinutes: 3,
         steps: [
           paso("Abre la bandeja",
-            "Ve a Ajustes → Bandeja de WhatsApp. Verás los chats del más reciente al más viejo, con los no leídos marcados. Puedes buscar por nombre o número."),
+            "Ve a Ajustes → Chats de WhatsApp. Verás los chats del más reciente al más viejo, con los no leídos marcados. Puedes buscar por nombre o número."),
           paso("Atiende tú un chat",
             "Abre el chat y toca \"Hanna responde · toca para atender tú\". Hanna deja de responder en ese chat (aparece MANUAL) hasta que la reactives."),
           paso("La ventana de 24 horas",
@@ -463,7 +463,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 
   {
     id: "marca",
-    label: "Mi Tienda y ajustes",
+    label: "Mi tienda y ajustes",
     description: "Tu página de reservas y los ajustes del negocio.",
     iconName: "Palette",
     articles: [
@@ -474,7 +474,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         category: "marca",
         readMinutes: 2,
         steps: [
-          paso("Abre Mi Tienda", "Ve a Ajustes → Mi Tienda."),
+          paso("Abre Mi tienda", "Ve a Ajustes → Mi tienda."),
           paso("Cambia el logo", "Toca el logo actual y elige una imagen de tu galería."),
           paso("Elige los colores y el mensaje",
             "El color primario y el secundario se usan en los botones y encabezados de tu página. Debajo puedes cambiar el mensaje de bienvenida."),

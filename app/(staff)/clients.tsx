@@ -14,8 +14,8 @@ import { useTenant } from "@/lib/tenant";
 import { Colors, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { MonoTag } from "@/components/ui";
-import { STATUS_META } from "@/constants/status";
-import { enlaceTel, enlaceWhatsApp, fmtMoneyFull, fmtTelefono } from "@/lib/format";
+import { STATUS_META, colorDeEstadoLegible } from "@/constants/status";
+import { enlaceTel, enlaceWhatsApp, fmt12, fmtMoneyFull, fmtTelefono } from "@/lib/format";
 import { fmtDia, hoyNegocio, sumarDias } from "@/lib/tz";
 import { useStaffPermissionsEstado, type StaffPermissions } from "@/lib/permissions";
 import {
@@ -69,7 +69,7 @@ function ClientModal({ client, proId, perms, onClose }: {
 }) {
   const { tenantId } = useAuth();
   const { timezone } = useTenant();
-  const { t } = useTheme();
+  const { t, mode } = useTheme();
   const guardHist = useGuardRespuestas();
   const guardFid = useGuardRespuestas();
   const [history, setHistory] = useState<ApptHistoryItem[]>([]);
@@ -179,7 +179,7 @@ function ClientModal({ client, proId, perms, onClose }: {
       setHistory(filas.map(a => ({
         id: a.id,
         date: a.appointment_date,
-        time: a.appointment_time?.slice(0, 5) ?? "—",
+        time: a.appointment_time ? fmt12(a.appointment_time) : "—",
         status: a.status ?? "pending",
         serviceName: a.services?.name ?? "—",
         price: Number(a.services?.price ?? 0),
@@ -265,7 +265,7 @@ function ClientModal({ client, proId, perms, onClose }: {
               <>
                 <View style={[cm.statDivider, { backgroundColor: t.line }]} />
                 <View style={cm.statBox}>
-                  <Text style={[cm.statVal, { color: Colors.purple }]} numberOfLines={1} adjustsFontSizeToFit>{fmtMoneyFull(totalAtendido)}</Text>
+                  <Text style={[cm.statVal, { color: t.accent }]} numberOfLines={1} adjustsFontSizeToFit>{fmtMoneyFull(totalAtendido)}</Text>
                   {/* Precio de lista de lo atendido en 12 meses; no es lo cobrado (D10). */}
                   <Text style={[cm.statLabel, { color: t.subtle }]}>Valor atendido</Text>
                 </View>
@@ -338,7 +338,8 @@ function ClientModal({ client, proId, perms, onClose }: {
             </View>
           ) : (
             history.map(a => {
-              const meta = STATUS_META[a.status] ?? STATUS_META.pending;
+              const base = STATUS_META[a.status] ?? STATUS_META.pending;
+              const meta = { ...base, color: colorDeEstadoLegible(base.color, mode) };
               const [diaTxt, mesTxt] = fmtDia(a.date, "dia-mes").split(" ");
               return (
                 <View key={a.id} style={[cm.apptRow, Shadow.sm, card]}>
@@ -551,7 +552,7 @@ export default function StaffClientsScreen() {
       {/* Header */}
       <View style={s.header}>
         <MonoTag>Clientes</MonoTag>
-        <Text style={[s.headerTitle, { color: t.ink }]}>Mis Clientes</Text>
+        <Text style={[s.headerTitle, { color: t.ink }]}>Mis clientes</Text>
         <Text style={[s.headerSub, { color: t.muted }]}>
           {clients.length} cliente{clients.length !== 1 ? "s" : ""} atendido{clients.length !== 1 ? "s" : ""} en el último año
         </Text>
