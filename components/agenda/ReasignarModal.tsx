@@ -21,8 +21,7 @@ type Fila = { pro: ProfesionalAgenda; disp: Disponibilidad | null; error?: unkno
  * Pasar una cita a otro profesional sin tocar la fecha ni la hora (atajo del
  * Detalle de cita; para mover también la hora está "Modificar cita"). Muestra
  * quién está libre a esa hora; con "Al azar" se sortea entre los libres.
- * Sirve también con la cita ya cobrada (se atendió otra persona): la comisión
- * pasa a la nueva, salvo que ese día ya se haya liquidado.
+ * Solo para citas sin cobro: una cobrada no cambia de profesional.
  */
 export default function ReasignarModal({ appt, tenantId, profesionales, horario, onClose, onSaved }: {
   appt: ApptAgenda | null;
@@ -76,56 +75,28 @@ export default function ReasignarModal({ appt, tenantId, profesionales, horario,
     }
     setGuardando(pro.id);
     try {
-      // ¿Ya se cobró? Entonces la comisión pasa a la persona nueva: las
-      // líneas de servicio del cobro no guardan profesional y la nómina
-      // usa el de la cita. Si ese día ya se liquidó la comisión de alguno de
-      // los dos, se bloquea (movería plata ya pagada).
-      const ventas = await supabase.from("pos_sales").select("id").eq("appointment_id", appt.id);
+      // Una cita cobrada no cambia de profesional (regla del negocio). El
+      // Detalle ya no deja abrir esto, pero el cobro pudo hacerse desde otro
+      // dispositivo mientras la hoja estaba abierta.
+      const ventas = await supabase.from("pos_sales").select("id", { count: "exact", head: true }).eq("appointment_id", appt.id);
       if (ventas.error) throw new ErrorDB(ventas.error, "No se pudo revisar el cobro de la cita");
-      const ventaIds = (ventas.data ?? []).map(v => v.id as string);
-      const cobrada = ventaIds.length > 0;
-      if (cobrada) {
-        const anterior = appt.professional_id;
-        const ids = [pro.id, ...(anterior ? [anterior] : [])];
-        const pagos = await supabase.from("commission_payments").select("professional_id")
-          .eq("tenant_id", tenantId).in("professional_id", ids)
-          .lte("period_start", appt.appointment_date).gte("period_end", appt.appointment_date);
-        if (pagos.error) throw new ErrorDB(pagos.error, "No se pudo revisar la nómina de ese día");
-        if ((pagos.data ?? []).length > 0) {
-          const quien = (pagos.data ?? []).some(x => x.professional_id === pro.id) ? pro.name : appt.professionals?.name ?? "el profesional actual";
-          Alert.alert(
-            "Ese día ya se liquidó",
-            `La comisión del ${fmtDia(appt.appointment_date, "largo")} de ${quien} ya se pagó en la nómina. Cambiar el profesional movería una comisión ya pagada; si hace falta, anula esa liquidación primero.`,
-          );
-          return;
-        }
-        const seguir = await confirmar(
-          `¿Pasar la cita cobrada a ${pro.name}?`,
-          `La cita ya está cobrada. La comisión de sus servicios pasa a ${pro.name}${anterior && appt.professionals?.name ? ` y deja de contarle a ${appt.professionals.name}` : ""}. Las propinas se quedan con quien las recibió.`,
-          "Cambiar",
+      if ((ventas.count ?? 0) > 0) {
+        Alert.alert(
+          "Esta cita ya se cobró",
+          "Una cita cobrada no puede cambiar de profesional. Para hacerlo, anula primero el cobro desde el historial de ventas.",
         );
-        if (!seguir) return;
+        return;
       }
 
       const payload: { professional_id: string; location_id?: string } = { professional_id: pro.id };
-      // Si el profesional es de otra sede, la cita se va con él (como en
-      // Modificar cita). Cobrada no: el cobro ya quedó en la caja de su sede.
-      if (pro.location_id && !cobrada) payload.location_id = pro.location_id;
+      // Si el profesional es de otra sede, la cita se va con él (como en Modificar cita).
+      if (pro.location_id) payload.location_id = pro.location_id;
       exigirFilas(
         await supabase.from("appointments").update(payload).eq("id", appt.id).select("id"),
         "No se pudo cambiar el profesional",
       );
-      // Por si algún cobro sí guardó al profesional en la línea del servicio
-      // (hoy ninguno lo hace): esa línea también pasa a la persona nueva.
-      if (cobrada && appt.professional_id) {
-        const { error: itErr } = await supabase.from("pos_sale_items").update({ professional_id: pro.id })
-          .in("sale_id", ventaIds).eq("item_type", "service").eq("professional_id", appt.professional_id);
-        if (itErr) {
-          Alert.alert("Profesional cambiado", `La cita quedó con ${pro.name}, pero no se pudo actualizar el cobro. ${mensajeError(itErr)}`);
-        }
-      }
       // Al cliente solo se le avisa de una cita que aún no ha pasado.
-      if (!cobrada && appt.status !== "cancelled" && appt.status !== "no_show" && appt.status !== "completed"
+      if (appt.status !== "cancelled" && appt.status !== "no_show" && appt.status !== "completed"
         && cambioAvisable(appt, { ...appt, professional_id: pro.id })) {
         void enviarCorreoCita("modification", appt.id);
       }

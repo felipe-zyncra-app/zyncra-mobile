@@ -152,9 +152,9 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
             )}
             {puedeReasignar && (
               <TouchableOpacity
-                // También con la cita cobrada: ReasignarModal mueve la comisión
-                // y bloquea si ese día ya se liquidó.
-                onPress={onReasignar}
+                // Solo sin cobro: una cita cobrada no cambia de profesional
+                // (regla del negocio, 2026-10-16).
+                onPress={() => siNoEstaCobrada(onReasignar!)}
                 disabled={!listo}
                 style={[s.reasignarBtn, !listo && { opacity: 0.5 }]}
                 accessibilityRole="button"
