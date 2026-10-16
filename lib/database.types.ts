@@ -244,10 +244,14 @@ export type Database = {
         Row: {
           appointment_date: string
           appointment_time: string
+          cancelled_at: string | null
           client_id: string | null
           created_at: string | null
           deposit_paid: boolean | null
+          duration_minutes: number | null
           id: string
+          imported: boolean
+          is_warranty: boolean
           location_id: string | null
           manage_token: string | null
           notes: string | null
@@ -257,14 +261,20 @@ export type Database = {
           status: string | null
           stripe_payment_intent_id: string | null
           tenant_id: string | null
+          warranty_of: string | null
+          warranty_reason: string | null
         }
         Insert: {
           appointment_date: string
           appointment_time: string
+          cancelled_at?: string | null
           client_id?: string | null
           created_at?: string | null
           deposit_paid?: boolean | null
+          duration_minutes?: number | null
           id?: string
+          imported?: boolean
+          is_warranty?: boolean
           location_id?: string | null
           manage_token?: string | null
           notes?: string | null
@@ -274,14 +284,20 @@ export type Database = {
           status?: string | null
           stripe_payment_intent_id?: string | null
           tenant_id?: string | null
+          warranty_of?: string | null
+          warranty_reason?: string | null
         }
         Update: {
           appointment_date?: string
           appointment_time?: string
+          cancelled_at?: string | null
           client_id?: string | null
           created_at?: string | null
           deposit_paid?: boolean | null
+          duration_minutes?: number | null
           id?: string
+          imported?: boolean
+          is_warranty?: boolean
           location_id?: string | null
           manage_token?: string | null
           notes?: string | null
@@ -291,6 +307,8 @@ export type Database = {
           status?: string | null
           stripe_payment_intent_id?: string | null
           tenant_id?: string | null
+          warranty_of?: string | null
+          warranty_reason?: string | null
         }
         Relationships: [
           {
@@ -330,6 +348,64 @@ export type Database = {
           },
           {
             foreignKeyName: "appointments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_warranty_of_fkey"
+            columns: ["warranty_of"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_notices: {
+        Row: {
+          anchor_day: string
+          created_at: string
+          email: string | null
+          id: number
+          kind: string
+          push: string | null
+          subscription_id: string
+          tenant_id: string
+          whatsapp: string | null
+        }
+        Insert: {
+          anchor_day: string
+          created_at?: string
+          email?: string | null
+          id?: number
+          kind: string
+          push?: string | null
+          subscription_id: string
+          tenant_id: string
+          whatsapp?: string | null
+        }
+        Update: {
+          anchor_day?: string
+          created_at?: string
+          email?: string | null
+          id?: number
+          kind?: string
+          push?: string | null
+          subscription_id?: string
+          tenant_id?: string
+          whatsapp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_notices_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "saas_subscriptions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_notices_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -2558,6 +2634,57 @@ export type Database = {
           },
         ]
       }
+      payroll_line_overrides: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          id: string
+          line_key: string
+          note: string | null
+          professional_id: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          line_key: string
+          note?: string | null
+          professional_id: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          line_key?: string
+          note?: string | null
+          professional_id?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_line_overrides_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_line_overrides_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payroll_profiles: {
         Row: {
           base_period: string
@@ -2804,6 +2931,8 @@ export type Database = {
         Row: {
           appointment_id: string | null
           client_id: string | null
+          cobrado_por: string | null
+          cobrado_por_nombre: string | null
           created_at: string
           discount_type: string | null
           discount_value: number
@@ -2819,6 +2948,8 @@ export type Database = {
         Insert: {
           appointment_id?: string | null
           client_id?: string | null
+          cobrado_por?: string | null
+          cobrado_por_nombre?: string | null
           created_at?: string
           discount_type?: string | null
           discount_value?: number
@@ -2834,6 +2965,8 @@ export type Database = {
         Update: {
           appointment_id?: string | null
           client_id?: string | null
+          cobrado_por?: string | null
+          cobrado_por_nombre?: string | null
           created_at?: string
           discount_type?: string | null
           discount_value?: number
@@ -4506,6 +4639,83 @@ export type Database = {
           },
         ]
       }
+      wallet_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          push_token: string
+          serial: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          push_token: string
+          serial: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          push_token?: string
+          serial?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_devices_serial_fkey"
+            columns: ["serial"]
+            isOneToOne: false
+            referencedRelation: "wallet_passes"
+            referencedColumns: ["serial"]
+          },
+        ]
+      }
+      wallet_passes: {
+        Row: {
+          appointment_id: string | null
+          client_id: string | null
+          created_at: string
+          deleted_at: string | null
+          kind: string
+          serial: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          kind: string
+          serial: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          kind?: string
+          serial?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_passes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_passes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       websites: {
         Row: {
           about_image_url: string | null
@@ -4795,6 +5005,8 @@ export type Database = {
       }
       zyncra_web_events: {
         Row: {
+          ad_platform: string | null
+          click_id: string | null
           country: string | null
           created_at: string
           device: string | null
@@ -4810,6 +5022,8 @@ export type Database = {
           utm_source: string | null
         }
         Insert: {
+          ad_platform?: string | null
+          click_id?: string | null
           country?: string | null
           created_at?: string
           device?: string | null
@@ -4825,6 +5039,8 @@ export type Database = {
           utm_source?: string | null
         }
         Update: {
+          ad_platform?: string | null
+          click_id?: string | null
           country?: string | null
           created_at?: string
           device?: string | null
@@ -4846,6 +5062,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      actualizar_mi_ficha: {
+        Args: { p_name?: string; p_schedule?: Json; p_tenant_id: string }
+        Returns: Json
+      }
       anular_nomina: { Args: { p_id: string; p_tenant: string }; Returns: Json }
       client_visit_count: { Args: { p_client_id: string }; Returns: number }
       generate_gift_card_code: { Args: never; Returns: string }
@@ -4909,6 +5129,7 @@ export type Database = {
           tenant_id: string
         }[]
       }
+      mis_tenants_agenda_completa: { Args: never; Returns: string[] }
       mis_tenants_equipo: { Args: never; Returns: string[] }
       mis_tenants_staff: { Args: never; Returns: string[] }
       my_subscription_state: {
@@ -4925,6 +5146,16 @@ export type Database = {
       patch_tenant_settings: {
         Args: { p_patch: Json; p_tenant_id?: string }
         Returns: Json
+      }
+      pos_editar_cobro: {
+        Args: {
+          p_caja: Json
+          p_items: Json
+          p_sale_id: string
+          p_total_antes: number
+          p_venta: Json
+        }
+        Returns: undefined
       }
       redeem_gift_card: {
         Args: {
@@ -4996,6 +5227,17 @@ export type Database = {
         Args: { p_phone: string; p_tenant: string; p_ttl_seconds: number }
         Returns: undefined
       }
+      wallet_notify: { Args: { p_serial: string }; Returns: undefined }
+      wallet_touch_agenda: { Args: { p_client_id: string }; Returns: undefined }
+      wallet_touch_cita: {
+        Args: { p_appointment_id: string }
+        Returns: undefined
+      }
+      wallet_touch_fidelidad: {
+        Args: { p_client_id: string }
+        Returns: undefined
+      }
+      zyncra_pauta_summary: { Args: { days?: number }; Returns: Json }
       zyncra_traffic_summary: { Args: { days?: number }; Returns: Json }
     }
     Enums: {
