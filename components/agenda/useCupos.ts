@@ -5,7 +5,32 @@ import {
   cuposLibres, effectiveDayHours, generateSlotsForDay, MIN_LEAD_MIN, ocupacionDelDia, timeToMins,
   type DayHours, type HorarioNegocio, type Ocupado, type ProfesionalAgenda,
 } from "@/lib/scheduling";
+import { unirCuposDelEquipo } from "@/lib/asignacion";
 import type { EstadoCupos } from "./SelectorHora";
+
+/** Grilla del día, cupos libres y ocupación de un profesional (para un día que atiende). */
+async function calcularCupos(o: {
+  tenantId: string;
+  proId: string;
+  proSchedule: unknown;
+  duracion: number;
+  dia: string;
+  horario: HorarioNegocio;
+  intervalo: number;
+  excluirCitaId?: string | null;
+  hoy: string;
+  timezone: string;
+}): Promise<{ grilla: string[]; libres: string[]; ocupados: Ocupado[] }> {
+  const hd = effectiveDayHours(o.dia, o.horario, o.proSchedule);
+  const ocupados = await ocupacionDelDia({ tenantId: o.tenantId, professionalId: o.proId, dia: o.dia, excluirCitaId: o.excluirCitaId });
+  let grilla = generateSlotsForDay(hd, o.duracion, o.intervalo);
+  if (o.dia === o.hoy) {
+    // Al modificar una cita no se exige el margen: moverla un rato es normal.
+    const desde = minutosDelDia(new Date(), o.timezone) + (o.excluirCitaId ? 0 : MIN_LEAD_MIN);
+    grilla = grilla.filter(h => timeToMins(h) >= desde);
+  }
+  return { grilla, libres: cuposLibres(grilla, ocupados, o.duracion), ocupados };
+}
 
 /**
  * Cupos libres de un profesional en un día, para Nueva cita y Modificar cita
@@ -56,9 +81,8 @@ export function useCuposDelDia(p: {
   const recargar = useCallback(async () => {
     if (!habilitado || !proId || !duracion || !horario || !dia) return;
     const turno = guard.nuevo();
-    const hd = effectiveDayHours(dia, horario, proSchedule);
     setError(null);
-    if (!hd.open) {
+    if (!effectiveDayHours(dia, horario, proSchedule).open) {
       setEstado("cerrado");
       setCupos([]);
       setOcupadosGrilla([]);
@@ -67,18 +91,11 @@ export function useCuposDelDia(p: {
     }
     setEstado("cargando");
     try {
-      const ocupados = await ocupacionDelDia({ tenantId, professionalId: proId, dia, excluirCitaId });
+      const r = await calcularCupos({ tenantId, proId, proSchedule, duracion, dia, horario, intervalo, excluirCitaId, hoy, timezone });
       if (!turno.vigente()) return;
-      let grilla = generateSlotsForDay(hd, duracion, intervalo);
-      if (dia === hoy) {
-        // Al modificar una cita no se exige el margen: moverla un rato es normal.
-        const desde = minutosDelDia(new Date(), timezone) + (excluirCitaId ? 0 : MIN_LEAD_MIN);
-        grilla = grilla.filter(h => timeToMins(h) >= desde);
-      }
-      const libres = cuposLibres(grilla, ocupados, duracion);
-      setCupos(libres);
-      setOcupadosGrilla(grilla.filter(h => !libres.includes(h)));
-      setBloqueos(ocupados.filter(o => o.tipo === "bloqueo"));
+      setCupos(r.libres);
+      setOcupadosGrilla(r.grilla.filter(h => !r.libres.includes(h)));
+      setBloqueos(r.ocupados.filter(o => o.tipo === "bloqueo"));
       setEstado("listo");
     } catch (e) {
       if (!turno.vigente()) return;
@@ -93,4 +110,82 @@ export function useCuposDelDia(p: {
   useEffect(() => { recargar(); }, [recargar]);
 
   return { estado, error, cupos, ocupados: ocupadosGrilla, bloqueos, horarioDia, recargar };
+}
+
+type CuposEquipo = { cupos: string[]; ocupados: string[]; bloqueos: Ocupado[]; libresPorHora: Record<string, string[]> };
+const SIN_CUPOS: CuposEquipo = { cupos: [], ocupados: [], bloqueos: [], libresPorHora: {} };
+
+/**
+ * Cupos de TODO el equipo en un día, para "Al azar" en Nueva cita: una hora
+ * se ofrece si al menos un profesional la tiene libre (`libresPorHora` dice
+ * quiénes, para sortear entre ellos al guardar). Si la agenda de alguno no se
+ * pudo leer queda en "error": ofrecer horas sin saber si están libres es
+ * justo lo que AGE-X1 prohibió. Las ausencias de cada profesional no se
+ * listan (serían de varias personas); sí los cierres de todo el negocio.
+ */
+export function useCuposDelEquipo(p: {
+  tenantId: string;
+  profesionales: ProfesionalAgenda[];
+  duracion: number | null;
+  dia: string;
+  horario: HorarioNegocio | null;
+  intervalo: number;
+  habilitado: boolean;
+  excluirCitaId?: string | null;
+  hoy: string;
+  timezone: string;
+}): {
+  estado: EstadoCupos;
+  error: unknown;
+  cupos: string[];
+  ocupados: string[];
+  bloqueos: Ocupado[];
+  horarioDia: DayHours | null;
+  libresPorHora: Record<string, string[]>;
+  recargar: () => Promise<void>;
+} {
+  const { tenantId, profesionales, duracion, dia, horario, intervalo, habilitado, excluirCitaId, hoy, timezone } = p;
+  const guard = useGuardRespuestas();
+  const [estado, setEstado] = useState<EstadoCupos>("cargando");
+  const [error, setError] = useState<unknown>(null);
+  const [res, setRes] = useState<CuposEquipo>(SIN_CUPOS);
+
+  // Horario del negocio ese día: sirve para los avisos de una hora puesta a mano.
+  const horarioDia = horario ? effectiveDayHours(dia, horario, null) : null;
+
+  const recargar = useCallback(async () => {
+    if (!habilitado || profesionales.length === 0 || !duracion || !horario || !dia) return;
+    const turno = guard.nuevo();
+    setError(null);
+    const abiertos = profesionales.filter(pro => effectiveDayHours(dia, horario, pro.schedule).open);
+    if (abiertos.length === 0) {
+      setEstado("cerrado");
+      setRes(SIN_CUPOS);
+      return;
+    }
+    setEstado("cargando");
+    try {
+      const porPro = await Promise.all(abiertos.map(async pro => ({
+        pro,
+        r: await calcularCupos({ tenantId, proId: pro.id, proSchedule: pro.schedule, duracion, dia, horario, intervalo, excluirCitaId, hoy, timezone }),
+      })));
+      if (!turno.vigente()) return;
+      const u = unirCuposDelEquipo(porPro.map(({ pro, r }) => ({ proId: pro.id, cerrado: false, grilla: r.grilla, libres: r.libres })));
+      const cierres = new Map<string, Ocupado>();
+      for (const { r } of porPro) {
+        for (const o of r.ocupados) if (o.tipo === "bloqueo" && !o.professionalId) cierres.set(o.id ?? `${o.inicio}-${o.fin}`, o);
+      }
+      setRes({ cupos: u.cupos, ocupados: u.ocupados, bloqueos: [...cierres.values()], libresPorHora: u.libresPorHora });
+      setEstado("listo");
+    } catch (e) {
+      if (!turno.vigente()) return;
+      setError(e);
+      setRes(SIN_CUPOS);
+      setEstado("error");
+    }
+  }, [habilitado, profesionales, duracion, horario, dia, tenantId, excluirCitaId, intervalo, hoy, timezone, guard]);
+
+  useEffect(() => { recargar(); }, [recargar]);
+
+  return { estado, error, ...res, horarioDia, recargar };
 }

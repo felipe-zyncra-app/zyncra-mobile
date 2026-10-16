@@ -12,7 +12,8 @@ import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
 import { IconButton, MonoTag } from "@/components/ui";
 import { STATUS_OPTIONS, STATUS_META } from "@/constants/status";
-import { duracionServicio, verificarCupo } from "@/lib/scheduling";
+import { duracionCita, verificarCupo } from "@/lib/scheduling";
+import { nombreDeCita } from "@/lib/adicionales";
 import { fmt12, fmtTelefono } from "@/lib/format";
 import { exigirFilas, mensajeError, traerTodo } from "@/lib/db";
 import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
@@ -28,8 +29,12 @@ type Appt = {
   appointment_time: string;
   status: string;
   professional_id: string | null;
+  /** Duración propia de la cita (con adicionales de valor libre); si falta, la del servicio. */
+  duration_minutes?: number | null;
   clients: { name: string; phone?: string | null } | null;
   services: { name: string; price?: number | null; duration_minutes?: number | null; duration_min?: number | null } | null;
+  /** Adicionales (los de valor libre no tienen servicio: se nombra la cita con ellos). */
+  appointment_services?: { name: string | null }[] | null;
   professionals: { name: string } | null;
 };
 
@@ -77,7 +82,7 @@ function ApptDetailModal({ appt, verPro, onClose, onStatusChange }: {
           </View>
           <View style={{ alignItems: "center", marginTop: 8 }}>
             <Text style={s.clientName}>{appt.clients?.name ?? "Sin cliente"}</Text>
-            <Text style={s.serviceName}>{appt.services?.name ?? "Sin servicio"}</Text>
+            <Text style={s.serviceName}>{nombreDeCita(appt) ?? "Sin servicio"}</Text>
             {verPro && appt.professionals?.name && <Text style={s.serviceName}>con {appt.professionals.name}</Text>}
             <View style={s.timeBadge}>
               <Ionicons name="time-outline" size={14} color="rgba(255,255,255,.9)" />
@@ -193,7 +198,7 @@ export default function StaffAgendaScreen() {
 
       const citas = await traerTodo<Appt>((desde, hasta) => {
         let q = supabase.from("appointments")
-          .select(`id, appointment_date, appointment_time, status, professional_id, ${clientes}, services(name, price, duration_minutes, duration_min), professionals(name)`)
+          .select(`id, appointment_date, appointment_time, status, professional_id, duration_minutes, ${clientes}, services(name, price, duration_minutes, duration_min), appointment_services(name), professionals(name)`)
           .eq("appointment_date", dia);
         q = agendaCompleta ? q.eq("tenant_id", tenantId) : q.eq("professional_id", professionalId);
         return q.order("appointment_time").order("id").range(desde, hasta) as unknown as PromiseLike<{ data: Appt[] | null; error: unknown }>;
@@ -231,7 +236,7 @@ export default function StaffAgendaScreen() {
           professionalId: appt.professional_id,
           dia: appt.appointment_date,
           hora: appt.appointment_time.slice(0, 5),
-          duracion: duracionServicio(appt.services),
+          duracion: duracionCita(appt),
           excluirCitaId: appt.id,
         });
         if (!v.ok) {
@@ -317,7 +322,7 @@ export default function StaffAgendaScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.clientName} numberOfLines={1}>{a.clients?.name ?? "Sin cliente"}</Text>
                     <Text style={s.serviceName} numberOfLines={1}>
-                      {a.services?.name ?? "Sin servicio"}
+                      {nombreDeCita(a) ?? "Sin servicio"}
                       {vigentes.agendaCompleta && a.professionals?.name ? ` · ${a.professionals.name.split(" ")[0]}` : ""}
                     </Text>
                   </View>

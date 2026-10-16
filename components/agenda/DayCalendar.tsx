@@ -7,7 +7,8 @@ import { useTheme } from "@/lib/theme";
 import { STATUS_META } from "@/constants/status";
 import { minutosDelDia } from "@/lib/tz";
 import { fmt12 } from "@/lib/format";
-import { duracionServicio, rangoLineaDeTiempo, timeToMins, type DayHours } from "@/lib/scheduling";
+import { duracionCita, rangoLineaDeTiempo, timeToMins, type DayHours } from "@/lib/scheduling";
+import { nombreDeCita } from "@/lib/adicionales";
 import { proColor, type ApptAgenda, type BloqueoAgenda, type VentaCita } from "./tipos";
 
 const SLOT_MINS  = 30;
@@ -26,7 +27,7 @@ function layoutLanes(appts: ApptAgenda[]): Colocada[] {
   const items = appts
     .map(a => {
       const start = timeToMins(a.appointment_time.slice(0, 5));
-      const dur   = Math.max(duracionServicio(a.services), 10);
+      const dur   = Math.max(duracionCita(a), 10);
       return { appt: a, start, end: start + dur, dur };
     })
     .sort((x, y) => x.start - y.start || x.end - y.end);
@@ -213,7 +214,7 @@ export default function DayCalendar({
               onPress={() => onPressAppt(appt)}
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel={`${fmt12(appt.appointment_time)}, ${appt.clients?.name ?? "Sin cliente"}, ${appt.services?.name ?? ""}, ${label}${cruzada ? ", se cruza con otra cita" : ""}`}
+              accessibilityLabel={`${fmt12(appt.appointment_time)}, ${appt.clients?.name ?? "Sin cliente"}, ${nombreDeCita(appt) ?? ""}${appt.is_warranty ? ", garantía" : ""}, ${label}${cruzada ? ", se cruza con otra cita" : ""}`}
             >
               <View style={[dg.blockAccent, { backgroundColor: color }]} />
               <View style={{ flex: 1, paddingHorizontal: narrow ? 6 : 8, paddingVertical: 5, gap: 1 }}>
@@ -221,7 +222,11 @@ export default function DayCalendar({
                   {cruzada && <Ionicons name="warning" size={11} color={POR_COBRAR} />}
                   <Text style={[dg.blockClient, { color: t.text, flexShrink: 1 }]} numberOfLines={1}>{appt.clients?.name ?? "Sin cliente"}</Text>
                 </View>
-                {height >= 40 && <Text style={[dg.blockService, { color: t.muted }]} numberOfLines={1}>{appt.services?.name ?? ""}</Text>}
+                {height >= 40 && (
+                  <Text style={[dg.blockService, { color: t.muted }]} numberOfLines={1}>
+                    {appt.is_warranty ? <Text style={{ color: "#7c3aed" }}>🛡 Garantía · </Text> : null}{nombreDeCita(appt) ?? ""}
+                  </Text>
+                )}
                 {height >= 60 && showPro && appt.professionals && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 }}>
                     <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: pColor }} />

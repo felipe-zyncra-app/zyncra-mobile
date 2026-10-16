@@ -11,11 +11,17 @@ export type ApptAgenda = {
   client_id: string | null;
   professional_id: string | null;
   location_id?: string | null;
+  /** Duración propia (con adicionales de valor libre); si falta, la del servicio (duracionCita). */
+  duration_minutes?: number | null;
+  /** Garantía de otra cita (warranty_of): se cobra en $0 y no da comisión. */
+  is_warranty?: boolean | null;
+  warranty_of?: string | null;
+  warranty_reason?: string | null;
   clients: { name: string; phone?: string | null } | null;
   services: { name: string; price?: number | null; duration_minutes?: number | null; duration_min?: number | null } | null;
   professionals: { id: string; name: string } | null;
   /** Servicios adicionales de la cita: cuentan en el precio a cobrar (DIN-23). */
-  appointment_services?: { price: number | string | null }[] | null;
+  appointment_services?: { name?: string | null; price: number | string | null }[] | null;
 };
 
 /** Fila de blocked_slots: ausencia de un profesional o cierre del negocio (professional_id null). */

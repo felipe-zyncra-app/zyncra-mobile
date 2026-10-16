@@ -18,7 +18,7 @@ import { fmtDia, hoyNegocio, inicioDeSemana } from "@/lib/tz";
 import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import {
-  bloqueosQueAplican, citasQueSeCruzan, duracionServicio, effectiveDayHours, leerHorarioNegocio,
+  bloqueosQueAplican, citasQueSeCruzan, duracionCita, effectiveDayHours, leerHorarioNegocio,
   profesionalesDeLaSede, timeToMins, verificarCupo,
   type HorarioNegocio, type ProfesionalAgenda,
 } from "@/lib/scheduling";
@@ -30,6 +30,8 @@ import SemanaStrip from "@/components/agenda/SemanaStrip";
 import DayCalendar from "@/components/agenda/DayCalendar";
 import ApptDetailModal from "@/components/agenda/ApptDetailModal";
 import EditApptModal from "@/components/agenda/EditApptModal";
+import ReasignarModal from "@/components/agenda/ReasignarModal";
+import { nombreDeCita } from "@/lib/adicionales";
 import { proColor, proInitials, type ApptAgenda, type BloqueoAgenda, type VentaCita } from "@/components/agenda/tipos";
 
 /** Área táctil extra de los botones pequeños del encabezado (CAL-24). */
@@ -98,7 +100,7 @@ async function cargarDia(tenantId: string, dia: string): Promise<DatosDia> {
   const [citas, prosRes, bloqRes, tenRes, sedesRes] = await Promise.all([
     traerTodo<ApptAgenda>((desde, hasta) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(price)")
+        .select("id, appointment_date, appointment_time, status, service_id, client_id, professional_id, location_id, duration_minutes, is_warranty, warranty_of, warranty_reason, clients(name, phone), services(name, price, duration_minutes, duration_min), professionals(id, name), appointment_services(name, price)")
         .eq("tenant_id", tenantId)
         .eq("appointment_date", dia);
       if (loc) q = q.eq("location_id", loc);
@@ -164,6 +166,7 @@ export default function AgendaScreen() {
   const [showNew, setShowNew]         = useState(false);
   const [detailAppt, setDetailAppt]   = useState<ApptAgenda | null>(null);
   const [editAppt, setEditAppt]       = useState<ApptAgenda | null>(null);
+  const [reasignarAppt, setReasignarAppt] = useState<ApptAgenda | null>(null);
   const [chargeAppt, setChargeAppt]   = useState<LinkedAppt | null>(null);
 
   const { hoy, recargar } = useRecarga(async () => {
@@ -249,7 +252,7 @@ export default function AgendaScreen() {
     : [];
   const cruzadas = citasQueSeCruzan(visibles.map(a => {
     const inicio = timeToMins(a.appointment_time.slice(0, 5));
-    return { id: a.id, professionalId: a.professional_id, inicio, fin: inicio + duracionServicio(a.services), status: a.status };
+    return { id: a.id, professionalId: a.professional_id, inicio, fin: inicio + duracionCita(a), status: a.status };
   }));
   const activas = citas.filter(a => a.status !== "cancelled");
 
@@ -284,7 +287,7 @@ export default function AgendaScreen() {
           professionalId: appt.professional_id,
           dia: appt.appointment_date,
           hora: appt.appointment_time.slice(0, 5),
-          duracion: duracionServicio(appt.services),
+          duracion: duracionCita(appt),
           excluirCitaId: appt.id,
         });
         if (!v.ok) {
@@ -317,7 +320,7 @@ export default function AgendaScreen() {
       date: appt.appointment_date,
       time: appt.appointment_time,
       clientName: appt.clients?.name ?? null,
-      serviceName: appt.services?.name ?? null,
+      serviceName: nombreDeCita(appt),
       status,
     }, timezone).catch(() => {});
 
@@ -329,6 +332,7 @@ export default function AgendaScreen() {
       id: a.id, clientId: a.client_id, clientName: a.clients?.name ?? null, clientPhone: a.clients?.phone ?? null,
       serviceId: a.service_id, serviceName: a.services?.name ?? null, servicePrice: Number(a.services?.price ?? 0),
       locationId: a.location_id ?? null, time: a.appointment_time,
+      garantia: a.is_warranty ? { motivo: a.warranty_reason ?? null } : null,
     });
     setDetailAppt(null);
   };
@@ -441,6 +445,7 @@ export default function AgendaScreen() {
         onClose={() => setDetailAppt(null)}
         onCambiarEstado={handleStatusChange}
         onEditar={() => { setEditAppt(detailAppt); setDetailAppt(null); }}
+        onReasignar={() => { setReasignarAppt(detailAppt); setDetailAppt(null); }}
         onCobrar={() => { if (detailAppt) abrirCobro(detailAppt); }}
         onIrAlHistorial={() => router.push("/(admin)/pos-history")}
       />
@@ -463,6 +468,17 @@ export default function AgendaScreen() {
           professionals={profesionales}
           onClose={() => setEditAppt(null)}
           onSaved={() => { setEditAppt(null); recargar(); }}
+        />
+      )}
+
+      {tenantId && (
+        <ReasignarModal
+          appt={reasignarAppt}
+          tenantId={tenantId}
+          profesionales={profesionales}
+          horario={vigentes?.horario ?? datos?.horario ?? null}
+          onClose={() => setReasignarAppt(null)}
+          onSaved={() => { setReasignarAppt(null); recargar(); }}
         />
       )}
 

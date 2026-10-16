@@ -285,7 +285,7 @@ async function cargarPanel(tenantId: string, p: Period, hoy: string, tz: string)
   const [citas, sueltas, clientesRes, porCobrar, sedesRes] = await Promise.all([
     traerTodo<Appt>((d, h) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
+        .select("id, appointment_date, appointment_time, status, is_warranty, clients(name), services(name, price), appointment_services(price), pos_sales(total, payment_method, payments)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", fetchDesde)
         .lte("appointment_date", hoy);

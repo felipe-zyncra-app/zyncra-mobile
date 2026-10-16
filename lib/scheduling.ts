@@ -290,6 +290,20 @@ type ConDuracion = { duration_minutes?: number | null; duration_min?: number | n
  * el web. `porDefecto` solo aplica a una cita SIN servicio (service_id null):
  * se le reservan 60 min para no ofrecer encima un cupo que quizá no alcanza.
  */
+/**
+ * Duración de una CITA: la propia (appointments.duration_minutes, la que se
+ * guarda cuando lleva un adicional con valor libre o se le cambió el tiempo
+ * en el web) y, si no tiene, la de su servicio. Mismo criterio que
+ * appointmentDuration del web.
+ */
+export function duracionCita(a: {
+  duration_minutes?: number | string | null;
+  services?: ConDuracion | ConDuracion[];
+} | null | undefined): number {
+  const propia = Number(a?.duration_minutes ?? 0);
+  return Number.isFinite(propia) && propia > 0 ? Math.round(propia) : duracionServicio(a?.services);
+}
+
 export function duracionServicio(s: ConDuracion | ConDuracion[], porDefecto = 60): number {
   const x = Array.isArray(s) ? s[0] : s;
   if (!x) return porDefecto;
@@ -352,14 +366,23 @@ export function aServicioAgenda(s: Crudo): ServicioAgenda {
   };
 }
 
+/** Minúsculas y sin tildes: "depilacion" encuentra "Depilación". */
+const paraBuscar = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
 /**
- * Buscador del paso "Servicio" de Nueva cita: por nombre o por código, igual
- * que el panel web. Sin texto devuelve la lista entera.
+ * Buscador de servicios (Nueva cita y la hoja de cobro): por nombre o por
+ * código, sin importar tildes ni mayúsculas, y con cada palabra en cualquier
+ * orden ("uñas semi" encuentra "Semipermanente uñas"). Sin texto devuelve la
+ * lista entera.
  */
 export function filtrarServicios<T extends Pick<ServicioAgenda, "name" | "code">>(lista: readonly T[], texto: string): T[] {
-  const q = texto.trim().toLowerCase();
-  if (!q) return [...lista];
-  return lista.filter(x => x.name.toLowerCase().includes(q) || (x.code ?? "").toLowerCase().includes(q));
+  const palabras = paraBuscar(texto).split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return [...lista];
+  return lista.filter(x => {
+    const nombre = paraBuscar(x.name);
+    const codigo = paraBuscar(x.code ?? "");
+    return palabras.every(w => nombre.includes(w) || codigo.includes(w));
+  });
 }
 
 /** El servicio cuyo código es EXACTAMENTE lo tecleado (se elige solo), o null. */
@@ -430,7 +453,7 @@ export async function ocupacionDelDia(o: {
   excluirCitaId?: string | null;
 }): Promise<Ocupado[]> {
   let citasQ = supabase.from("appointments")
-    .select("id, appointment_time, services(duration_minutes, duration_min)")
+    .select("id, appointment_time, duration_minutes, services(duration_minutes, duration_min)")
     .eq("tenant_id", o.tenantId)
     .eq("professional_id", o.professionalId)
     .eq("appointment_date", o.dia)
@@ -451,7 +474,7 @@ export async function ocupacionDelDia(o: {
     const inicio = timeToMins(String(a.appointment_time ?? "").slice(0, 5));
     out.push({
       inicio,
-      fin: inicio + duracionServicio(a.services as ConDuracion | ConDuracion[]),
+      fin: inicio + duracionCita({ duration_minutes: a.duration_minutes as number | null, services: a.services as ConDuracion | ConDuracion[] }),
       tipo: "cita",
       id: String(a.id),
       professionalId: o.professionalId,

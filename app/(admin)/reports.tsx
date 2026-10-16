@@ -80,7 +80,7 @@ async function cargarReporte(tenantId: string, r: RangoNegocio): Promise<Reporte
     // Paginado: el servidor corta en 1000 filas y "Año" las pasaba (CAL-05).
     traerTodo<CitaReporte>((d, h) => {
       let q = supabase.from("appointments")
-        .select("id, appointment_date, appointment_time, status, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
+        .select("id, appointment_date, appointment_time, status, is_warranty, services(name, price), appointment_services(price), professionals(name), clients(id, created_at), pos_sales(total)")
         .eq("tenant_id", tenantId)
         .gte("appointment_date", r.desde)
         .lte("appointment_date", r.hasta);

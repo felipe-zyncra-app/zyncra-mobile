@@ -17,6 +17,7 @@ import { useGuardRespuestas, useRecarga } from "@/lib/useRecarga";
 import { reprogramarRecordatorioCita } from "@/lib/notifications";
 import { fmt12, fmtMoneyFull } from "@/lib/format";
 import { precioDeLista } from "@/lib/ingresos";
+import { nombreDeCita } from "@/lib/adicionales";
 import { fmtDia, sumarDias } from "@/lib/tz";
 import {
   agruparPorCobrar, estadoPorCobrar, fechaPorCobrar, porDia, serviciosDe, traerPorCobrarDetalle,
@@ -167,6 +168,7 @@ export default function PorCobrarScreen() {
       id: c.id, clientId: c.client_id, clientName: c.clients?.name ?? null, clientPhone: c.clients?.phone ?? null,
       serviceId: c.service_id, serviceName: c.services?.name ?? null, servicePrice: Number(c.services?.price ?? 0),
       locationId: c.location_id ?? null, time: c.appointment_time,
+      garantia: c.is_warranty ? { motivo: null } : null,
     });
   };
 
@@ -221,7 +223,7 @@ export default function PorCobrarScreen() {
       date: c.appointment_date,
       time: c.appointment_time,
       clientName: c.clients?.name ?? null,
-      serviceName: c.services?.name ?? null,
+      serviceName: nombreDeCita(c),
       status,
     }, timezone).catch(() => {});
 

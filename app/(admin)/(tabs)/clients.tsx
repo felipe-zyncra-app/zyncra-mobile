@@ -19,6 +19,8 @@ import { STATUS_META } from "@/constants/status";
 import Avatar from "@/components/Avatar";
 import ErrorState from "@/components/ErrorState";
 import { MonoTag } from "@/components/ui";
+import CumpleanosPicker from "@/components/CumpleanosPicker";
+import { cumpleParaGuardar, leerCumple, type MesDia } from "@/lib/cumpleanos";
 import {
   type LoyaltyReward,
   contarVisitas, describeReward, entregarRecompensa, getClientRewardStatuses,
@@ -66,15 +68,6 @@ function computeSegment(appts: Appt[], hoy: string): Segment {
 }
 type CustomField = { id: string; name: string; field_type: string };
 
-/** 'YYYY-MM-DD' que existe en el calendario (la regex sola dejaba pasar 1995-02-31). */
-function esFechaReal(dia: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia);
-  if (!m) return false;
-  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
-}
-
 /** Alert con Cancelar / botón, como promesa. */
 function confirmar(titulo: string, mensaje: string, boton: string, destructivo = false): Promise<boolean> {
   return new Promise(resolve => {
@@ -102,14 +95,13 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
   onAbrirExistente?: (id: string) => void;
 }) {
   const { t } = useTheme();
-  const { timezone } = useTenant();
   const isNew = client === null;
   const [name, setName]   = useState("");
   const [phone, setPhone] = useState("");
   const [iso2, setIso2] = useState(DEFAULT_COUNTRY_ISO);
   const [countryPicker, setCountryPicker] = useState(false);
   const [email, setEmail] = useState("");
-  const [birthday, setBirthday] = useState("");
+  const [birthday, setBirthday] = useState<MesDia | null>(null);
   const [address, setAddress] = useState("");
   const [document, setDocument] = useState("");
   const [notes, setNotes] = useState("");
@@ -126,7 +118,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
         ? separarTelefono(client.phone, client.phone_country_code)
         : { iso2: DEFAULT_COUNTRY_ISO, national: "" };
       setName(client?.name ?? ""); setPhone(sep.national); setIso2(sep.iso2); setEmail(client?.email ?? "");
-      setBirthday(client?.birthday ?? ""); setNotes(client?.notes ?? "");
+      setBirthday(leerCumple(client?.birthday)); setNotes(client?.notes ?? "");
       setAddress(client?.address ?? ""); setDocument(client?.document ?? "");
     }
   }, [visible, client]);
@@ -161,11 +153,7 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
   };
 
   const guardar = async () => {
-    const bday = birthday.trim();
-    if (bday && (!esFechaReal(bday) || bday > hoyNegocio(timezone))) {
-      Alert.alert("Cumpleaños inválido", "Usa el formato AAAA-MM-DD con una fecha real, por ejemplo 1995-06-24.");
-      return;
-    }
+    const bday = cumpleParaGuardar(birthday, client?.birthday);
     const mail = email.trim().toLowerCase();
     if (mail && !validarCorreoCliente(mail).ok) {
       Alert.alert("Correo inválido", "Revisa el correo (ej: nombre@gmail.com) o déjalo vacío.");
@@ -325,9 +313,8 @@ function EditModal({ visible, client, tenantId, onClose, onSaved, onDeleted, onA
                 placeholderTextColor={t.subtle} />
             </View>
             <View style={em.field}>
-              <Text style={labelStyle}>Cumpleaños (AAAA-MM-DD)</Text>
-              <TextInput style={inputStyle} value={birthday} onChangeText={setBirthday} placeholder="1995-06-24"
-                placeholderTextColor={t.subtle} keyboardType="numbers-and-punctuation" />
+              <Text style={labelStyle}>Cumpleaños</Text>
+              <CumpleanosPicker value={birthday} onChange={setBirthday} />
             </View>
             <View style={em.field}>
               <Text style={labelStyle}>Notas internas</Text>

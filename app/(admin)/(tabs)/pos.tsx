@@ -28,6 +28,7 @@ import ErrorState from "@/components/ErrorState";
 import { IconButton, MonoTag } from "@/components/ui";
 import SedeChip, { cargarListaSedes, nombreSede } from "@/components/SedeChip";
 import ChargeSheet, { type ChargeTarget, type LinkedAppt } from "@/components/ChargeSheet";
+import { nombreDeCita as nombreServicioCita } from "@/lib/adicionales";
 import TarjetaCita, { esCobrable, porCobrar, type CitaCobro } from "@/components/cobros/TarjetaCita";
 import FilaCobro from "@/components/cobros/FilaCobro";
 import DetalleCobro, { type CobroDetalle } from "@/components/cobros/DetalleCobro";
@@ -59,6 +60,7 @@ function toLinkedAppt(a: CitaCobro): LinkedAppt {
     servicePrice: Number(a.services?.price ?? 0),
     locationId: a.location_id,
     time: a.appointment_time,
+    garantia: a.is_warranty ? { motivo: a.warranty_reason ?? null } : null,
   };
 }
 
@@ -114,7 +116,7 @@ export default function PosScreen() {
       const [citasCrudas, ventasCrudas, sedes, estadoCaja, pendientes, conf] = await Promise.all([
         traerTodo((d, h) => {
           let q = supabase.from("appointments")
-            .select("id, appointment_time, status, client_id, service_id, location_id, clients(name, phone), services(name, price), appointment_services(price), pos_sales(total, payment_method)")
+            .select("id, appointment_time, status, client_id, service_id, location_id, is_warranty, warranty_reason, clients(name, phone), services(name, price), appointment_services(name, price), pos_sales(total, payment_method)")
             .eq("tenant_id", tenantId)
             .eq("appointment_date", dia);
           if (loc) q = q.eq("location_id", loc);
@@ -184,7 +186,7 @@ export default function PosScreen() {
 
   const masOpciones = (a: CitaCobro) => {
     const cliente = a.clients?.name ?? "Sin cliente";
-    Alert.alert(cliente, `${fmt12(a.appointment_time.slice(0, 5))} · ${a.services?.name ?? "Sin servicio"}`, [
+    Alert.alert(cliente, `${fmt12(a.appointment_time.slice(0, 5))} · ${nombreServicioCita(a) ?? "Sin servicio"}`, [
       { text: "Abrir en la agenda", onPress: () => router.navigate({ pathname: "/(admin)/(tabs)/agenda", params: { fecha: dia, cita: a.id } }) },
       { text: `Marcar ${STATUS_META.no_show.label}`, onPress: () => cambiarEstado(a, "no_show") },
       { text: "Cancelar la cita", style: "destructive", onPress: () => cambiarEstado(a, "cancelled") },

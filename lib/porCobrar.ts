@@ -42,6 +42,8 @@ export type CitaPorCobrar = {
   /** Solo lo trae la consulta de detalle; sirve para ordenar dentro del día. */
   appointment_time?: string | null;
   status: string;
+  /** Cita de garantía: el servicio principal va en $0. */
+  is_warranty?: boolean | null;
   services: { name?: string | null; price?: Precio } | null;
   appointment_services: { name?: string | null; price: Precio }[] | null;
   pos_sales?: { id: string }[] | null;
@@ -62,9 +64,9 @@ export type CitaPorCobrarDetalle = CitaPorCobrar & {
 // suma) y el de la pantalla trae lo que se lista. pos_sales(id) va en los dos
 // porque el anti-join (pos_sales=is.null) necesita el embed en el select.
 // La sede se nombra con la lista de sedes (location_id), sin otro embed.
-export const SELECT_TARJETA = "id, appointment_date, status, services(price), appointment_services(price), pos_sales(id)";
+export const SELECT_TARJETA = "id, appointment_date, status, is_warranty, services(price), appointment_services(price), pos_sales(id)";
 export const SELECT_DETALLE =
-  "id, appointment_date, appointment_time, status, client_id, service_id, professional_id, location_id, "
+  "id, appointment_date, appointment_time, status, is_warranty, client_id, service_id, professional_id, location_id, "
   + "clients(name, phone), services(name, price), appointment_services(name, price), professionals(name), pos_sales(id)";
 
 const CONTEXTO = "No se pudo calcular lo que está por cobrar";

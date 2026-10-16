@@ -15,6 +15,7 @@ import {
   pareceUnaPropina, textoPropinaCobrada, totalesCobro, type LineaCarrito, type Profesional,
 } from "@/lib/propinas";
 import { getActiveLocationId } from "@/lib/active-location";
+import { filtrarServicios } from "@/lib/scheduling";
 import { filtroSedeOGeneral } from "@/lib/sedes";
 import { fmtMoneyFull, fmt12, enlaceWhatsApp } from "@/lib/format";
 import { diaLocalDe, horaLocalDe, fmtDia, esHoy } from "@/lib/tz";
@@ -64,6 +65,11 @@ export type LinkedAppt = {
   servicePrice: number;
   locationId: string | null;
   time: string;
+  /**
+   * Cita de garantía (appointments.is_warranty): el servicio principal entra
+   * en $0. Los adicionales y productos se cobran normal.
+   */
+  garantia?: { motivo: string | null } | null;
 };
 
 /** Resumen del cobro ya registrado, para la pantalla de éxito. */
@@ -90,7 +96,7 @@ export type ChargeTarget =
   | { kind: "appointment"; appt: LinkedAppt }
   | { kind: "direct" };
 
-type Service = { id: string; name: string; price: number };
+type Service = { id: string; name: string; price: number; code: string | null };
 type Product = {
   id: string; name: string; sale_price: number; cost_price: number | null;
   discount_type: string | null; discount_value: number | null; stock_quantity: number;
@@ -258,9 +264,9 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     if (apertura !== aperturaRef.current) return;
     const err = svc.error || prod.error;
     if (err) { setCatalogoError(err); setCatalogo("error"); return; }
-    setServices(((svc.data ?? []) as { id: string; name: string; price: number; is_active?: boolean | null }[])
+    setServices(((svc.data ?? []) as { id: string; name: string; price: number; code?: string | null; is_active?: boolean | null }[])
       .filter(x => x.is_active !== false)
-      .map(x => ({ id: x.id, name: x.name, price: Number(x.price) })));
+      .map(x => ({ id: x.id, name: x.name, price: Number(x.price), code: x.code?.trim() || null })));
     setProducts((prod.data ?? []) as Product[]);
     setCatalogo("listo");
   };
@@ -366,7 +372,11 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     const a = tg.appt;
     if (a.clientId) setClient({ id: a.clientId, name: a.clientName ?? "Cliente", phone: a.clientPhone ?? "" });
     if (a.serviceId || a.serviceName) {
-      setCart([{ key: a.serviceId ?? "main", serviceId: a.serviceId, productId: null, itemType: "service", name: a.serviceName ?? "Servicio", price: a.servicePrice, qty: 1 }]);
+      setCart([{
+        key: a.serviceId ?? "main", serviceId: a.serviceId, productId: null, itemType: "service",
+        name: a.garantia ? `${a.serviceName ?? "Servicio"} (garantía)` : a.serviceName ?? "Servicio",
+        price: a.garantia ? 0 : a.servicePrice, qty: 1,
+      }]);
     }
     cargarExtras(a.id);
     revisarCobroPrevio(a.id);
@@ -442,9 +452,8 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const splitValid     = !split || (Math.abs(splitRemaining) < 1 && splitLines.every(l => monto(l.amount) > 0));
 
   const coincidencias = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (tab === "servicios") return services.filter(x => !q || x.name.toLowerCase().includes(q));
-    if (tab === "productos") return products.filter(x => !q || x.name.toLowerCase().includes(q));
+    if (tab === "servicios") return filtrarServicios(services, search);
+    if (tab === "productos") return filtrarServicios(products, search);
     return [];
   }, [tab, search, services, products]);
   const TOPE_CATALOGO = 8;
@@ -713,7 +722,15 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
       <View style={{ flex: 1 }}>
         <Text style={s.apptBannerKicker}>Cobrando una cita</Text>
         <Text style={[s.apptBannerTitle, { color: t.text }]} numberOfLines={1}>{appt.clientName ?? "Sin cliente"}</Text>
-        <Text style={[s.apptBannerMeta, { color: t.muted }]} numberOfLines={1}>{appt.serviceName ?? "Servicio"} · {fmt12(appt.time.slice(0, 5))}</Text>
+        <Text style={[s.apptBannerMeta, { color: t.muted }]} numberOfLines={1}>{appt.serviceName ?? "Adicionales con valor libre"} · {fmt12(appt.time.slice(0, 5))}</Text>
+        {appt.garantia ? (
+          <View style={s.garantiaChip}>
+            <Ionicons name="shield-checkmark-outline" size={13} color="#7c3aed" />
+            <Text style={s.garantiaTxt} numberOfLines={2}>
+              Garantía: el servicio va en $0{appt.garantia.motivo ? ` · ${appt.garantia.motivo}` : ""}
+            </Text>
+          </View>
+        ) : null}
         <Text style={[s.apptBannerHint, { color: t.muted }]}>Al cobrar, la cita queda Completada.</Text>
       </View>
     </View>
@@ -794,7 +811,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                       : `${fmtMoneyFull(i.price)}${i.itemType === "product" ? " · producto" : ""}${tope ? " · sin más stock" : ""}`}
                   </Text>
                 )}
-                {i.itemType === "service" && i.price <= 0 && (
+                {i.itemType === "service" && i.price <= 0 && !(appt?.garantia && i.key === (appt.serviceId ?? "main")) && (
                   <Text style={[s.cartSub, { color: "#d97706", fontFamily: Fonts.semibold }]}>Escribe el valor por unidad y la cantidad.</Text>
                 )}
                 {conVendedor && (
@@ -1001,29 +1018,9 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
     </View>
   );
 
-  const toggleMas = appt ? (
-    <TouchableOpacity onPress={() => setShowMore(v => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} activeOpacity={0.7}
-      accessibilityRole="button" accessibilityState={{ expanded: showMore }}>
-      <Ionicons name={showMore ? "remove-circle-outline" : "add-circle-outline"} size={16} color={azul} />
-      <Text style={{ fontFamily: Fonts.bold, fontSize: 13, color: azul }}>
-        {showMore ? "Menos opciones" : "Agregar otro servicio, producto, descuento o nota"}
-      </Text>
-    </TouchableOpacity>
-  ) : null;
-
-  const bloqueAgregar = (showMore || !appt) ? (
-    <View>
-      <Text style={[s.label, { color: t.muted }]}>{appt ? "Agregar" : "¿Qué vendes?"}</Text>
-      <View style={s.tabs}>
-        {([["servicios", "Servicios"], ["productos", "Productos"], ["libre", "Ítem libre"]] as const).map(([key, lbl]) => (
-          <TouchableOpacity key={key} onPress={() => { setTab(key); setSearch(""); setVerTodo(false); }}
-            accessibilityRole="tab" accessibilityState={{ selected: tab === key }}
-            style={[s.tab, { borderColor: t.border, backgroundColor: t.card }, tab === key && [s.tabActive, { backgroundColor: t.ink, borderColor: t.ink }]]}>
-            <Text style={[s.tabText, { color: t.muted }, tab === key && { color: t.cardSolid }]}>{lbl}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      {tab !== "libre" ? (
+  // Buscador y resultados del catálogo. `soloAlBuscar`: en el cobro de una
+  // cita la lista sale solo al escribir, para no empujar el pago hacia abajo.
+  const listaCatalogo = (soloAlBuscar: boolean) => (
         catalogo === "error" ? (
           <View style={s.errorBox}>
             <Ionicons name="cloud-offline-outline" size={16} color={Colors.red} />
@@ -1040,11 +1037,18 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
             <Ionicons name="search-outline" size={15} color={t.subtle} />
             <TextInput
               style={[s.searchInput, { color: t.text }]}
-              value={search} onChangeText={setSearch}
-              placeholder={tab === "servicios" ? "Buscar servicio" : "Buscar producto"} placeholderTextColor={t.subtle}
+              value={search} onChangeText={v => { setSearch(v); setVerTodo(false); }}
+              placeholder={tab === "servicios" ? "Buscar servicio por nombre o código" : "Buscar producto"} placeholderTextColor={t.subtle}
+              autoCorrect={false} autoCapitalize="none" returnKeyType="search" clearButtonMode="never"
+              accessibilityLabel={tab === "servicios" ? "Buscar servicio" : "Buscar producto"}
             />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
+                <Ionicons name="close-circle" size={17} color={t.subtle} />
+              </TouchableOpacity>
+            )}
           </View>
-          {filtered.length === 0 ? (
+          {soloAlBuscar && !search.trim() ? null : filtered.length === 0 ? (
             <Text style={{ fontFamily: Fonts.regular, fontSize: 12, color: t.subtle, paddingVertical: 8 }}>
               {search.trim() ? "Nada coincide con la búsqueda" : tab === "servicios" ? "Sin servicios" : "Sin productos activos"}
             </Text>
@@ -1080,6 +1084,41 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
           ) : null}
         </>
         )
+  );
+
+  // Cobro de una cita: el buscador de servicios queda a la vista, sin tener
+  // que abrir "Agregar otro servicio…" (con un catálogo largo era lo más lento).
+  const buscadorCita = appt && !showMore && tab === "servicios" ? (
+    <View>
+      <Text style={[s.label, { color: t.muted }]}>Agregar servicio</Text>
+      {listaCatalogo(true)}
+    </View>
+  ) : null;
+
+  const toggleMas = appt ? (
+    <TouchableOpacity onPress={() => setShowMore(v => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }} activeOpacity={0.7}
+      accessibilityRole="button" accessibilityState={{ expanded: showMore }}>
+      <Ionicons name={showMore ? "remove-circle-outline" : "add-circle-outline"} size={16} color={azul} />
+      <Text style={{ fontFamily: Fonts.bold, fontSize: 13, color: azul }}>
+        {showMore ? "Menos opciones" : "Agregar otro servicio, producto, descuento o nota"}
+      </Text>
+    </TouchableOpacity>
+  ) : null;
+
+  const bloqueAgregar = (showMore || !appt) ? (
+    <View>
+      <Text style={[s.label, { color: t.muted }]}>{appt ? "Agregar" : "¿Qué vendes?"}</Text>
+      <View style={s.tabs}>
+        {([["servicios", "Servicios"], ["productos", "Productos"], ["libre", "Ítem libre"]] as const).map(([key, lbl]) => (
+          <TouchableOpacity key={key} onPress={() => { setTab(key); setSearch(""); setVerTodo(false); }}
+            accessibilityRole="tab" accessibilityState={{ selected: tab === key }}
+            style={[s.tab, { borderColor: t.border, backgroundColor: t.card }, tab === key && [s.tabActive, { backgroundColor: t.ink, borderColor: t.ink }]]}>
+            <Text style={[s.tabText, { color: t.muted }, tab === key && { color: t.cardSolid }]}>{lbl}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {tab !== "libre" ? (
+        listaCatalogo(false)
       ) : (
         <View style={{ gap: 10 }}>
           <TextInput style={[s.input, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
@@ -1174,6 +1213,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                 {bannerCita}
                 {errorExtras}
                 {bloqueCarrito}
+                {buscadorCita}
                 {bloquePropina}
                 {bloquePago}
                 {toggleMas}
@@ -1296,6 +1336,8 @@ const s = StyleSheet.create({
   secondaryBtnText: { fontSize: 14, fontFamily: Fonts.bold },
   waBtn:         { alignSelf: "stretch", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: Radius.full, borderWidth: 1, borderColor: "rgba(37,211,102,0.5)", backgroundColor: "rgba(37,211,102,0.08)", marginTop: 4 },
   waBtnText:     { fontSize: 14, fontFamily: Fonts.bold, color: "#128C7E" },
+  garantiaChip:  { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", marginTop: 6, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: "rgba(124,58,237,0.10)" },
+  garantiaTxt:   { fontSize: 11.5, fontFamily: Fonts.semibold, color: "#7c3aed", flexShrink: 1 },
   searchBox:     { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, marginBottom: 4 },
   searchInput:   { flex: 1, paddingVertical: 11, fontSize: 14, fontFamily: Fonts.regular },
   enCobro:       { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center" },

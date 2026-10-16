@@ -59,13 +59,15 @@ export function estaCobrada(cita: ConVentas | null | undefined): boolean {
 /**
  * Precio de lista de la cita: servicio principal + adicionales
  * (appointment_services), igual que el POS (DIN-23). Solo para "por cobrar" y
- * "pérdidas", nunca para ingresos.
+ * "pérdidas", nunca para ingresos. Una cita de garantía (is_warranty) no
+ * cobra el servicio principal: solo cuentan los adicionales.
  */
 export function precioDeLista(cita: {
   services?: { price?: number | string | null } | null;
   appointment_services?: { price?: number | string | null }[] | null;
+  is_warranty?: boolean | null;
 } | null | undefined): number {
-  const base = Number(cita?.services?.price ?? 0);
+  const base = cita?.is_warranty ? 0 : Number(cita?.services?.price ?? 0);
   const extras = (cita?.appointment_services ?? []).reduce((s, x) => s + (Number(x?.price) || 0), 0);
   const n = (Number.isFinite(base) ? base : 0) + extras;
   return Number.isFinite(n) ? n : 0;

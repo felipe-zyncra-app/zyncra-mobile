@@ -78,7 +78,7 @@ export interface Linea {
   /** Lo cobrado por la línea, con el descuento de la venta repartido. */
   valor: number;
   comision: number;
-  regla: "servicio" | "general" | "producto" | "ninguna";
+  regla: "servicio" | "general" | "producto" | "ninguna" | "garantia";
   cliente: string | null;
   hora: string | null;
   /** El día ya está cubierto por una liquidación de comisión. */
@@ -300,6 +300,7 @@ export const ETIQUETA_REGLA: Record<Linea["regla"], string> = {
   general: "Regla general",
   producto: "% de productos",
   ninguna: "Sin comisión",
+  garantia: "Garantía (sin comisión)",
 };
 
 /** ¿Hay algo que pagarle? (comisión, básico o novedades pendientes). */

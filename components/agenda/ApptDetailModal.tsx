@@ -10,6 +10,7 @@ import { fmt12, fmtMoneyFull } from "@/lib/format";
 import { fmtDia } from "@/lib/tz";
 import { mensajeError } from "@/lib/db";
 import { precioDeLista } from "@/lib/ingresos";
+import { nombreDeCita } from "@/lib/adicionales";
 import { useGuardRespuestas } from "@/lib/useRecarga";
 import { IconButton } from "@/components/ui";
 import type { ApptAgenda, VentaCita } from "./tipos";
@@ -31,11 +32,13 @@ type EstadoVenta =
  *    quedaba en caja, el Panel lo dejaba de contar y aparecía "Cobrar" otra vez);
  *  · una cita completada sin cobro se muestra "por cobrar".
  */
-export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEditar, onCobrar, onIrAlHistorial }: {
+export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEditar, onReasignar, onCobrar, onIrAlHistorial }: {
   appt: ApptAgenda | null;
   onClose: () => void;
   onCambiarEstado: (appt: ApptAgenda, status: string) => void;
   onEditar: () => void;
+  /** Pasar la cita a otro profesional a la misma hora. */
+  onReasignar?: () => void;
   onCobrar: () => void;
   onIrAlHistorial: () => void;
 }) {
@@ -101,7 +104,7 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
   // Mover una cita cobrada (otra fecha, profesional o servicio) deja la venta
   // con los datos viejos y el Panel pasa a atribuir el cobro al día nuevo.
   // Misma regla que el estado: primero se anula el cobro.
-  const alEditar = () => {
+  const siNoEstaCobrada = (accion: () => void) => {
     if (!listo) return;
     if (cobrada) {
       Alert.alert(
@@ -114,8 +117,10 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
       );
       return;
     }
-    onEditar();
+    accion();
   };
+  const alEditar = () => siNoEstaCobrada(onEditar);
+  const puedeReasignar = !!onReasignar && appt.status !== "cancelled" && appt.status !== "no_show";
 
   return (
     <Modal visible={!!appt} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
@@ -130,12 +135,35 @@ export default function ApptDetailModal({ appt, onClose, onCambiarEstado, onEdit
           <View style={s.summaryBox}>
             <Text style={s.clientName}>{appt.clients?.name ?? "Sin cliente"}</Text>
             <Text style={s.meta}>
-              {appt.services?.name ?? "Sin servicio"}
+              {nombreDeCita(appt) ?? "Sin servicio"}
               {adicionales > 0 ? ` + ${adicionales} adicional${adicionales > 1 ? "es" : ""}` : ""}
             </Text>
             <Text style={s.meta}>{fmt12(time)} · {fmtDia(appt.appointment_date, "largo")}</Text>
             {appt.professionals?.name && (
               <Text style={s.proMeta}>por {appt.professionals.name}</Text>
+            )}
+            {appt.is_warranty && (
+              <View style={s.garantia}>
+                <Ionicons name="shield-checkmark-outline" size={13} color="white" />
+                <Text style={s.garantiaText} numberOfLines={2}>
+                  Garantía · sin costo{appt.warranty_reason ? ` · ${appt.warranty_reason}` : ""}
+                </Text>
+              </View>
+            )}
+            {puedeReasignar && (
+              <TouchableOpacity
+                // También con la cita cobrada: ReasignarModal mueve la comisión
+                // y bloquea si ese día ya se liquidó.
+                onPress={onReasignar}
+                disabled={!listo}
+                style={[s.reasignarBtn, !listo && { opacity: 0.5 }]}
+                accessibilityRole="button"
+                accessibilityHint="Pasa la cita a otro profesional a la misma hora"
+                hitSlop={6}
+              >
+                <Ionicons name="swap-horizontal" size={13} color="white" />
+                <Text style={s.reasignarText}>Cambiar profesional</Text>
+              </TouchableOpacity>
             )}
             {precio > 0 && <Text style={s.price}>{fmtMoneyFull(precio)}</Text>}
           </View>
@@ -245,6 +273,10 @@ function crearEstilos(t: ThemeColors) {
     clientName:  { fontSize: 18, fontFamily: Fonts.bold, color: "white" },
     meta:        { fontSize: 13, fontFamily: Fonts.regular, color: "rgba(255,255,255,.8)" },
     proMeta:     { fontSize: 12, fontFamily: Fonts.semibold, color: "rgba(255,255,255,.65)", fontStyle: "italic" },
+    garantia:    { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: Radius.full, backgroundColor: "rgba(124,58,237,0.55)" },
+    garantiaText:{ fontSize: 12, fontFamily: Fonts.semibold, color: "white", flexShrink: 1 },
+    reasignarBtn:{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: Radius.full, backgroundColor: "rgba(255,255,255,.14)", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" },
+    reasignarText:{ fontSize: 12, fontFamily: Fonts.semibold, color: "white" },
     price:       { fontSize: 22, fontFamily: Fonts.bold, color: "white", marginTop: 4 },
     sectionLabel:{ fontSize: 11, fontFamily: Fonts.bold, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 },
     statusBtn:   { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: t.cardSolid, borderWidth: 1, borderColor: t.line, borderRadius: Radius.md, padding: 14, overflow: "hidden" },

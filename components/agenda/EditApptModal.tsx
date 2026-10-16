@@ -19,11 +19,12 @@ import { fmtDia, inicioDeSemana, minutosDelDia } from "@/lib/tz";
 import { fmtMoneyFull, fmtTelefono } from "@/lib/format";
 import { useGuardRespuestas, useHoyNegocio } from "@/lib/useRecarga";
 import {
-  avisosDeHorario, cargarCatalogoAgenda, duracionServicio, effectiveDayHours, mensajeErrorCita,
+  avisosDeHorario, cargarCatalogoAgenda, duracionCita, duracionServicio, effectiveDayHours, mensajeErrorCita,
   timeToMins, verificarCupo,
   type CatalogoAgenda, type ProfesionalAgenda, type ServicioAgenda,
 } from "@/lib/scheduling";
 import ErrorState from "@/components/ErrorState";
+import { nombreDeCita } from "@/lib/adicionales";
 import { IconButton } from "@/components/ui";
 import SemanaStrip from "./SemanaStrip";
 import SelectorHora from "./SelectorHora";
@@ -139,10 +140,17 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
     return activos;
   }, [catalogo, selectedService]);
 
+  // Tiempo que la cita lleva encima de su servicio (adicionales de valor
+  // libre, guardados en duration_minutes): se conserva al cambiar de servicio.
+  const extraMin = appt ? Math.max(0, duracionCita(appt) - (appt.service_id ? duracionServicio(appt.services) : 0)) : 0;
+  const duracion = selectedService ? selectedService.duracion + extraMin
+    : appt && !appt.service_id ? duracionCita(appt) : null;
+  const nombreServicio = selectedService?.name ?? nombreDeCita(appt) ?? "Sin servicio";
+
   const cupos = useCuposDelDia({
     tenantId,
     profesional: selectedPro,
-    duracion: selectedService?.duracion ?? null,
+    duracion,
     dia: selectedDay,
     horario: catalogo?.horario ?? null,
     intervalo: catalogo?.intervalo ?? 30,
@@ -165,10 +173,10 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
 
   const horaFueraDeGrilla = selectedTime !== null && !cupos.cupos.includes(selectedTime);
   const avisosHora = (() => {
-    if (!selectedTime || !selectedService || !horaFueraDeGrilla || cupos.estado === "cargando") return [];
+    if (!selectedTime || !duracion || !horaFueraDeGrilla || cupos.estado === "cargando") return [];
     // La hora que ya tenía la cita no se cuestiona si no se movió.
     if (esDiaOriginal && selectedTime === appt.appointment_time.slice(0, 5) && selectedPro?.id === appt.professional_id) return [];
-    const avisos = avisosDeHorario(cupos.horarioDia, selectedTime, selectedService.duracion);
+    const avisos = avisosDeHorario(cupos.horarioDia, selectedTime, duracion);
     if (selectedDay === hoy && timeToMins(selectedTime) < minutosDelDia(new Date(), timezone)) avisos.push("Esa hora de hoy ya pasó.");
     return avisos;
   })();
@@ -176,12 +184,13 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
   const canStep0 = selectedPro !== null;
   // Una cita sin cliente se puede reagendar sin asignarle uno.
   const canStep1 = selectedClient !== null || !appt.client_id;
-  const canStep2 = selectedService !== null;
+  // Una cita solo con adicionales de valor libre no tiene servicio de la carta.
+  const canStep2 = selectedService !== null || !appt.service_id;
   const canSave  = selectedTime !== null && (selectedDay >= hoy || esDiaOriginal);
   const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
 
   const handleSave = async () => {
-    if (!selectedTime || !selectedService || !selectedPro || saving) return;
+    if (!selectedTime || !duracion || !selectedPro || saving) return;
     if (selectedDay < hoy && !esDiaOriginal) {
       Alert.alert("Fecha pasada", "No se puede mover una cita a un día que ya pasó.");
       return;
@@ -198,7 +207,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
       try {
         v = await verificarCupo({
           tenantId, professionalId: selectedPro.id, dia: selectedDay, hora: selectedTime,
-          duracion: selectedService.duracion, excluirCitaId: appt.id,
+          duracion, excluirCitaId: appt.id,
         });
       } catch (e) {
         Alert.alert("No se pudo verificar el horario", mensajeError(e));
@@ -217,15 +226,17 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
       }
 
       const payload: {
-        professional_id: string; service_id: string; appointment_date: string; appointment_time: string;
-        client_id?: string; location_id?: string;
+        professional_id: string; service_id: string | null; appointment_date: string; appointment_time: string;
+        client_id?: string; location_id?: string; duration_minutes?: number;
       } = {
         professional_id:  selectedPro.id,
-        service_id:       selectedService.id,
+        service_id:       selectedService?.id ?? appt.service_id,
         appointment_date: selectedDay,
         appointment_time: `${selectedTime}:00`,
       };
       if (selectedClient) payload.client_id = selectedClient.id;
+      // La cita ya tenía su propio tiempo (adicionales): se recalcula con el servicio nuevo.
+      if (Number(appt.duration_minutes) > 0) payload.duration_minutes = duracion;
       // Si se cambia a un profesional de otra sede, la cita se va con él.
       if (selectedPro.location_id) payload.location_id = selectedPro.location_id;
 
@@ -246,7 +257,7 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
         date: selectedDay,
         time: `${selectedTime}:00`,
         clientName: selectedClient?.name ?? appt.clients?.name ?? null,
-        serviceName: selectedService.name,
+        serviceName: nombreServicio,
         status: appt.status,
       }, timezone).catch(() => {});
 
@@ -410,9 +421,9 @@ export default function EditApptModal({ appt, tenantId, professionals, onClose, 
             {/* ── STEP 3: DATE + TIME ── */}
             {step === 3 && (
               <ScrollView contentContainerStyle={{ paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
-                {selectedService && (
+                {!!duracion && (
                   <View style={s.durationNote}>
-                    <Text style={s.durationNoteText}>{fmtDia(selectedDay, "largo")}  ·  {selectedService.name}  ·  ⏱ {selectedService.duracion} min</Text>
+                    <Text style={s.durationNoteText}>{fmtDia(selectedDay, "largo")}  ·  {nombreServicio}  ·  ⏱ {duracion} min</Text>
                   </View>
                 )}
 

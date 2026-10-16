@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme";
 import { fmtMoneyFull, fmt12 } from "@/lib/format";
 import { cobradoDe, estaCobrada, precioDeLista, ventasDe, type VentaResumen } from "@/lib/ingresos";
+import { nombreDeCita } from "@/lib/adicionales";
 import { medioOGenerico } from "@/lib/medios-pago";
 import { Colors, Fonts, Radius, Shadow } from "@/constants/theme";
 import { IconButton } from "@/components/ui";
@@ -15,10 +16,13 @@ export type CitaCobro = {
   client_id: string | null;
   service_id: string | null;
   location_id: string | null;
+  /** Cita de garantía: el servicio principal se cobra en $0. */
+  is_warranty?: boolean | null;
+  warranty_reason?: string | null;
   clients: { name: string; phone?: string | null } | null;
   services: { name: string; price: number } | null;
   /** Servicios adicionales: se cobran junto al principal (DIN-23). */
-  appointment_services: { price: number }[] | null;
+  appointment_services: { name?: string | null; price: number }[] | null;
   /**
    * Cobros de la cita, embebidos (se hayan hecho el día que se hayan hecho):
    * así una cita ya cobrada nunca vuelve a ofrecer "Cobrar". Mismo criterio
@@ -50,8 +54,9 @@ export function porCobrar(a: CitaCobro): boolean {
 }
 
 function servicioDe(a: CitaCobro): string {
+  if (!a.services?.name) return nombreDeCita(a) ?? "Sin servicio";
   const extras = a.appointment_services?.length ?? 0;
-  return `${a.services?.name ?? "Sin servicio"}${extras > 0 ? ` + ${extras} adicional${extras > 1 ? "es" : ""}` : ""}`;
+  return `${a.services.name}${extras > 0 ? ` + ${extras} adicional${extras > 1 ? "es" : ""}` : ""}`;
 }
 
 /**

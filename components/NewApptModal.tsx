@@ -8,6 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Colors, Fonts, Gradients, Radius, Shadow } from "@/constants/theme";
 import { useTheme, type ThemeColors } from "@/lib/theme";
@@ -31,7 +32,11 @@ import ErrorState from "@/components/ErrorState";
 import { IconButton } from "@/components/ui";
 import SemanaStrip from "@/components/agenda/SemanaStrip";
 import SelectorHora from "@/components/agenda/SelectorHora";
-import { useCuposDelDia } from "@/components/agenda/useCupos";
+import { useCuposDelDia, useCuposDelEquipo } from "@/components/agenda/useCupos";
+import { sortearProfesional } from "@/lib/asignacion";
+import AdicionalesEditor from "@/components/agenda/AdicionalesEditor";
+import { duracionConAdicionales, nombreDeCita, precioConAdicionales, type Adicional } from "@/lib/adicionales";
+import GarantiaSelector, { SIN_GARANTIA, garantiaLista, type Garantia } from "@/components/agenda/GarantiaSelector";
 import { confirmar } from "@/components/agenda/tipos";
 
 type Client   = { id: string; name: string; phone: string };
@@ -78,6 +83,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const [clients, setClients]         = useState<Client[]>([]);
 
   const [selectedPro, setSelectedPro]         = useState<ProfesionalAgenda | null>(null);
+  // "Al azar": no se elige profesional; al guardar se sortea entre los que
+  // tienen libre la hora elegida.
+  const [alAzar, setAlAzar]                   = useState(false);
   const [clientSearch, setClientSearch]       = useState("");
   const [serviceQuery, setServiceQuery]       = useState("");
   const [isNewClient, setIsNewClient]         = useState(false);
@@ -95,6 +103,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const [selectedDay, setSelectedDay]         = useState(() => hoyNegocio(timezone));
   const [semana, setSemana]                   = useState(() => inicioDeSemana(hoyNegocio(timezone)));
   const [selectedTime, setSelectedTime]       = useState<string | null>(null);
+  const [garantia, setGarantia]               = useState<Garantia>(SIN_GARANTIA);
+  // Adicionales con valor libre (lo que no está en la carta): solos o junto al servicio.
+  const [adicionales, setAdicionales]         = useState<Adicional[]>([]);
 
   // Id de la cita generado al abrir: si el insert llegó pero la respuesta se
   // perdió, el reintento choca con su propia fila (23505) y se reconoce como
@@ -140,6 +151,9 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     apptIdRef.current = nuevoId();
     setStep(0);
     setSelectedPro(null);
+    setAlAzar(false);
+    setGarantia(SIN_GARANTIA);
+    setAdicionales([]);
     setSelectedClient(null);
     setSelectedService(null);
     setSelectedTime(null);
@@ -193,23 +207,48 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     if (exacto) setSelectedService(exacto);
   };
 
-  const cupos = useCuposDelDia({
+  // Lo que dura y vale la cita: el servicio de la carta (si hay) más los adicionales.
+  const hayServicio = selectedService !== null || adicionales.length > 0;
+  const duracionTotal = hayServicio ? duracionConAdicionales(selectedService?.duracion ?? null, adicionales) : null;
+  const nombreServicio = nombreDeCita({
+    services: selectedService ? { name: selectedService.name } : null,
+    appointment_services: adicionales.map(a => ({ name: a.nombre })),
+  }) ?? "Servicio";
+
+  const cuposPro = useCuposDelDia({
     tenantId,
     profesional: selectedPro,
-    duracion: selectedService?.duracion ?? null,
+    duracion: duracionTotal,
     dia: selectedDay,
     horario: catalogo?.horario ?? null,
     intervalo: catalogo?.intervalo ?? 30,
-    habilitado: visible && step === 3,
+    habilitado: visible && step === 3 && !alAzar,
     // Si un intento anterior sí guardó (se perdió la respuesta), su propia
     // fila no debe ocupar el cupo que se va a reintentar.
     excluirCitaId: apptIdRef.current,
     hoy,
     timezone,
   });
+  const cuposEquipo = useCuposDelEquipo({
+    tenantId,
+    profesionales,
+    duracion: duracionTotal,
+    dia: selectedDay,
+    horario: catalogo?.horario ?? null,
+    intervalo: catalogo?.intervalo ?? 30,
+    habilitado: visible && step === 3 && alAzar,
+    excluirCitaId: apptIdRef.current,
+    hoy,
+    timezone,
+  });
+  const cupos = alAzar ? cuposEquipo : cuposPro;
+  const libresALaHora = alAzar && selectedTime ? (cuposEquipo.libresPorHora[selectedTime]?.length ?? 0) : 0;
+
+  // La garantía repara una cita de ESE cliente: si cambia el cliente, se reinicia.
+  useEffect(() => { setGarantia(SIN_GARANTIA); }, [selectedClient?.id, isNewClient]);
 
   // Al cambiar de día o recargar, la hora elegida deja de valer.
-  useEffect(() => { setSelectedTime(null); }, [selectedDay, selectedPro?.id, selectedService?.id]);
+  useEffect(() => { setSelectedTime(null); }, [selectedDay, selectedPro?.id, alAzar, selectedService?.id, duracionTotal]);
 
   // Con búsqueda activa se consulta el servidor: la lista local solo tiene 150 clientes
   const serverClients = useClientSearch(tenantId, clientSearch);
@@ -228,18 +267,20 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   const correoNuevo = newClientEmail.trim();
   const correoNuevoValido = correoNuevo ? validarCorreoCliente(correoNuevo).ok : !emailRequired;
 
+  // Un cliente nuevo no tiene citas que reparar.
+  const esGarantia = garantia.activa && !isNewClient && selectedClient !== null;
   const clientName = isNewClient ? newClientName.trim() : (selectedClient?.name ?? "");
-  const canStep0   = selectedPro !== null;
+  const canStep0   = selectedPro !== null || alAzar;
   const canStep1   = isNewClient ? newClientName.trim().length >= 2 && telNuevoValido && correoNuevoValido : selectedClient !== null;
-  const canStep2   = selectedService !== null;
+  const canStep2   = hayServicio && garantiaLista(garantia);
   const requiredFieldsOk = apptFields.every(f => !f.required || (fieldValues[f.id] ?? "").trim().length > 0);
   const canSave    = selectedTime !== null && requiredFieldsOk && selectedDay >= hoy;
   const stepCanProceed = [canStep0, canStep1, canStep2, canSave];
 
   const horaFueraDeGrilla = selectedTime !== null && !cupos.cupos.includes(selectedTime);
   const avisosHora = (() => {
-    if (!selectedTime || !selectedService || !horaFueraDeGrilla) return [];
-    const avisos = avisosDeHorario(cupos.horarioDia, selectedTime, selectedService.duracion);
+    if (!selectedTime || !duracionTotal || !horaFueraDeGrilla) return [];
+    const avisos = avisosDeHorario(cupos.horarioDia, selectedTime, duracionTotal);
     if (selectedDay === hoy && timeToMins(selectedTime) < minutosDelDia(new Date(), timezone)) {
       avisos.push("Esa hora de hoy ya pasó.");
     }
@@ -314,7 +355,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
   };
 
   const handleSave = async () => {
-    if (!canSave || !selectedService || !selectedPro || !selectedTime || saving) return;
+    if (!canSave || !duracionTotal || (!selectedPro && !alAzar) || !selectedTime || saving) return;
     if (selectedDay < hoy) {
       Alert.alert("Fecha pasada", "No se pueden agendar citas en días que ya pasaron.");
       return;
@@ -326,6 +367,31 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     setSaving(true);
     try {
       const apptId = apptIdRef.current;
+      let pro = selectedPro;
+      if (alAzar) {
+        // Se sortea entre quienes tienen libre la hora; una hora puesta a
+        // mano (fuera de la grilla) se intenta con todo el equipo.
+        const ids = cuposEquipo.libresPorHora[selectedTime] ?? [];
+        const candidatos = ids.length > 0 ? profesionales.filter(x => ids.includes(x.id)) : profesionales;
+        try {
+          pro = await sortearProfesional({
+            tenantId, candidatos, dia: selectedDay, hora: selectedTime, duracion: duracionTotal,
+            horario: catalogo?.horario ?? null, excluirCitaId: apptId,
+          });
+        } catch (e) {
+          Alert.alert("No se pudo verificar el horario", mensajeError(e));
+          return;
+        }
+        if (!pro) {
+          Alert.alert(
+            "Nadie está libre a esa hora",
+            "Ningún profesional tiene ese horario disponible. Elige otra hora o vuelve al paso 1 y escoge a alguien.",
+          );
+          cupos.recargar();
+          return;
+        }
+      }
+      if (!pro) return;
       // Justo antes de guardar: el cupo pudo ocuparse (otra cita o una
       // ausencia cargada en el web) mientras se completaba el formulario.
       // Se excluye la propia cita: si un intento anterior llegó a guardarse y
@@ -333,7 +399,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       let v;
       try {
         v = await verificarCupo({
-          tenantId, professionalId: selectedPro.id, dia: selectedDay, hora: selectedTime, duracion: selectedService.duracion,
+          tenantId, professionalId: pro.id, dia: selectedDay, hora: selectedTime, duracion: duracionTotal,
           excluirCitaId: apptId,
         });
       } catch (e) {
@@ -379,15 +445,23 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
       // La sede es la del profesional elegido; si no tiene, la activa. Con la
       // sede activa a secas, un profesional de otra sede quedaba con la cita
       // en la sede equivocada (AGE-16).
-      const locationId = selectedPro.location_id ?? sede;
+      const locationId = pro.location_id ?? sede;
       const elegido: {
-        service_id: string; professional_id: string; appointment_date: string; appointment_time: string;
+        service_id: string | null; professional_id: string; appointment_date: string; appointment_time: string;
         client_id?: string; location_id?: string;
+        duration_minutes: number | null;
+        is_warranty: boolean; warranty_of: string | null; warranty_reason: string | null;
       } = {
-        service_id:       selectedService.id,
-        professional_id:  selectedPro.id,
+        service_id:       selectedService?.id ?? null,
+        // Con adicionales la cita dura más que su servicio: se guarda su tiempo.
+        duration_minutes: adicionales.length > 0 ? duracionTotal : null,
+        professional_id:  pro.id,
         appointment_date: selectedDay,
         appointment_time: `${selectedTime}:00`,
+        // Garantía: se cobra en $0 y no genera comisión (lib/ingresos, nómina del web).
+        is_warranty:      esGarantia,
+        warranty_of:      esGarantia ? garantia.originalId : null,
+        warranty_reason:  esGarantia ? garantia.motivo.trim() || null : null,
       };
       if (clientId) elegido.client_id = clientId;
       if (locationId) elegido.location_id = locationId;
@@ -420,6 +494,19 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         }
       }
 
+      // Adicionales con valor libre: appointment_services sin service_id, los
+      // mismos que precarga la hoja de cobro. Se reemplazan por si un intento
+      // anterior alcanzó a guardar algunos.
+      if (adicionales.length > 0) {
+        const borrar = await supabase.from("appointment_services").delete().eq("appointment_id", apptId).is("service_id", null);
+        const { error: adErr } = borrar.error ? borrar : await supabase.from("appointment_services").insert(
+          adicionales.map(x => ({ appointment_id: apptId, service_id: null, name: x.nombre, price: x.precio })),
+        );
+        if (adErr) {
+          Alert.alert("Cita guardada", `La cita quedó agendada, pero no se guardaron los adicionales: agrégalos al cobrarla. ${mensajeError(adErr)}`);
+        }
+      }
+
       // Valores de los campos del servicio — mismo destino que la reserva online (client_field_values)
       if (clientId && apptFields.length > 0) {
         const upserts = apptFields
@@ -439,7 +526,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
         date: selectedDay,
         time: `${selectedTime}:00`,
         clientName: nombreCliente || null,
-        serviceName: selectedService.name,
+        serviceName: nombreServicio,
         status: "pending",
       }, timezone).catch(() => {});
 
@@ -448,6 +535,12 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
 
       onSuccess();
       onClose();
+      if (alAzar) {
+        // Después de que cierre la hoja: un Alert durante la animación de
+        // cierre del Modal en iOS a veces no se muestra.
+        const nombre = pro.name;
+        setTimeout(() => Alert.alert("Cita agendada", `Se asignó al azar a ${nombre}.`), 450);
+      }
     } finally {
       setSaving(false);
     }
@@ -458,8 +551,11 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
     router.push("/settings/schedule");
   };
 
-  const diaCerrado = (d: string) =>
-    !!selectedPro && !!catalogo && !effectiveDayHours(d, catalogo.horario, selectedPro.schedule).open;
+  const diaCerrado = (d: string) => {
+    if (!catalogo) return false;
+    if (alAzar) return profesionales.every(x => !effectiveDayHours(d, catalogo.horario, x.schedule).open);
+    return !!selectedPro && !effectiveDayHours(d, catalogo.horario, selectedPro.schedule).open;
+  };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -509,11 +605,36 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     <Text style={s.emptySub}>Agrega el equipo en Ajustes → Equipo de trabajo</Text>
                   </View>
                 ) : (
-                  profesionales.map((pro, i) => (
+                  <>
+                  {profesionales.length > 1 && (
+                    <Animated.View entering={FadeInDown.duration(300)}>
+                      <TouchableOpacity
+                        style={[s.proCard, Shadow.sm, alAzar && s.cardActive]}
+                        onPress={() => { setAlAzar(true); setSelectedPro(null); }}
+                        activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityLabel="Al azar"
+                        accessibilityHint="Se asigna a un profesional libre a la hora elegida"
+                        accessibilityState={{ selected: alAzar }}
+                      >
+                        <View style={[s.proAvatar, s.azarAvatar]}>
+                          <Ionicons name="shuffle" size={20} color={Colors.red} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[s.proName, alAzar && { color: Colors.red }]}>Al azar</Text>
+                          <Text style={s.proRole}>Cualquiera del equipo que esté libre a esa hora</Text>
+                        </View>
+                        {alAzar && (
+                          <View style={s.check}><Text style={{ color: "white", fontSize: 11 }}>✓</Text></View>
+                        )}
+                      </TouchableOpacity>
+                    </Animated.View>
+                  )}
+                  {profesionales.map((pro, i) => (
                     <Animated.View key={pro.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
                       <TouchableOpacity
                         style={[s.proCard, Shadow.sm, selectedPro?.id === pro.id && s.cardActive]}
-                        onPress={() => setSelectedPro(pro)}
+                        onPress={() => { setSelectedPro(pro); setAlAzar(false); }}
                         activeOpacity={0.75}
                         accessibilityRole="button"
                         accessibilityState={{ selected: selectedPro?.id === pro.id }}
@@ -530,7 +651,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                         )}
                       </TouchableOpacity>
                     </Animated.View>
-                  ))
+                  ))}
+                  </>
                 )}
               </ScrollView>
             )}
@@ -647,6 +769,18 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
             {/* ── STEP 2: SERVICE ── */}
             {step === 2 && (
               <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+                <GarantiaSelector
+                  tenantId={tenantId}
+                  clientId={isNewClient ? null : selectedClient?.id ?? null}
+                  hoy={hoy}
+                  value={garantia}
+                  onChange={setGarantia}
+                  onServicio={id => {
+                    const svc = servicios.find(x => x.id === id);
+                    if (svc) { setSelectedService(svc); setServiceQuery(""); }
+                  }}
+                />
+                <AdicionalesEditor value={adicionales} onChange={setAdicionales} />
                 {servicios.length > 0 && (
                   <View style={[s.searchBar, Shadow.sm]}>
                     <Text style={{ fontSize: 15, color: t.subtle }}>🔍</Text>
@@ -685,7 +819,8 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     <Animated.View key={svc.id} entering={i < 10 ? FadeInDown.delay(i * 55).duration(300) : undefined}>
                       <TouchableOpacity
                         style={[s.svcCard, Shadow.sm, selectedService?.id === svc.id && s.cardActive]}
-                        onPress={() => setSelectedService(svc)}
+                        // Tocar el elegido lo quita: así la cita puede ir solo con adicionales.
+                        onPress={() => setSelectedService(cur => (cur?.id === svc.id && adicionales.length > 0 ? null : svc))}
                         activeOpacity={0.75}
                         accessibilityRole="button"
                         accessibilityState={{ selected: selectedService?.id === svc.id }}
@@ -723,10 +858,10 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                 />
 
                 <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
-                  {selectedService && (
+                  {hayServicio && (
                     <View style={s.durationNote}>
                       <Text style={s.durationNoteText}>
-                        {fmtDia(selectedDay, "largo")}  ·  {selectedService.name}  ·  ⏱ {selectedService.duracion} min
+                        {fmtDia(selectedDay, "largo")}  ·  {nombreServicio}  ·  ⏱ {duracionTotal} min
                       </Text>
                     </View>
                   )}
@@ -741,7 +876,7 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     onSeleccionar={setSelectedTime}
                     bloqueos={cupos.bloqueos}
                     avisoHora={avisosHora.length ? avisosHora.join(" ") : null}
-                    mensajeCerrado={selectedPro?.schedule ? `${selectedPro.name} no atiende este día.` : "El negocio no atiende este día."}
+                    mensajeCerrado={alAzar ? "Nadie del equipo atiende este día." : selectedPro?.schedule ? `${selectedPro.name} no atiende este día.` : "El negocio no atiende este día."}
                     horarioPorDefecto={catalogo?.horario.porDefecto}
                     onConfigurarHorario={irAConfigurarHorario}
                   />
@@ -789,16 +924,28 @@ export default function NewApptModal({ visible, onClose, tenantId, initialDate, 
                     </View>
                   )}
 
-                  {canSave && selectedService && selectedPro && (
+                  {canSave && hayServicio && !!duracionTotal && (selectedPro || alAzar) && (
                     <Animated.View entering={FadeInDown.duration(300)} style={[s.summary, Shadow.md]}>
                       <Text style={s.summaryTitle}>Resumen de la cita</Text>
-                      <SummaryRow s={s} label="Profesional" value={selectedPro.name} />
+                      <SummaryRow
+                        s={s}
+                        label="Profesional"
+                        value={alAzar
+                          ? `Al azar${libresALaHora > 0 ? ` (entre ${libresALaHora} libre${libresALaHora === 1 ? "" : "s"})` : ""}`
+                          : selectedPro!.name}
+                      />
                       <SummaryRow s={s} label="Cliente"     value={clientName} />
-                      <SummaryRow s={s} label="Servicio"    value={selectedService.name} />
-                      <SummaryRow s={s} label="Duración"    value={`${selectedService.duracion} min`} />
+                      {selectedService && <SummaryRow s={s} label="Servicio" value={selectedService.name} />}
+                      {adicionales.map(a => (
+                        <SummaryRow key={a.key} s={s} label="Adicional" value={`${a.nombre} · ${fmtMoneyFull(a.precio)}`} />
+                      ))}
+                      <SummaryRow s={s} label="Duración"    value={`${duracionTotal} min`} />
                       <SummaryRow s={s} label="Fecha"       value={fmtDia(selectedDay, "largo")} />
-                      <SummaryRow s={s} label="Hora"        value={`${fmt12(selectedTime!)} – ${fmt12(minsToTime(timeToMins(selectedTime!) + selectedService.duracion))}`} />
-                      <SummaryRow s={s} label="Valor"       value={fmtMoneyFull(selectedService.price)} highlight />
+                      <SummaryRow s={s} label="Hora"        value={`${fmt12(selectedTime!)} – ${fmt12(minsToTime(timeToMins(selectedTime!) + duracionTotal))}`} />
+                      {esGarantia && <SummaryRow s={s} label="Garantía" value={garantia.motivo.trim() || "Sí, sin costo"} />}
+                      <SummaryRow s={s} label="Valor"       value={esGarantia
+                        ? `${fmtMoneyFull(precioConAdicionales(0, adicionales))} (garantía)`
+                        : fmtMoneyFull(precioConAdicionales(selectedService?.price ?? null, adicionales))} highlight />
                     </Animated.View>
                   )}
                 </View>
@@ -872,6 +1019,7 @@ function crearEstilos(t: ThemeColors) {
     proCard:       { flexDirection: "row", alignItems: "center", ...card, borderRadius: Radius.lg, padding: 14, marginBottom: 10, gap: 14 },
     proAvatar:     { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
     proAvatarText: { color: "white", fontSize: 16, fontFamily: Fonts.bold },
+    azarAvatar:    { backgroundColor: "rgba(251,15,5,0.10)", borderWidth: 1, borderColor: "rgba(251,15,5,0.25)" },
     proName:       { fontSize: 14, fontFamily: Fonts.semibold, color: t.text, marginBottom: 2 },
     proRole:       { fontSize: 12, fontFamily: Fonts.regular, color: t.muted },
 
