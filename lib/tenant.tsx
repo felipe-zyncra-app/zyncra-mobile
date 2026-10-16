@@ -35,6 +35,8 @@ type TenantCtx = {
   /** Moneda y locale de tenants.settings (default COP / es-CO). */
   currency: string;
   locale: string;
+  /** Orden de las categorías de servicios (settings.categoryOrder, lo fija la página Servicios del web). */
+  categoryOrder: string[];
   loading: boolean;
   /** Mensaje en español si la última carga falló. */
   error: string | null;
@@ -57,6 +59,7 @@ const TenantContext = createContext<TenantCtx>({
   ready: false,
   currency: "COP",
   locale: "es-CO",
+  categoryOrder: [],
   loading: true,
   error: null,
   refresh: async () => {},
@@ -69,6 +72,7 @@ type Cargado = {
   timezone: string;
   currency: string;
   locale: string;
+  categoryOrder: string[];
 };
 
 type Fila = Record<string, unknown>;
@@ -84,6 +88,7 @@ function desdeSettings(settings: unknown) {
     timezone: zonaDelNegocio(s),
     currency: texto(s.currency) ?? "COP",
     locale: texto(s.locale) ?? "es-CO",
+    categoryOrder: Array.isArray(s.categoryOrder) ? s.categoryOrder.filter((x): x is string => typeof x === "string") : [],
   };
 }
 
@@ -145,6 +150,7 @@ async function cargarComoStaff(): Promise<Cargado> {
       timezone: texto(d.timezone, d.zona) ?? base.timezone,
       currency: texto(d.currency, d.moneda) ?? base.currency,
       locale: texto(d.locale) ?? base.locale,
+      categoryOrder: base.categoryOrder,
     };
   }
   if (!esFuncionInexistente(mi.error)) throw mi.error;
@@ -170,6 +176,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [tzLista, setTzLista] = useState(false);
   const [currency, setCurrency] = useState("COP");
   const [locale, setLocale] = useState("es-CO");
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +188,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setTzLista(false);
     setCurrency("COP");
     setLocale("es-CO");
+    setCategoryOrder([]);
     setError(null);
     establecerZonaActiva(null);
     configurarMoneda();
@@ -200,6 +208,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       setTzLista(true);
       setCurrency(c.currency);
       setLocale(c.locale);
+      setCategoryOrder(c.categoryOrder);
       setError(null);
       establecerZonaActiva(c.timezone);
       configurarMoneda(c.currency, c.locale);
@@ -254,7 +263,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <TenantContext.Provider
-      value={{ tenant, timezone, tzLista, ready, currency, locale, loading, error, refresh, update, patch }}
+      value={{ tenant, timezone, tzLista, ready, currency, locale, categoryOrder, loading, error, refresh, update, patch }}
     >
       {children}
     </TenantContext.Provider>

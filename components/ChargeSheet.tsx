@@ -17,6 +17,7 @@ import {
 } from "@/lib/propinas";
 import { getActiveLocationId } from "@/lib/active-location";
 import { filtrarServicios } from "@/lib/scheduling";
+import { categoriaDe, ordenarPorCategoria } from "@/lib/categorias";
 import { filtroSedeOGeneral } from "@/lib/sedes";
 import { fmtMoneyFull, fmt12, enlaceWhatsApp } from "@/lib/format";
 import { diaLocalDe, horaLocalDe, fmtDia, esHoy } from "@/lib/tz";
@@ -97,7 +98,7 @@ export type ChargeTarget =
   | { kind: "appointment"; appt: LinkedAppt }
   | { kind: "direct" };
 
-type Service = { id: string; name: string; price: number; code: string | null };
+type Service = { id: string; name: string; price: number; code: string | null; category: string | null; position: number | null };
 type Product = {
   id: string; name: string; sale_price: number; cost_price: number | null;
   discount_type: string | null; discount_value: number | null; stock_quantity: number;
@@ -178,7 +179,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const areaEquipo = role === "staff" && !adminEquipo;
   const rutaCaja = areaEquipo ? "/(staff)/caja" : "/(admin)/caja";
   const { t, mode } = useTheme();
-  const { tenant, timezone } = useTenant();
+  const { tenant, timezone, categoryOrder } = useTenant();
   // El azul de marca casi no se lee sobre el fondo oscuro.
   const azul = mode === "dark" ? "#8da2ff" : Colors.blue;
 
@@ -266,14 +267,18 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
       // select("*"): services.is_active llega con la migración; antes de
       // aplicarla, pedir la columna rompería la consulta. Se filtra aquí.
       supabase.from("services").select("*").eq("tenant_id", tenantId).order("name"),
-      qProd.order("name"),
+      // Mismo orden que Inventario en el web: los más recientes primero.
+      qProd.order("created_at", { ascending: false }).order("id"),
     ]);
     if (apertura !== aperturaRef.current) return;
     const err = svc.error || prod.error;
     if (err) { setCatalogoError(err); setCatalogo("error"); return; }
-    setServices(((svc.data ?? []) as { id: string; name: string; price: number; code?: string | null; is_active?: boolean | null }[])
+    setServices(((svc.data ?? []) as { id: string; name: string; price: number; code?: string | null; category?: string | null; position?: number | null; is_active?: boolean | null }[])
       .filter(x => x.is_active !== false)
-      .map(x => ({ id: x.id, name: x.name, price: Number(x.price), code: x.code?.trim() || null })));
+      .map(x => ({
+        id: x.id, name: x.name, price: Number(x.price), code: x.code?.trim() || null,
+        category: x.category ?? null, position: x.position ?? null,
+      })));
     setProducts((prod.data ?? []) as Product[]);
     setCatalogo("listo");
   };
@@ -459,11 +464,13 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
   const splitValid     = !split || (Math.abs(splitRemaining) < 1 && splitLines.every(l => monto(l.amount) > 0));
 
   const coincidencias = useMemo(() => {
-    if (tab === "servicios") return filtrarServicios(services, search);
+    // Sin buscar, en el orden de la página Servicios (por categoría y posición).
+    if (tab === "servicios") return ordenarPorCategoria(filtrarServicios(services, search), categoryOrder);
     if (tab === "productos") return filtrarServicios(products, search);
     return [];
-  }, [tab, search, services, products]);
+  }, [tab, search, services, products, categoryOrder]);
   const TOPE_CATALOGO = 8;
+  const hayCategorias = useMemo(() => new Set(services.map(categoriaDe)).size > 1, [services]);
   const recortar = !verTodo && !search.trim() && coincidencias.length > TOPE_CATALOGO;
   const filtered = coincidencias.slice(0, recortar ? TOPE_CATALOGO : 40);
 
@@ -1061,14 +1068,22 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
             <Text style={{ fontFamily: Fonts.regular, fontSize: 12, color: t.subtle, paddingVertical: 8 }}>
               {search.trim() ? "Nada coincide con la búsqueda" : tab === "servicios" ? "Sin servicios" : "Sin productos activos"}
             </Text>
-          ) : (filtered as (Service | Product)[]).map(item => {
+          ) : (filtered as (Service | Product)[]).map((item, idx) => {
             const isProd = tab === "productos";
+            // Encabezado de categoría cuando cambia (solo servicios y si hay más de una).
+            const cat = isProd ? null : categoriaDe(item as Service);
+            const prevCat = !isProd && idx > 0 ? categoriaDe(filtered[idx - 1] as Service) : null;
+            const encabezado = !isProd && hayCategorias && cat !== prevCat ? cat : null;
             const price  = isProd ? productPrice(item as Product) : (item as Service).price;
             const stock  = isProd ? (item as Product).stock_quantity : null;
             const out    = isProd && (stock ?? 0) <= 0;
             const n      = enElCobro(item.id, isProd);
             return (
-              <TouchableOpacity key={item.id} onPress={() => isProd ? addProduct(item as Product) : addService(item as Service)}
+              <View key={item.id}>
+              {encabezado && (
+                <Text style={[s.catHeader, { color: t.muted }]} accessibilityRole="header">{encabezado}</Text>
+              )}
+              <TouchableOpacity onPress={() => isProd ? addProduct(item as Product) : addService(item as Service)}
                 accessibilityRole="button" accessibilityLabel={`Agregar ${item.name}${n > 0 ? `, ya hay ${n} en el cobro` : ""}`}
                 style={[s.resultRow, { borderColor: t.border }, out && { opacity: 0.45 }]} activeOpacity={0.75}>
                 <View style={{ flex: 1 }}>
@@ -1082,6 +1097,7 @@ export default function ChargeSheet({ visible, tenantId, target, onClose, onSave
                   <Ionicons name="add-circle" size={22} color={out ? t.subtle : Colors.red} />
                 )}
               </TouchableOpacity>
+              </View>
             );
           })}
           {recortar ? (
@@ -1347,6 +1363,7 @@ const s = StyleSheet.create({
   waBtnText:     { fontSize: 14, fontFamily: Fonts.bold, color: "#128C7E" },
   garantiaChip:  { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", marginTop: 6, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: "rgba(124,58,237,0.10)" },
   garantiaTxt:   { fontSize: 11.5, fontFamily: Fonts.semibold, color: "#7c3aed", flexShrink: 1 },
+  catHeader:     { fontSize: 10.5, fontFamily: Fonts.bold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 12, marginBottom: 2 },
   searchBox:     { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, marginBottom: 4 },
   searchInput:   { flex: 1, paddingVertical: 11, fontSize: 14, fontFamily: Fonts.regular },
   enCobro:       { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: Colors.red, alignItems: "center", justifyContent: "center" },
