@@ -35,7 +35,10 @@ compatible con el SDK 54.
 
 ## Fuera del código
 
-- Push en Android: no hay Firebase configurado (falta `google-services.json`
-  y la credencial FCM v1 en EAS). Es una acción del dueño en la consola de
-  Firebase/EAS; no inventes esa configuración en `app.json`.
+- Push en Android: Firebase está configurado desde el 27-sep-2026 (proyecto
+  `zyncra-d8ddb`). El `google-services.json` NO se versiona: llega a los builds
+  como variable de archivo `GOOGLE_SERVICES_JSON` del entorno production de EAS
+  (lo lee `app.config.ts`) y la credencial FCM V1 vive en EAS. Un build sin esa
+  variable compila pero Android no recibe push. No pegues esa configuración
+  en `app.json`.
 - `store.config.json` lleva la cuenta demo de App Review y nunca se versiona.
