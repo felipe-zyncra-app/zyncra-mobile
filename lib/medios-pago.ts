@@ -20,6 +20,11 @@ export const MEDIOS: readonly MedioPago[] = [
   { key: "nequi",         label: "Nequi",         icon: "phone-portrait-outline",  color: "#db2777" },
   { key: "daviplata",     label: "Daviplata",     icon: "wallet-outline",          color: "#f59e0b" },
   { key: "qr",            label: "QR",            icon: "qr-code-outline",         color: "#8b5cf6" },
+  // Financiación a cuotas (pedido del dueño, 21-oct-2026): el cliente paga con
+  // el financiador y el negocio recibe la plata de ellos. Mismas claves que
+  // lib/medios-pago.ts del portal web.
+  { key: "addi",          label: "Addi",          icon: "calendar-outline",        color: "#0f172a" },
+  { key: "sistecredito",  label: "Sistecrédito",  icon: "receipt-outline",         color: "#dc2626" },
 ];
 
 /** Venta con pago dividido: payment_method = "mixto" y el detalle en `payments`. */

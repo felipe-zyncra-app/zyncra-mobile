@@ -206,7 +206,10 @@ export function metodoAFactus(metodo: string | null | undefined): string {
   switch (metodo) {
     case "efectivo":      return "10";
     case "tarjeta":       return "49";
-    case "transferencia": return "47";
+    // Addi y Sistecrédito: el financiador le consigna al negocio por transferencia.
+    case "transferencia":
+    case "addi":
+    case "sistecredito":  return "47";
     case "nequi":
     case "daviplata":
     case "qr":            return "42";
