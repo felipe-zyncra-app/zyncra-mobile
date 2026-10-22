@@ -15,6 +15,7 @@ import { SubscriptionProvider } from "@/lib/subscription";
 import { PantallaCargando } from "@/lib/guards";
 import ZyncraIntro from "@/components/ZyncraIntro";
 import Apertura from "@/components/Apertura";
+import AvisoActualizacion from "@/components/AvisoActualizacion";
 import { liberarPushPendiente, registrarPushDelDispositivo, scheduleDailyBriefing } from "@/lib/notifications";
 
 const CLAVE_INTRO = "zyncra_intro_vista";
@@ -108,6 +109,8 @@ function AppContent() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: t.bg }}>
       <StatusBar style={intro.estado === "mostrar" || apertura === "mostrar" ? "light" : t.statusBar} />
       <EfectosDeSesion />
+      {/* Versión nueva descargada → "Actualizar ahora" (antes se aplicaba callada en el siguiente arranque). */}
+      <AvisoActualizacion />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
         <Stack.Screen name="(admin)" options={{ animation: "fade", gestureEnabled: false }} />
         <Stack.Screen name="(auth)"  options={{ animation: "fade", gestureEnabled: false }} />

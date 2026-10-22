@@ -8,6 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { Config, authedFetch } from "@/lib/config";
 import { textoParaUsuario } from "@/lib/db";
 import Constants from "expo-constants";
+import * as Updates from "expo-updates";
+import { textoVersion } from "@/lib/actualizaciones";
+import { buscarActualizacion } from "@/components/AvisoActualizacion";
 import { Colors, Fonts } from "@/constants/theme";
 import { useTheme } from "@/lib/theme";
 import { useTenant } from "@/lib/tenant";
@@ -99,6 +102,7 @@ function AjustesDelDueno() {
   const { tenant } = useTenant();
   const { session, cerrarSesion } = useAuth();
   const [deleting, setDeleting] = useState(false);
+  const [buscando, setBuscando] = useState(false);
   const [saliendo, setSaliendo] = useState(false);
 
   const email = session?.user?.email ?? "";
@@ -146,6 +150,16 @@ function AjustesDelDueno() {
       const msg = e instanceof Error && e.message ? e.message : "No se pudo eliminar la cuenta. Intenta de nuevo.";
       Alert.alert("No se eliminó la cuenta", msg);
     }
+  };
+
+  const handleBuscarActualizacion = async () => {
+    setBuscando(true);
+    const r = await buscarActualizacion();
+    setBuscando(false);
+    if (r === "al_dia") Alert.alert("Estás al día", "Ya tienes la última versión de Zyncra.");
+    else if (r === "sin_red") Alert.alert("No se pudo revisar", "Revisa tu conexión e inténtalo de nuevo.");
+    else if (r === "no_disponible") Alert.alert("No disponible", "Las actualizaciones automáticas no están activas en esta instalación.");
+    // "descargada": AvisoActualizacion la ofrece apenas termina de descargarse.
   };
 
   const handleDeleteAccount = () => {
@@ -304,8 +318,34 @@ function AjustesDelDueno() {
           </Pressable>
         </Animated.View>
 
+        {/* Qué código corre: la versión de la tienda o la actualización al aire
+            y su fecha (antes decía "v1.2.6" igual antes y después de actualizar,
+            y el dueño no sabía si ya tenía los cambios). "Buscar actualización"
+            revisa el servidor ya; si hay una, AvisoActualizacion la ofrece. */}
         <View style={s.footerWrap}>
           <Text style={[s.footer, { color: t.subtle }]}>Zyncra · v{Constants.expoConfig?.version ?? "1.0.0"} · Hecho en Colombia 🇨🇴</Text>
+          <Text style={[s.footerSub, { color: t.subtle }]}>
+            {textoVersion({
+              version: Constants.expoConfig?.version ?? "1.0.0",
+              habilitado: Updates.isEnabled && !__DEV__,
+              embebida: Updates.isEmbeddedLaunch,
+              creada: Updates.createdAt ?? null,
+              updateId: Updates.updateId ?? null,
+            })}
+          </Text>
+          <Pressable
+            onPress={handleBuscarActualizacion}
+            disabled={buscando}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: buscando, busy: buscando }}
+            style={({ pressed }) => [s.deleteBtn, pressed && { opacity: 0.6 }]}
+          >
+            {buscando
+              ? <ActivityIndicator size="small" color={t.subtle} />
+              : <Ionicons name="refresh-outline" size={14} color={t.subtle} />}
+            <Text style={[s.deleteText, { color: t.subtle }]}>{buscando ? "Revisando…" : "Buscar actualización"}</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -328,4 +368,5 @@ const s = StyleSheet.create({
   deleteText:  { fontSize: 12.5, fontFamily: Fonts.regular },
   footerWrap:  { alignItems: "center", marginTop: 8 },
   footer:      { fontSize: 12, fontFamily: Fonts.regular },
+  footerSub:   { fontSize: 11, fontFamily: Fonts.regular, marginTop: 4, opacity: 0.8 },
 });
