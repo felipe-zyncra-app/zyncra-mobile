@@ -6,6 +6,7 @@ import { zonaDelNegocio, ZONA_POR_DEFECTO, establecerZonaActiva } from "./tz";
 import { configurarMoneda } from "./format";
 import { esFuncionInexistente, mensajeError } from "./db";
 import { crearGuardRespuestas } from "./useRecarga";
+import { guardarNegocio, leerNegocio, type NegocioGuardado } from "./memoria-arranque";
 
 type TenantData = {
   name: string;
@@ -181,6 +182,20 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const guard = useRef(crearGuardRespuestas()).current;
+  // true cuando ya respondió el servidor para este negocio: lo guardado en el
+  // teléfono (que se lee en paralelo) no debe pisar algo más nuevo.
+  const deServidor = useRef(false);
+
+  const aplicar = useCallback((n: NegocioGuardado) => {
+    setTenant(n.tenant);
+    setTimezone(n.timezone);
+    setTzLista(true);
+    setCurrency(n.currency);
+    setLocale(n.locale);
+    setCategoryOrder(n.categoryOrder);
+    establecerZonaActiva(n.timezone);
+    configurarMoneda(n.currency, n.locale);
+  }, []);
 
   const limpiar = useCallback(() => {
     setTenant(null);
@@ -203,22 +218,22 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         cargarLogo(tenantId),
       ]);
       if (!turno.vigente()) return;
-      setTenant({ ...c.tenant, logoUrl });
-      setTimezone(c.timezone);
-      setTzLista(true);
-      setCurrency(c.currency);
-      setLocale(c.locale);
-      setCategoryOrder(c.categoryOrder);
+      const n: NegocioGuardado = {
+        tenant: { ...c.tenant, logoUrl },
+        timezone: c.timezone, currency: c.currency, locale: c.locale, categoryOrder: c.categoryOrder,
+      };
+      deServidor.current = true;
+      aplicar(n);
       setError(null);
-      establecerZonaActiva(c.timezone);
-      configurarMoneda(c.currency, c.locale);
+      // Para el próximo arranque (lib/memoria-arranque).
+      guardarNegocio(role, tenantId, n);
     } catch (e) {
       if (!turno.vigente()) return;
       // Se conserva lo que hubiera del mismo negocio; la zona queda en la de
       // por defecto solo si nunca se supo.
       setError(mensajeError(e, "No se pudieron cargar los datos del negocio"));
     }
-  }, [tenantId, role, guard]);
+  }, [tenantId, role, guard, aplicar]);
 
   const patch = useCallback((fields: Partial<TenantData>) => {
     setTenant(prev => prev ? { ...prev, ...fields } : null);
@@ -245,14 +260,24 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setLoading(true);
+    deServidor.current = false;
     let vigente = true;
+    // Lo último conocido de ESTE negocio, mientras responde el servidor: las
+    // pantallas que esperan `ready` (agenda, caja, reportes) abren de una con
+    // la zona y la moneda correctas en vez de esperar la red (23-oct-2026).
+    leerNegocio(role, tenantId).then(n => {
+      if (!vigente || !n || deServidor.current) return;
+      aplicar(n);
+      setLoading(false);
+      setReady(true);
+    });
     refresh().finally(() => {
       if (!vigente) return;   // ya se cambió de negocio: no marcar listo el nuevo
       setLoading(false);
       setReady(true);
     });
     return () => { vigente = false; };
-  }, [tenantId, role, refresh, limpiar, guard]);
+  }, [tenantId, role, refresh, limpiar, guard, aplicar]);
 
   // Si la carga falló (sin red), reintentar al volver a primer plano.
   useEffect(() => {

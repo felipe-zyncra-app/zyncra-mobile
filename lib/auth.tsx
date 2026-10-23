@@ -7,6 +7,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { conTimeout, esErrorDeRed, mensajeError } from "./db";
 import { borrarPushTokenDelServidor, cancelarTodasLasNotificaciones } from "./notifications";
 import { clearActiveLocationCache } from "./active-location";
+import { borrarAcceso, guardarAcceso, leerAcceso } from "./memoria-arranque";
 import { CLAVE_BORRADOR_REGISTRO } from "./cuenta";
 import { esAdministradorDelEquipo, inicioAdministradorEquipo, modulosWebDe, pantallaAdminDe, pantallaPermitida } from "./acceso-equipo";
 
@@ -97,21 +98,26 @@ async function consultarAcceso(userId: string): Promise<Resolucion> {
   // Dueño. order + limit en vez de maybeSingle: owner_id no es único y con
   // dos negocios maybeSingle da error y el dueño quedaba sin rol (AJU-21).
   // Se toma el más antiguo, el mismo que usa el resto del sistema.
-  const own = await supabase
-    .from("tenants")
-    .select("id")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: true })
-    .limit(1);
+  // Staff. Puede tener filas en más de un negocio: se usa la primera ACTIVA.
+  // Las dos preguntas van A LA VEZ (23-oct-2026): antes el staff esperaba la
+  // del dueño y luego la suya, dos vueltas a una API con picos de 1,5 s. El
+  // orden de la decisión es el mismo: si es dueño, gana el dueño.
+  const [own, pros] = await Promise.all([
+    supabase
+      .from("tenants")
+      .select("id")
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1),
+    supabase
+      .from("professionals")
+      .select("id, tenant_id, is_active, permissions")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true }),
+  ]);
   if (own.error) return { estado: "error", mensaje: mensajeError(own.error, "No pudimos verificar tu cuenta") };
   if (own.data && own.data.length > 0) return { estado: "admin", tenantId: own.data[0].id as string };
 
-  // Staff. Puede tener filas en más de un negocio: se usa la primera ACTIVA.
-  const pros = await supabase
-    .from("professionals")
-    .select("id, tenant_id, is_active, permissions")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
   if (pros.error) return { estado: "error", mensaje: mensajeError(pros.error, "No pudimos verificar tu cuenta") };
   const filas = (pros.data ?? []) as { id: string; tenant_id: string | null; is_active: boolean | null; permissions: unknown }[];
   const activa = filas.find(p => p.is_active === true && p.tenant_id);
@@ -188,6 +194,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     generacion.current++;
     limpiarReintento();
     intentos.current = 0;
+    // Lo guardado para arrancar rápido es de esa cuenta: en un teléfono
+    // compartido no debe quedar nada del que salió.
+    if (userRef.current) borrarAcceso(userRef.current);
     userRef.current = null;
     tenantRef.current = null;
     setSession(null);
@@ -196,6 +205,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setModulosWeb(null);
     setErrorAcceso(null);
     fijarEstado("sin-sesion");
+  }, [fijarEstado]);
+
+  /** Deja en el estado lo que se sabe del usuario (del servidor o de lo guardado en el teléfono). */
+  const aplicarResolucion = useCallback((r: Exclude<Resolucion, { estado: "error" }>) => {
+    if (r.estado === "admin") {
+      tenantRef.current = r.tenantId;
+      setTenantId(r.tenantId);
+      setProfessionalId(null);
+      setModulosWeb(null);
+    } else if (r.estado === "staff") {
+      tenantRef.current = r.tenantId;
+      setTenantId(r.tenantId);
+      setProfessionalId(r.professionalId);
+      // Se revalida al volver a primer plano: si el dueño le quita el rol,
+      // vuelve a la app del colaborador.
+      setModulosWeb(esAdministradorDelEquipo(r.permisos) ? modulosWebDe(r.permisos) : null);
+    } else {
+      // sin-rol / desactivado: sin negocio activo (TenantProvider se limpia).
+      tenantRef.current = null;
+      setTenantId(null);
+      setProfessionalId(r.estado === "desactivado" ? r.professionalId : null);
+      setModulosWeb(null);
+    }
+    fijarEstado(r.estado);
   }, [fijarEstado]);
 
   /**
@@ -234,27 +267,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     intentos.current = 0;
     setErrorAcceso(null);
-    if (r.estado === "admin") {
-      tenantRef.current = r.tenantId;
-      setTenantId(r.tenantId);
-      setProfessionalId(null);
-      setModulosWeb(null);
-    } else if (r.estado === "staff") {
-      tenantRef.current = r.tenantId;
-      setTenantId(r.tenantId);
-      setProfessionalId(r.professionalId);
-      // Se revalida al volver a primer plano: si el dueño le quita el rol,
-      // vuelve a la app del colaborador.
-      setModulosWeb(esAdministradorDelEquipo(r.permisos) ? modulosWebDe(r.permisos) : null);
-    } else {
-      // sin-rol / desactivado: sin negocio activo (TenantProvider se limpia).
-      tenantRef.current = null;
-      setTenantId(null);
-      setProfessionalId(r.estado === "desactivado" ? r.professionalId : null);
-      setModulosWeb(null);
-    }
-    fijarEstado(r.estado);
-  }, [fijarEstado]);
+    aplicarResolucion(r);
+    // Para el próximo arranque: solo un rol con negocio (dueño o staff activo).
+    // Sin rol o desactivado no se guarda: esas cuentas siempre esperan al servidor.
+    if (r.estado === "admin") guardarAcceso(userId, { estado: "admin", tenantId: r.tenantId, professionalId: null, permisos: null });
+    else if (r.estado === "staff") guardarAcceso(userId, { estado: "staff", tenantId: r.tenantId, professionalId: r.professionalId, permisos: r.permisos ?? null });
+    else borrarAcceso(userId);
+  }, [fijarEstado, aplicarResolucion]);
 
   const refreshRole = useCallback(async () => {
     const { data: { session: s } } = await supabase.auth.getSession();
@@ -273,8 +292,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setSession(s);
       if (userRef.current === s.user.id && estadoRef.current !== "cargando") return;
-      userRef.current = s.user.id;
-      resolver(s.user.id, false);
+      const uid = s.user.id;
+      userRef.current = uid;
+      // Arranque en frío con lo último que dijo el servidor para esta cuenta:
+      // la app entra de una y confirma en silencio (si cambió, manda el
+      // servidor; un error de red no la saca, como siempre). Sin nada
+      // guardado, se espera al servidor como antes.
+      leerAcceso(uid).then(g => {
+        if (userRef.current !== uid || estadoRef.current !== "cargando") return;
+        if (g) {
+          aplicarResolucion(g.estado === "admin"
+            ? { estado: "admin", tenantId: g.tenantId }
+            : { estado: "staff", tenantId: g.tenantId, professionalId: g.professionalId as string, permisos: g.permisos });
+          resolver(uid, true);
+        } else {
+          resolver(uid, false);
+        }
+      });
     }).catch(() => aplicarSinSesion());
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
