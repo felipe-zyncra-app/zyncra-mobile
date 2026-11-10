@@ -196,9 +196,30 @@ export function paraFacturar<T extends { price: number; quantity: number; item_t
 // ─── Caja ────────────────────────────────────────────────────────────────────
 
 /**
- * cash_movements.professional_id de un movimiento manual: solo un ingreso
- * "Propina" con alguien elegido lo lleva (vacío = para el negocio).
+ * Vale o adelanto de sueldo pagado con plata de la caja (web, 7-nov-2026,
+ * src/lib/caja-nomina.ts): un EGRESO de esta categoría con su profesional se
+ * le descuenta solo en la próxima liquidación (trigger nomina_propina_de_caja,
+ * migración 20261107b). El texto es el que mira la base: no se cambia.
+ */
+export const CATEGORIA_VALE = "Adelanto o vale";
+
+/**
+ * cash_movements.professional_id de un movimiento manual: un ingreso
+ * "Propina" (se le suma) o un egreso "Adelanto o vale" (se le descuenta) con
+ * alguien elegido. Vacío o cualquier otro movimiento = del negocio, sin nómina.
  */
 export function profesionalDeMovimiento(tipo: string, categoria: string | null | undefined, para: string | null | undefined): string | null {
-  return tipo === "ingreso" && categoria === CATEGORIA_PROPINA && para ? para : null;
+  if (!para) return null;
+  if (tipo === "ingreso" && categoria === CATEGORIA_PROPINA) return para;
+  if (tipo === "egreso" && categoria === CATEGORIA_VALE) return para;
+  return null;
+}
+
+/**
+ * Un egreso cuya descripción habla de un vale o un adelanto ("Vale Lau",
+ * "adelanto Carlos"). Imperio anotó así vales sin categoría y no se
+ * descontaron en la nómina; la caja pregunta antes de guardarlo.
+ */
+export function pareceUnVale(descripcion: string): boolean {
+  return /(^|[^a-záéíóúñ])(vales?|adelantos?|anticipos?)([^a-záéíóúñ]|$)/i.test(descripcion);
 }

@@ -1,6 +1,6 @@
 import {
   agregarPropina, equipoConCita, esPropina, etiquetaVendedor, itemsDeVenta, lineaPropina, nombrePropina,
-  paraFacturar, pareceUnaPropina, profesionalDeMovimiento, textoPropinaCobrada, totalesCobro,
+  paraFacturar, pareceUnaPropina, pareceUnVale, profesionalDeMovimiento, textoPropinaCobrada, totalesCobro,
   type LineaCarrito,
 } from "@/lib/propinas";
 import { prorratearPrecios } from "@/lib/dinero";
@@ -147,5 +147,25 @@ describe("profesionalDeMovimiento: propina registrada en Caja", () => {
     expect(profesionalDeMovimiento("ingreso", "Servicio", "pro-ana")).toBeNull();
     expect(profesionalDeMovimiento("egreso", "Propina", "pro-ana")).toBeNull();
     expect(profesionalDeMovimiento("ingreso", null, "pro-ana")).toBeNull();
+  });
+
+  test("un egreso «Adelanto o vale» con alguien elegido también lo lleva (se le descuenta)", () => {
+    expect(profesionalDeMovimiento("egreso", "Adelanto o vale", "pro-ana")).toBe("pro-ana");
+    expect(profesionalDeMovimiento("egreso", "Adelanto o vale", "")).toBeNull();
+    expect(profesionalDeMovimiento("ingreso", "Adelanto o vale", "pro-ana")).toBeNull();
+    expect(profesionalDeMovimiento("egreso", "Nómina", "pro-ana")).toBeNull();
+  });
+});
+
+describe("pareceUnVale: egresos que deberían ir a la nómina", () => {
+  test("reconoce cómo los anotan en Imperio", () => {
+    for (const d of ["Vale Lau", "VALE KEVIN $30.000", "vale 10 de Carlos y 40 pago manuel", "Vales semana", "adelanto Carlos", "Anticipo de sueldo"]) {
+      expect(pareceUnVale(d)).toBe(true);
+    }
+  });
+  test("no confunde otras palabras", () => {
+    for (const d of ["Pago de arriendo", "Insumos Valeria", "Avaler", "Cadena y Credito roous", "Pago pepedido cali"]) {
+      expect(pareceUnVale(d)).toBe(false);
+    }
   });
 });

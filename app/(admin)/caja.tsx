@@ -23,7 +23,7 @@ import { useRecarga, useGuardRespuestas } from "@/lib/useRecarga";
 import { leerMonto, totalesCaja, esIngresoHuerfano } from "@/lib/dinero";
 import { cargarListaSedes, nombreSede, type SedeLite } from "@/components/SedeChip";
 import { filtroSedeOGeneral, incluyeCajaGeneral, preferirCajaDeSede } from "@/lib/sedes";
-import { CATEGORIA_PROPINA, profesionalDeMovimiento, type Profesional } from "@/lib/propinas";
+import { CATEGORIA_PROPINA, CATEGORIA_VALE, pareceUnVale, profesionalDeMovimiento, type Profesional } from "@/lib/propinas";
 
 type Tab      = "caja" | "historial";
 type MoveType = "ingreso" | "egreso";
@@ -33,7 +33,7 @@ type Movement = {
   id: string; session_id: string; type: MoveType; amount: number; description: string;
   category: string | null; payment_method: string | null; created_at: string;
   pos_sale_id: string | null; layaway_payment_id: string | null;
-  /** A quién va una propina registrada a mano (null = para el negocio). */
+  /** De quién es una propina o un vale registrado a mano (null = del negocio). */
   professional_id: string | null;
 };
 type HistRow = {
@@ -45,7 +45,9 @@ type HistRow = {
 };
 
 const INGRESO_CATS = ["Servicio", "Producto", "Propina", "Otro"];
-const EGRESO_CATS  = ["Arriendo", "Nómina", "Insumos", "Servicios públicos", "Otro"];
+// "Adelanto o vale" (10-nov-2026, igual que la Caja web): con la persona
+// elegida se le descuenta solo en su próxima liquidación.
+const EGRESO_CATS  = ["Arriendo", "Nómina", CATEGORIA_VALE, "Insumos", "Servicios públicos", "Otro"];
 
 const COLS_SESION = "id, location_id, opening_amount, opening_note, opened_at, closed_at, closing_amount, closing_note";
 const COLS_MOV    = "id, session_id, type, amount, description, category, payment_method, created_at, pos_sale_id, layaway_payment_id, professional_id";
@@ -105,10 +107,11 @@ export default function CajaScreen() {
   const [movDesc, setMovDesc]       = useState("");
   const [movCat, setMovCat]         = useState("");
   const [movSaving, setMovSaving]   = useState(false);
-  // Propina: ¿para quién es? "" = para el negocio (no va a nómina). Igual que
-  // la Caja web: con alguien elegido, el trigger nomina_propina_de_caja la
-  // anota en su nómina.
-  const [propinaPara, setPropinaPara] = useState("");
+  // Propina (¿para quién es? "" = para el negocio, no va a nómina) o vale
+  // (¿a quién se le entregó? obligatorio). Igual que la Caja web: con alguien
+  // elegido, el trigger nomina_propina_de_caja lo anota en su nómina (la
+  // propina se le suma, el vale se le descuenta).
+  const [paraQuien, setParaQuien] = useState("");
   const [equipo, setEquipo]         = useState<Profesional[]>([]);
 
   // Cierre
@@ -251,11 +254,34 @@ export default function CajaScreen() {
     }
   };
 
-  const handleMovement = async () => {
+  const esVale = movType === "egreso" && movCat === CATEGORIA_VALE;
+  // Egreso que dice "vale" o "adelanto" sin la categoría: así se anotaron en
+  // Imperio vales que nunca se descontaron en la nómina.
+  const valeSinCategoria = movType === "egreso" && !movCat && pareceUnVale(movDesc);
+  const marcarComoVale = () => { setMovCat(CATEGORIA_VALE); setParaQuien(""); };
+
+  const handleMovement = () => {
     if (!tenantId || !session || ocupado.current) return;
     const amt = leerMonto(movAmt);
     if (amt === null || amt <= 0) { Alert.alert("Revisa el monto", "Ingresa un monto mayor a cero."); return; }
     if (!movDesc.trim()) { Alert.alert("Falta la descripción", "La descripción es obligatoria."); return; }
+    if (esVale && !paraQuien) { Alert.alert("¿A quién se le entregó?", "Elige la persona para que se le descuente en su nómina."); return; }
+    if (valeSinCategoria) {
+      Alert.alert(
+        "¿Es un vale o un adelanto?",
+        "Si lo es, márcalo como «Adelanto o vale» y elige a quién se le entregó: así se le descuenta solo en su próxima liquidación. Sin la categoría solo sale de la caja.",
+        [
+          { text: "Sí, es un vale", onPress: marcarComoVale },
+          { text: "No, guardar así", style: "cancel", onPress: () => { void guardarMovimiento(amt); } },
+        ],
+      );
+      return;
+    }
+    void guardarMovimiento(amt);
+  };
+
+  const guardarMovimiento = async (amt: number) => {
+    if (!tenantId || !session || ocupado.current) return;
     ocupado.current = true;
     setMovSaving(true);
     try {
@@ -263,9 +289,9 @@ export default function CajaScreen() {
         session_id: session.id, tenant_id: tenantId,
         type: movType, amount: amt, description: movDesc.trim(),
         category: movCat || null,
-        professional_id: profesionalDeMovimiento(movType, movCat, propinaPara),
+        professional_id: profesionalDeMovimiento(movType, movCat, paraQuien),
       }).select("id").single(), "No se pudo guardar el movimiento");
-      setMovAmt(""); setMovDesc(""); setMovCat(""); setPropinaPara("");
+      setMovAmt(""); setMovDesc(""); setMovCat(""); setParaQuien("");
       setMovModal(false);
       await recargar();
     } catch (e) {
@@ -509,7 +535,7 @@ export default function CajaScreen() {
                         ) : m.category ? (
                           <View style={s.movCatBadge}>
                             <Text style={s.movCatText}>
-                              {m.category}{m.category === CATEGORIA_PROPINA && nombreDe(m.professional_id) ? ` · ${nombreDe(m.professional_id)}` : ""}
+                              {m.category}{(m.category === CATEGORIA_PROPINA || m.category === CATEGORIA_VALE) && nombreDe(m.professional_id) ? ` · ${nombreDe(m.professional_id)}` : ""}
                             </Text>
                           </View>
                         ) : null}
@@ -613,7 +639,7 @@ export default function CajaScreen() {
               <View style={s.typeToggle}>
                 {(["ingreso", "egreso"] as MoveType[]).map(mt => (
                   <TouchableOpacity key={mt} style={[s.typeBtn, movType === mt && { backgroundColor: mt === "ingreso" ? Colors.success : Colors.red }]}
-                    onPress={() => { setMovType(mt); setMovCat(""); setPropinaPara(""); }} activeOpacity={0.8}
+                    onPress={() => { setMovType(mt); setMovCat(""); setParaQuien(""); }} activeOpacity={0.8}
                     accessibilityRole="button" accessibilityState={{ selected: movType === mt }}>
                     <Text style={[s.typeBtnText, movType === mt && { color: "white" }]}>
                       {mt === "ingreso" ? "Ingreso" : "Egreso"}
@@ -635,6 +661,13 @@ export default function CajaScreen() {
               <TextInput style={s.input} value={movDesc} onChangeText={setMovDesc}
                 placeholder={movType === "ingreso" ? "Ej: Corte de cabello" : "Ej: Pago de arriendo"}
                 placeholderTextColor={t.subtle} />
+              {valeSinCategoria && (
+                <TouchableOpacity onPress={marcarComoVale} activeOpacity={0.75} accessibilityRole="button" style={{ marginTop: 6 }}>
+                  <Text style={[s.hint, { color: "#d97706", marginTop: 0 }]}>
+                    ¿Es un vale? Toca aquí para marcarlo como «Adelanto o vale» y que se descuente en la nómina.
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <Text style={s.label}>Categoría (opcional)</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
@@ -642,7 +675,7 @@ export default function CajaScreen() {
                   {(movType === "ingreso" ? INGRESO_CATS : EGRESO_CATS).map(cat => (
                     <TouchableOpacity key={cat}
                       style={[s.catChip, movCat === cat && { backgroundColor: Colors.purple, borderColor: Colors.purple }]}
-                      onPress={() => { setMovCat(movCat === cat ? "" : cat); setPropinaPara(""); }} activeOpacity={0.75}
+                      onPress={() => { setMovCat(movCat === cat ? "" : cat); setParaQuien(""); }} activeOpacity={0.75}
                       accessibilityRole="button" accessibilityState={{ selected: movCat === cat }}>
                       <Text style={[s.catChipText, movCat === cat && { color: "white" }]}>{cat}</Text>
                     </TouchableOpacity>
@@ -656,11 +689,11 @@ export default function CajaScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }} keyboardShouldPersistTaps="handled">
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       {[{ id: "", name: "Para el negocio" }, ...equipo].map(p => {
-                        const activo = propinaPara === p.id;
+                        const activo = paraQuien === p.id;
                         return (
                           <TouchableOpacity key={p.id || "negocio"}
                             style={[s.catChip, activo && { backgroundColor: Colors.success, borderColor: Colors.success }]}
-                            onPress={() => setPropinaPara(p.id)} activeOpacity={0.75}
+                            onPress={() => setParaQuien(p.id)} activeOpacity={0.75}
                             accessibilityRole="radio" accessibilityState={{ checked: activo }}>
                             <Text style={[s.catChipText, activo && { color: "white" }]}>{p.name}</Text>
                           </TouchableOpacity>
@@ -669,16 +702,46 @@ export default function CajaScreen() {
                     </View>
                   </ScrollView>
                   <Text style={s.hint}>
-                    {propinaPara
-                      ? `Se le suma a ${nombreDe(propinaPara) ?? "esa persona"} en su nómina.`
+                    {paraQuien
+                      ? `Se le suma a ${nombreDe(paraQuien) ?? "esa persona"} en su nómina.`
                       : "Para el negocio no va a nómina. Si eliges a alguien, se le suma en su nómina."}
                   </Text>
                 </>
               )}
 
+              {esVale && (
+                <>
+                  <Text style={s.label}>¿A quién se le entregó? *</Text>
+                  {equipo.length > 0 ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }} keyboardShouldPersistTaps="handled">
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        {equipo.map(p => {
+                          const activo = paraQuien === p.id;
+                          return (
+                            <TouchableOpacity key={p.id}
+                              style={[s.catChip, activo && { backgroundColor: Colors.red, borderColor: Colors.red }]}
+                              onPress={() => setParaQuien(p.id)} activeOpacity={0.75}
+                              accessibilityRole="radio" accessibilityState={{ checked: activo }}>
+                              <Text style={[s.catChipText, activo && { color: "white" }]}>{p.name}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  ) : null}
+                  <Text style={s.hint}>
+                    {equipo.length === 0
+                      ? "No se pudo cargar el equipo. Cierra y vuelve a abrir la caja para intentarlo otra vez."
+                      : paraQuien
+                        ? `Se le descuenta solo a ${nombreDe(paraQuien) ?? "esa persona"} en su próxima liquidación (Nómina → Novedades). No hay que anotarlo otra vez.`
+                        : "Se le descuenta solo en su próxima liquidación (Nómina → Novedades). No hay que anotarlo otra vez."}
+                  </Text>
+                </>
+              )}
+
               <TouchableOpacity
-                style={[s.btn, { marginTop: 24 }, (!movAmt || !movDesc.trim() || movSaving) && { opacity: 0.4 }]}
-                onPress={handleMovement} disabled={!movAmt || !movDesc.trim() || movSaving} activeOpacity={0.85} accessibilityRole="button">
+                style={[s.btn, { marginTop: 24 }, (!movAmt || !movDesc.trim() || movSaving || (esVale && !paraQuien)) && { opacity: 0.4 }]}
+                onPress={handleMovement} disabled={!movAmt || !movDesc.trim() || movSaving || (esVale && !paraQuien)} activeOpacity={0.85} accessibilityRole="button">
                 <View style={[s.btnInner, { backgroundColor: movType === "ingreso" ? Colors.success : Colors.red }]}>
                   {movSaving ? <ActivityIndicator color="white" /> : <Text style={s.btnText}>Registrar {movType}</Text>}
                 </View>
